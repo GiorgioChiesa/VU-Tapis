@@ -10,6 +10,7 @@ instant_test_output
 inference_test_output
 
 
+
 *.png
 *.json
 *.diff
@@ -33,6 +34,10 @@ detectron2/wheels/
 *.pkl
 *.npy
 *.ts
+**/*.pyc
+**/__pycache__/
+*.log
+*.linux*
 model_ts*.txt
 
 # ipython/jupyter notebooks

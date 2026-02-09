@@ -1,0 +1,4 @@
+# ninja log v5
+26	8090	1770302159406700976	/scratch/Video_Understanding/GraSP/TAPIS/region_proposals/mask2former/modeling/pixel_decoder/ops/build/temp.linux-x86_64-cpython-310/scratch/Video_Understanding/GraSP/TAPIS/region_proposals/mask2former/modeling/pixel_decoder/ops/src/cpu/ms_deform_attn_cpu.o	415ae442a7716b5f
+26	20169	1770302171491699765	/scratch/Video_Understanding/GraSP/TAPIS/region_proposals/mask2former/modeling/pixel_decoder/ops/build/temp.linux-x86_64-cpython-310/scratch/Video_Understanding/GraSP/TAPIS/region_proposals/mask2former/modeling/pixel_decoder/ops/src/vision.o	fcb495bce396f821
+26	27038	1770302178309497816	/scratch/Video_Understanding/GraSP/TAPIS/region_proposals/mask2former/modeling/pixel_decoder/ops/build/temp.linux-x86_64-cpython-310/scratch/Video_Understanding/GraSP/TAPIS/region_proposals/mask2former/modeling/pixel_decoder/ops/src/cuda/ms_deform_attn_cuda.o	4d61c21863bdc412

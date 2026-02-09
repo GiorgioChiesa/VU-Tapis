@@ -1,0 +1,14 @@
+numpy<2
+simplejson
+psutil
+tensorboard
+moviepy
+pytorchvideo
+pandas
+Pillow
+scikit-learn
+scikit-image
+av
+iopath
+opencv-python
+pycocotools

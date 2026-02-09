@@ -1,0 +1,59 @@
+.secret
+.vscode
+checkpoints
+data
+outputs
+
+# output dir
+output
+instant_test_output
+inference_test_output
+
+
+*.png
+*.json
+*.diff
+*.jpg
+!/projects/DensePose/doc/images/*.jpg
+
+# compilation and distribution
+__pycache__
+_ext
+*.pyc
+*.pyd
+*.so
+*.dll
+*.egg-info/
+detectron2/build/
+detectron2/dist/
+detectron2/wheels/
+
+# pytorch/python/numpy formats
+*.pth
+*.pkl
+*.npy
+*.ts
+model_ts*.txt
+
+# ipython/jupyter notebooks
+*.ipynb
+**/.ipynb_checkpoints/
+
+# Editor temporaries
+*.swn
+*.swo
+*.swp
+*~
+
+# editor settings
+.idea
+.vscode
+_darcs
+
+# project dirs
+detectron2/detectron2/model_zoo/configs
+detectron2/datasets/*
+!/datasets/*.*
+/projects/*/datasets
+detectron2/models
+/snippet

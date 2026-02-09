@@ -1,0 +1,377 @@
+[02/06 14:43:03][INFO] train_net.py: 284: Train with config:
+[02/06 14:43:03][INFO] train_net.py: 285: CfgNode({'BN': CfgNode({'USE_PRECISE_STATS': False, 'NUM_BATCHES_PRECISE': 72, 'WEIGHT_DECAY': 0.0, 'NORM_TYPE': 'batchnorm', 'NUM_SPLITS': 1, 'NUM_SYNC_DEVICES': 1}), 'TRAIN': CfgNode({'ENABLE': True, 'DATASET': 'grasp', 'BATCH_SIZE': 24, 'EVAL_PERIOD': 1, 'CHECKPOINT_PERIOD': 1, 'AUTO_RESUME': True, 'CHECKPOINT_FILE_PATH': '', 'CHECKPOINT_TYPE': 'pytorch', 'CHECKPOINT_INFLATE': False, 'CHECKPOINT_EPOCH_RESET': False, 'CHECKPOINT_CLEAR_NAME_PATTERN': (), 'MIXED_PRECISION': False, 'EVAL_TRAIN': False, 'FILTER_EMPTY': True}), 'AUG': CfgNode({'ENABLE': False, 'NUM_SAMPLE': 1, 'COLOR_JITTER': 0.4, 'AA_TYPE': 'rand-m7-n4-mstd0.5-inc1', 'INTERPOLATION': 'bicubic', 'RE_PROB': 0.25, 'RE_MODE': 'pixel', 'RE_COUNT': 1, 'RE_SPLIT': False}), 'MULTIGRID': CfgNode({'EPOCH_FACTOR': 1.5, 'SHORT_CYCLE': False, 'SHORT_CYCLE_FACTORS': [0.5, 0.7071067811865476], 'LONG_CYCLE': False, 'LONG_CYCLE_FACTORS': [(0.25, 0.7071067811865476), (0.5, 0.7071067811865476), (0.5, 1), (1, 1)], 'BN_BASE_SIZE': 8, 'EVAL_FREQ': 3, 'LONG_CYCLE_SAMPLING_RATE': 0, 'DEFAULT_B': 0, 'DEFAULT_T': 0, 'DEFAULT_S': 0}), 'TEST': CfgNode({'ENABLE': False, 'DATASET': 'grasp', 'BATCH_SIZE': 24, 'CHECKPOINT_FILE_PATH': '', 'NUM_ENSEMBLE_VIEWS': 10, 'NUM_SPATIAL_CROPS': 3, 'CHECKPOINT_TYPE': 'pytorch', 'SAVE_RESULTS_PATH': ''}), 'RESNET': CfgNode({'TRANS_FUNC': 'bottleneck_transform', 'NUM_GROUPS': 1, 'WIDTH_PER_GROUP': 64, 'INPLACE_RELU': True, 'STRIDE_1X1': False, 'ZERO_INIT_FINAL_BN': False, 'DEPTH': 50, 'NUM_BLOCK_TEMP_KERNEL': [[3], [4], [6], [3]], 'SPATIAL_STRIDES': [[1], [2], [2], [2]], 'SPATIAL_DILATIONS': [[1], [1], [1], [1]]}), 'NONLOCAL': CfgNode({'LOCATION': [[[]], [[]], [[]], [[]]], 'GROUP': [[1], [1], [1], [1]], 'INSTANTIATION': 'dot_product', 'POOL': [[[1, 2, 2], [1, 2, 2]], [[1, 2, 2], [1, 2, 2]], [[1, 2, 2], [1, 2, 2]], [[1, 2, 2], [1, 2, 2]]]}), 'MODEL': CfgNode({'ARCH': 'mvit', 'MODEL_NAME': 'MViT', 'NUM_CLASSES': 400, 'LOSS_FUNC': 'soft_cross_entropy', 'SINGLE_PATHWAY_ARCH': ['2d', 'c2d', 'i3d', 'slow', 'x3d', 'mvit', 'mvitv2', 'videoswintransformer', 'transformerroihead'], 'MULTI_PATHWAY_ARCH': ['slowfast'], 'DROPOUT_RATE': 0.5, 'DROPCONNECT_RATE': 0.0, 'FC_INIT_STD': 0.01, 'HEAD_ACT': 'softmax', 'ACT_CHECKPOINT': False, 'KEEP_ALL_CHECKPOINTS': False, 'TIME_MLP': False, 'PREV_MLP': True, 'PREV_MLP_LAYERS': 1, 'PREV_MLP_HID_DIM': 1024, 'PREV_MLP_OUT_DIM': 1024, 'POST_MLP_LAYERS': 1, 'POST_MLP_HID_DIM': 1024, 'POST_MLP_OUT_DIM': 1024, 'FEAT_MLP_LAYERS': 1, 'FEAT_MLP_HID_DIM': 1024, 'FEAT_MLP_OUT_DIM': 1024, 'DECODER': True, 'DECODER_HID_DIM': 2048, 'DECODER_NUM_HEADS': 8, 'DECODER_NUM_LAYERS': 1, 'PRECISION': 32}), 'MVIT': CfgNode({'MODE': 'conv', 'POOL_FIRST': False, 'CLS_EMBED_ON': False, 'PATCH_KERNEL': [3, 7, 7], 'PATCH_STRIDE': [2, 4, 4], 'PATCH_PADDING': [1, 3, 3], 'PATCH_2D': False, 'EMBED_DIM': 96, 'NUM_HEADS': 1, 'MLP_RATIO': 4.0, 'QKV_BIAS': True, 'DROPPATH_RATE': 0.4, 'DEPTH': 16, 'NORM': 'layernorm', 'DIM_MUL': [[1, 2.0], [3, 2.0], [14, 2.0]], 'HEAD_MUL': [[1, 2.0], [3, 2.0], [14, 2.0]], 'POOL_KV_STRIDE': None, 'POOL_KV_STRIDE_ADAPTIVE': [1, 8, 8], 'POOL_Q_STRIDE': [[1, 1, 2, 2], [3, 1, 2, 2], [14, 1, 2, 2]], 'POOL_KVQ_KERNEL': [3, 3, 3], 'ZERO_DECAY_POS_CLS': False, 'NORM_STEM': False, 'SEP_POS_EMBED': True, 'USE_ABS_POS': True, 'REL_POS_SPATIAL': False, 'REL_POS_TEMPORAL': False, 'REL_POS_ZERO_INIT': False, 'DROPOUT_RATE': 0.0, 'FREEZE_PATCH': False, 'USE_FIXED_SINCOS_POS': False, 'DIM_MUL_IN_ATT': False, 'RESIDUAL_POOLING': False, 'SEPARATE_QKV': False}), 'VST': CfgNode({'PRETRAINED': False, 'PRETRAINED2D': False, 'DEPTHS': [2, 2, 18, 2], 'EMBED_DIM': 128, 'PATCH_NORM': True, 'FROZEN_STAGES': -1, 'WINDOW_SIZE': (8, 7, 7), 'PATCH_SIZE': (4, 4, 4), 'NUM_HEADS': [4, 8, 16, 32], 'DROP_RATE': 0.0, 'USE_CHECKPOINT': False, 'MLP_RATIO': 4.0, 'QKV_BIAS': True, 'QK_SCALE': None, 'ATTN_DROP_RATE': 0.0, 'IN_CHANS': 3, 'DROP_PATH_RATE': 0.2}), 'SLOWFAST': CfgNode({'BETA_INV': 8, 'ALPHA': 8, 'FUSION_CONV_CHANNEL_RATIO': 2, 'FUSION_KERNEL_SZ': 5}), 'DATA': CfgNode({'PATH_TO_DATA_DIR': '', 'PATH_LABEL_SEPARATOR': ' ', 'PATH_PREFIX': '', 'NUM_FRAMES': 16, 'SAMPLING_RATE': 1, 'TRAIN_PCA_EIGVAL': [0.225, 0.224, 0.229], 'TRAIN_PCA_EIGVEC': [[-0.5675, 0.7192, 0.4009], [-0.5808, -0.0045, -0.814], [-0.5836, -0.6948, 0.4203]], 'PATH_TO_PRELOAD_IMDB': '', 'MEAN': [0.45, 0.45, 0.45], 'INPUT_CHANNEL_NUM': [3], 'STD': [0.225, 0.225, 0.225], 'TRAIN_JITTER_SCALES': [224, 320], 'TRAIN_JITTER_SCALES_RELATIVE': [0.08, 1.0], 'TRAIN_JITTER_ASPECT_RELATIVE': [0.75, 1.3333], 'USE_OFFSET_SAMPLING': False, 'TRAIN_JITTER_MOTION_SHIFT': False, 'TRAIN_CROP_SIZE': 224, 'TRAIN_CROP_SIZE_LARGE': 356, 'TEST_CROP_SIZE': 224, 'TEST_CROP_SIZE_LARGE': 356, 'TARGET_FPS': 30, 'DECODING_BACKEND': 'pyav', 'INV_UNIFORM_SAMPLE': False, 'RANDOM_FLIP': True, 'MULTI_LABEL': False, 'ENSEMBLE_METHOD': 'sum', 'REVERSE_INPUT_CHANNEL': False, 'MAX_BBOXES': 5, 'JUST_CENTER': False, 'VERIFICATIONS': True}), 'SOLVER': CfgNode({'BASE_LR': 0.125, 'LR_POLICY': 'cosine', 'COSINE_END_LR': 0.01, 'GAMMA': 0.1, 'STEP_SIZE': 1, 'STEPS': [], 'LRS': [], 'MAX_EPOCH': 50, 'MOMENTUM': 0.9, 'DAMPENING': 0.0, 'NESTEROV': True, 'WEIGHT_DECAY': 0.0001, 'WARMUP_FACTOR': 0.1, 'WARMUP_EPOCHS': 0.0, 'WARMUP_START_LR': 0.0125, 'OPTIMIZING_METHOD': 'sgd', 'BASE_LR_SCALE_NUM_SHARDS': True, 'COSINE_AFTER_WARMUP': True, 'ZERO_WD_1D_PARAM': True, 'CLIP_GRAD_VAL': None, 'CLIP_GRAD_L2NORM': 1.0, 'REDUCTION': 'mean'}), 'NUM_GPUS': 1, 'NUM_SHARDS': 1, 'SHARD_ID': 0, 'OUTPUT_DIR': '.', 'RNG_SEED': 0, 'LOG_PERIOD': 10, 'LOG_MODEL_INFO': True, 'DIST_BACKEND': 'nccl', 'DATA_LOADER': CfgNode({'NUM_WORKERS': 5, 'PIN_MEMORY': True, 'ENABLE_MULTI_THREAD_DECODE': False}), 'REGIONS': CfgNode({'ENABLE': True, 'LEVEL': 'segmentation', 'ALIGNED': True, 'SPATIAL_SCALE_FACTOR': 16, 'ROI_XFORM_RESOLUTION': 3, 'FILTER_INCOMPLETE': False}), 'ENDOVIS_DATASET': CfgNode({'FRAME_DIR': '', 'FRAME_LIST_DIR': '', 'ANNOTATION_DIR': '', 'TRAIN_LISTS': 'train.csv', 'TEST_LISTS': 'val.csv', 'TRAIN_GT_BOX_JSON': 'train_coco_anns.json', 'TEST_GT_BOX_JSON': '', 'TRAIN_PREDICT_BOX_JSON': 'train_coco_preds.json', 'TEST_PREDICT_BOX_JSON': 'val_coco_preds.json', 'DETECTION_SCORE_THRESH': 0.0, 'BGR': False, 'TRAIN_USE_COLOR_AUGMENTATION': True, 'TRAIN_PCA_JITTER_ONLY': True, 'TEST_FORCE_FLIP': False, 'GROUNDTRUTH_FILE': '', 'IMG_PROC_BACKEND': 'cv2', 'TEST_COCO_ANNS': '', 'TASKS': ['phases', 'steps', 'instruments', 'actions'], 'REGION_TASKS': ['instruments', 'actions'], 'INCLUDE_GT': False, 'USE_PREDS': True, 'MASKS_PATH': '', 'ASPECT_RATION_TH': 0.02}), 'TASKS': CfgNode({'ENABLE': True, 'TASKS': ['actions', 'instruments'], 'METRICS': ['mAP@0.5IoU_box', 'mAP@0.5IoU_segm'], 'NUM_CLASSES': [14, 7], 'HEAD_ACT': ['sigmoid', 'softmax'], 'LOSS_FUNC': ['bce', 'cross_entropy'], 'LOSS_WEIGHTS': [1.0, 0.1], 'PRESENCE_RECOGNITION': False, 'PRESENCE_TASKS': ['instruments'], 'PRESENCE_WEIGHTS': [1], 'EVAL_PRESENCE': False, 'MULTIPLE_CLS': False, 'USE_VIDEO': True}), 'FEATURES': CfgNode({'ENABLE': True, 'DIM_FEATURES': 256, 'MODEL': 'detr', 'TRAIN_FEATURES_PATH': '', 'TEST_FEATURES_PATH': '', 'USE_RPN': False, 'RPN_CFG': CfgNode({}), 'RPN_CFG_PATH': '', 'PRECALCULATE_TEST': True, 'RPN_CHECKPOINT': ''})})
+[02/06 14:43:04][INFO] misc.py: 187: Model:
+MViT(
+  (patch_embed): PatchEmbed(
+    (proj): Conv3d(3, 96, kernel_size=(3, 7, 7), stride=(2, 4, 4), padding=(1, 3, 3))
+  )
+  (blocks): ModuleList(
+    (0): MultiScaleBlock(
+      (norm1): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+      (attn): MultiScaleAttention(
+        (qkv): Linear(in_features=96, out_features=288, bias=True)
+        (proj): Linear(in_features=96, out_features=96, bias=True)
+        (pool_k): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 8, 8), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_k): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+        (pool_v): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 8, 8), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_v): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+      )
+      (drop_path): Identity()
+      (norm2): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=96, out_features=384, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=384, out_features=192, bias=True)
+      )
+      (proj): Linear(in_features=96, out_features=192, bias=True)
+    )
+    (1): MultiScaleBlock(
+      (norm1): LayerNorm((192,), eps=1e-06, elementwise_affine=True)
+      (attn): MultiScaleAttention(
+        (qkv): Linear(in_features=192, out_features=576, bias=True)
+        (proj): Linear(in_features=192, out_features=192, bias=True)
+        (pool_q): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 2, 2), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_q): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+        (pool_k): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 4, 4), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_k): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+        (pool_v): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 4, 4), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_v): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+      )
+      (drop_path): DropPath()
+      (norm2): LayerNorm((192,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=192, out_features=768, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=768, out_features=192, bias=True)
+      )
+      (pool_skip): MaxPool3d(kernel_size=[1, 3, 3], stride=[1, 2, 2], padding=[0, 1, 1], dilation=1, ceil_mode=False)
+    )
+    (2): MultiScaleBlock(
+      (norm1): LayerNorm((192,), eps=1e-06, elementwise_affine=True)
+      (attn): MultiScaleAttention(
+        (qkv): Linear(in_features=192, out_features=576, bias=True)
+        (proj): Linear(in_features=192, out_features=192, bias=True)
+        (pool_k): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 4, 4), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_k): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+        (pool_v): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 4, 4), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_v): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+      )
+      (drop_path): DropPath()
+      (norm2): LayerNorm((192,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=192, out_features=768, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=768, out_features=384, bias=True)
+      )
+      (proj): Linear(in_features=192, out_features=384, bias=True)
+    )
+    (3): MultiScaleBlock(
+      (norm1): LayerNorm((384,), eps=1e-06, elementwise_affine=True)
+      (attn): MultiScaleAttention(
+        (qkv): Linear(in_features=384, out_features=1152, bias=True)
+        (proj): Linear(in_features=384, out_features=384, bias=True)
+        (pool_q): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 2, 2), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_q): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+        (pool_k): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 2, 2), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_k): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+        (pool_v): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 2, 2), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_v): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+      )
+      (drop_path): DropPath()
+      (norm2): LayerNorm((384,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=384, out_features=1536, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=1536, out_features=384, bias=True)
+      )
+      (pool_skip): MaxPool3d(kernel_size=[1, 3, 3], stride=[1, 2, 2], padding=[0, 1, 1], dilation=1, ceil_mode=False)
+    )
+    (4-12): 9 x MultiScaleBlock(
+      (norm1): LayerNorm((384,), eps=1e-06, elementwise_affine=True)
+      (attn): MultiScaleAttention(
+        (qkv): Linear(in_features=384, out_features=1152, bias=True)
+        (proj): Linear(in_features=384, out_features=384, bias=True)
+        (pool_k): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 2, 2), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_k): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+        (pool_v): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 2, 2), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_v): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+      )
+      (drop_path): DropPath()
+      (norm2): LayerNorm((384,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=384, out_features=1536, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=1536, out_features=384, bias=True)
+      )
+    )
+    (13): MultiScaleBlock(
+      (norm1): LayerNorm((384,), eps=1e-06, elementwise_affine=True)
+      (attn): MultiScaleAttention(
+        (qkv): Linear(in_features=384, out_features=1152, bias=True)
+        (proj): Linear(in_features=384, out_features=384, bias=True)
+        (pool_k): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 2, 2), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_k): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+        (pool_v): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 2, 2), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_v): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+      )
+      (drop_path): DropPath()
+      (norm2): LayerNorm((384,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=384, out_features=1536, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=1536, out_features=768, bias=True)
+      )
+      (proj): Linear(in_features=384, out_features=768, bias=True)
+    )
+    (14): MultiScaleBlock(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): MultiScaleAttention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=True)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (pool_q): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 2, 2), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_q): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+        (pool_k): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 1, 1), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_k): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+        (pool_v): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 1, 1), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_v): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+      )
+      (drop_path): DropPath()
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+      )
+      (pool_skip): MaxPool3d(kernel_size=[1, 3, 3], stride=[1, 2, 2], padding=[0, 1, 1], dilation=1, ceil_mode=False)
+    )
+    (15): MultiScaleBlock(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): MultiScaleAttention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=True)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (pool_k): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 1, 1), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_k): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+        (pool_v): Conv3d(96, 96, kernel_size=(3, 3, 3), stride=(1, 1, 1), padding=(1, 1, 1), groups=96, bias=False)
+        (norm_v): LayerNorm((96,), eps=1e-06, elementwise_affine=True)
+      )
+      (drop_path): DropPath()
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+      )
+    )
+  )
+  (norm): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+  (extra_heads_actions): TransformerRoIHead(
+    (dropout): Dropout(p=0.5, inplace=False)
+    (feat_project): Sequential(
+      (0): Linear(in_features=256, out_features=768, bias=True)
+    )
+    (decoder): TransformerDecoder(
+      (layers): ModuleList(
+        (0): TransformerDecoderLayer(
+          (self_attn): MultiheadAttention(
+            (out_proj): NonDynamicallyQuantizableLinear(in_features=768, out_features=768, bias=True)
+          )
+          (multihead_attn): MultiheadAttention(
+            (out_proj): NonDynamicallyQuantizableLinear(in_features=768, out_features=768, bias=True)
+          )
+          (linear1): Linear(in_features=768, out_features=2048, bias=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (linear2): Linear(in_features=2048, out_features=768, bias=True)
+          (norm1): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+          (norm2): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+          (norm3): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+          (dropout1): Dropout(p=0.1, inplace=False)
+          (dropout2): Dropout(p=0.1, inplace=False)
+          (dropout3): Dropout(p=0.1, inplace=False)
+        )
+      )
+    )
+    (class_projection): Sequential(
+      (0): Linear(in_features=768, out_features=14, bias=True)
+    )
+    (act): Sigmoid()
+  )
+  (extra_heads_instruments): TransformerRoIHead(
+    (dropout): Dropout(p=0.5, inplace=False)
+    (feat_project): Sequential(
+      (0): Linear(in_features=256, out_features=768, bias=True)
+    )
+    (decoder): TransformerDecoder(
+      (layers): ModuleList(
+        (0): TransformerDecoderLayer(
+          (self_attn): MultiheadAttention(
+            (out_proj): NonDynamicallyQuantizableLinear(in_features=768, out_features=768, bias=True)
+          )
+          (multihead_attn): MultiheadAttention(
+            (out_proj): NonDynamicallyQuantizableLinear(in_features=768, out_features=768, bias=True)
+          )
+          (linear1): Linear(in_features=768, out_features=2048, bias=True)
+          (dropout): Dropout(p=0.1, inplace=False)
+          (linear2): Linear(in_features=2048, out_features=768, bias=True)
+          (norm1): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+          (norm2): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+          (norm3): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+          (dropout1): Dropout(p=0.1, inplace=False)
+          (dropout2): Dropout(p=0.1, inplace=False)
+          (dropout3): Dropout(p=0.1, inplace=False)
+        )
+      )
+    )
+    (class_projection): Sequential(
+      (0): Linear(in_features=768, out_features=7, bias=True)
+    )
+    (act): Softmax(dim=1)
+  )
+)
+[02/06 14:43:04][INFO] misc.py: 188: Params: 52,646,965
+[02/06 14:43:04][INFO] misc.py: 189: Mem: 0.19827556610107422 MB
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::repeat encountered 1 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::repeat_interleave encountered 1 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::add_ encountered 2 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::mul encountered 152 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::softmax encountered 17 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::add encountered 38 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::gelu encountered 16 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::max_pool3d encountered 3 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::masked_fill_ encountered 2 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::div encountered 4 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::unflatten encountered 4 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::scaled_dot_product_attention encountered 4 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 499: Unsupported operator aten::sigmoid encountered 1 time(s)
+[02/06 14:43:04][WARNING] jit_analysis.py: 511: The following submodules of the model were never called during the trace of the graph. They may be unused, or they were accessed by direct calls to .forward() or via other python methods. In the latter case they will have zeros for statistics, though their statistics will still contribute to their parent calling module.
+blocks.1.drop_path, blocks.10.drop_path, blocks.11.drop_path, blocks.12.drop_path, blocks.13.drop_path, blocks.14.drop_path, blocks.15.drop_path, blocks.2.drop_path, blocks.3.drop_path, blocks.4.drop_path, blocks.5.drop_path, blocks.6.drop_path, blocks.7.drop_path, blocks.8.drop_path, blocks.9.drop_path, extra_heads_actions.decoder.layers.0.multihead_attn.out_proj, extra_heads_actions.decoder.layers.0.self_attn.out_proj, extra_heads_actions.dropout, extra_heads_instruments.decoder.layers.0.multihead_attn.out_proj, extra_heads_instruments.decoder.layers.0.self_attn.out_proj, extra_heads_instruments.dropout
+[02/06 14:43:04][INFO] misc.py: 190: Flops: 133.27059072 G
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::repeat encountered 1 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::repeat_interleave encountered 1 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::add_ encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::layer_norm encountered 74 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::mul encountered 152 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::softmax encountered 17 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::add encountered 38 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::gelu encountered 16 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::max_pool3d encountered 3 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::masked_fill_ encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::div encountered 4 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::unflatten encountered 4 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::scaled_dot_product_attention encountered 4 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::sigmoid encountered 1 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 511: The following submodules of the model were never called during the trace of the graph. They may be unused, or they were accessed by direct calls to .forward() or via other python methods. In the latter case they will have zeros for statistics, though their statistics will still contribute to their parent calling module.
+blocks.1.drop_path, blocks.10.drop_path, blocks.11.drop_path, blocks.12.drop_path, blocks.13.drop_path, blocks.14.drop_path, blocks.15.drop_path, blocks.2.drop_path, blocks.3.drop_path, blocks.4.drop_path, blocks.5.drop_path, blocks.6.drop_path, blocks.7.drop_path, blocks.8.drop_path, blocks.9.drop_path, extra_heads_actions.decoder.layers.0.multihead_attn.out_proj, extra_heads_actions.decoder.layers.0.self_attn.out_proj, extra_heads_actions.dropout, extra_heads_instruments.decoder.layers.0.multihead_attn.out_proj, extra_heads_instruments.decoder.layers.0.self_attn.out_proj, extra_heads_instruments.dropout
+[02/06 14:43:05][INFO] misc.py: 195: Activations: 475.005033 M
+[02/06 14:43:05][INFO] misc.py: 200: nvidia-smi
+[02/06 14:43:05][INFO] misc.py: 187: Model:
+TransformerRoIHead(
+  (dropout): Dropout(p=0.5, inplace=False)
+  (feat_project): Sequential(
+    (0): Linear(in_features=256, out_features=768, bias=True)
+  )
+  (decoder): TransformerDecoder(
+    (layers): ModuleList(
+      (0): TransformerDecoderLayer(
+        (self_attn): MultiheadAttention(
+          (out_proj): NonDynamicallyQuantizableLinear(in_features=768, out_features=768, bias=True)
+        )
+        (multihead_attn): MultiheadAttention(
+          (out_proj): NonDynamicallyQuantizableLinear(in_features=768, out_features=768, bias=True)
+        )
+        (linear1): Linear(in_features=768, out_features=2048, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+        (linear2): Linear(in_features=2048, out_features=768, bias=True)
+        (norm1): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+        (norm2): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+        (norm3): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+        (dropout1): Dropout(p=0.1, inplace=False)
+        (dropout2): Dropout(p=0.1, inplace=False)
+        (dropout3): Dropout(p=0.1, inplace=False)
+      )
+    )
+  )
+  (class_projection): Sequential(
+    (0): Linear(in_features=768, out_features=14, bias=True)
+  )
+  (act): Sigmoid()
+)
+[02/06 14:43:05][INFO] misc.py: 188: Params: 8,086,030
+[02/06 14:43:05][INFO] misc.py: 189: Mem: 2.598884105682373 MB
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::masked_fill_ encountered 1 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::div encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::unflatten encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::mul encountered 11 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::scaled_dot_product_attention encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::add encountered 3 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::sigmoid encountered 1 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 511: The following submodules of the model were never called during the trace of the graph. They may be unused, or they were accessed by direct calls to .forward() or via other python methods. In the latter case they will have zeros for statistics, though their statistics will still contribute to their parent calling module.
+decoder.layers.0.multihead_attn.out_proj, decoder.layers.0.self_attn.out_proj, dropout
+[02/06 14:43:05][INFO] misc.py: 190: Flops: 0.761180928 G
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::masked_fill_ encountered 1 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::div encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::unflatten encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::mul encountered 11 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::scaled_dot_product_attention encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::add encountered 3 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::layer_norm encountered 3 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::sigmoid encountered 1 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 511: The following submodules of the model were never called during the trace of the graph. They may be unused, or they were accessed by direct calls to .forward() or via other python methods. In the latter case they will have zeros for statistics, though their statistics will still contribute to their parent calling module.
+decoder.layers.0.multihead_attn.out_proj, decoder.layers.0.self_attn.out_proj, dropout
+[02/06 14:43:05][INFO] misc.py: 195: Activations: 0.987206 M
+[02/06 14:43:05][INFO] misc.py: 200: nvidia-smi
+[02/06 14:43:05][INFO] misc.py: 187: Model:
+TransformerRoIHead(
+  (dropout): Dropout(p=0.5, inplace=False)
+  (feat_project): Sequential(
+    (0): Linear(in_features=256, out_features=768, bias=True)
+  )
+  (decoder): TransformerDecoder(
+    (layers): ModuleList(
+      (0): TransformerDecoderLayer(
+        (self_attn): MultiheadAttention(
+          (out_proj): NonDynamicallyQuantizableLinear(in_features=768, out_features=768, bias=True)
+        )
+        (multihead_attn): MultiheadAttention(
+          (out_proj): NonDynamicallyQuantizableLinear(in_features=768, out_features=768, bias=True)
+        )
+        (linear1): Linear(in_features=768, out_features=2048, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+        (linear2): Linear(in_features=2048, out_features=768, bias=True)
+        (norm1): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+        (norm2): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+        (norm3): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+        (dropout1): Dropout(p=0.1, inplace=False)
+        (dropout2): Dropout(p=0.1, inplace=False)
+        (dropout3): Dropout(p=0.1, inplace=False)
+      )
+    )
+  )
+  (class_projection): Sequential(
+    (0): Linear(in_features=768, out_features=7, bias=True)
+  )
+  (act): Softmax(dim=1)
+)
+[02/06 14:43:05][INFO] misc.py: 188: Params: 8,080,647
+[02/06 14:43:05][INFO] misc.py: 189: Mem: 2.598884105682373 MB
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::masked_fill_ encountered 1 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::div encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::unflatten encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::mul encountered 11 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::scaled_dot_product_attention encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::add encountered 3 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::softmax encountered 1 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 511: The following submodules of the model were never called during the trace of the graph. They may be unused, or they were accessed by direct calls to .forward() or via other python methods. In the latter case they will have zeros for statistics, though their statistics will still contribute to their parent calling module.
+decoder.layers.0.multihead_attn.out_proj, decoder.layers.0.self_attn.out_proj, dropout
+[02/06 14:43:05][INFO] misc.py: 190: Flops: 0.761154048 G
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::masked_fill_ encountered 1 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::div encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::unflatten encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::mul encountered 11 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::scaled_dot_product_attention encountered 2 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::add encountered 3 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::layer_norm encountered 3 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 499: Unsupported operator aten::softmax encountered 1 time(s)
+[02/06 14:43:05][WARNING] jit_analysis.py: 511: The following submodules of the model were never called during the trace of the graph. They may be unused, or they were accessed by direct calls to .forward() or via other python methods. In the latter case they will have zeros for statistics, though their statistics will still contribute to their parent calling module.
+decoder.layers.0.multihead_attn.out_proj, decoder.layers.0.self_attn.out_proj, dropout
+[02/06 14:43:05][INFO] misc.py: 195: Activations: 0.987171 M
+[02/06 14:43:05][INFO] misc.py: 200: nvidia-smi

@@ -1,8 +1,16 @@
 import itertools
 import numpy as np
 from sklearn.preprocessing import label_binarize
-from sklearn.metrics import precision_recall_curve, average_precision_score, f1_score
+from sklearn.metrics import precision_recall_curve, balanced_accuracy_score ,average_precision_score, f1_score, roc_auc_score
 from tqdm import tqdm
+import wandb
+
+def wandb_log_confusion_matrix( coco_anns, preds, label_name=None):
+    wandb.log({"conf_matrix" : wandb.plot.confusion_matrix( 
+            preds=preds, y_true=coco_anns,
+            class_names=label_name)})
+
+
 
 def eval_classification(task, coco_anns, preds, **kwargs):
     
@@ -12,6 +20,7 @@ def eval_classification(task, coco_anns, preds, **kwargs):
     bin_preds = np.zeros((len(coco_anns["annotations"]), num_classes))
     ann_preds_dict = {}
     evaluated_frames = []
+    image_not_found_count = 0
     for idx, ann in tqdm(enumerate(coco_anns["annotations"]), total=len(coco_anns["annotations"])):
         ann_class = int(ann[task])
         bin_labels[idx, :] = label_binarize([ann_class], classes=list(range(0, num_classes)))
@@ -34,7 +43,10 @@ def eval_classification(task, coco_anns, preds, **kwargs):
             else:
                 ann_preds_dict[video] = [(ann_class,np.argmax(these_probs))]
         else:
-            print("Image {} not found in predictions lists".format(ann["image_name"]))
+            image_not_found_count += 1
+            # print("Image {} not found in predictions lists".format(ann["image_name"]))
+    print(f"Total images not found in predictions: {image_not_found_count}")
+    print(f"Total for calcculating metrics: {len(coco_anns['annotations']) - image_not_found_count}")
             
     bin_labels = bin_labels[evaluated_frames]
     bin_preds = bin_preds[evaluated_frames]
@@ -43,26 +55,43 @@ def eval_classification(task, coco_anns, preds, **kwargs):
     recall = {}
     threshs = {}
     ap = {}
+    auc = {}
+    acc = {}
     for c in range(0, num_classes):
         precision[c], recall[c], threshs[c] = precision_recall_curve(bin_labels[:, c], bin_preds[:, c])
+        auc[c] = roc_auc_score(bin_labels[:, c], bin_preds[:, c])
+        acc[c] = balanced_accuracy_score(bin_labels[:, c], bin_preds[:, c]>0.5)
         ap[c] = average_precision_score(bin_labels[:, c], bin_preds[:, c])
 
     mAP = np.nanmean(list(ap.values()))
-    
+    mACC = np.nanmean(list(acc.values()))
+    mAUC = np.nanmean(list(auc.values()))
+
     cat_names = [f"{cat['name']}-AP" for cat in classes]
     cat_res_dict = dict(zip(cat_names,list(ap.values())))
+
+    cat_res_dict.update({f"{cat['name']}-AUC": auc[c] for c, cat in enumerate(classes)})
+    cat_res_dict.update({f"{cat['name']}-ACC": acc[c] for c, cat in enumerate(classes)})
     
+
     f1_dict = {}
+    auc_dict = {}
+    acc_dict = {}
     for video, anns_preds in ann_preds_dict.items():
         np_anns_preds = np.array(anns_preds)
         anns = np_anns_preds[:,0]
         preds = np_anns_preds[:,1]
         f1_dict[video] = f1_score(anns, preds, average='macro')
+        acc_dict[video] = balanced_accuracy_score(anns, preds)
     
     f1 = np.nanmean(list(f1_dict.values()))
+    acc = np.nanmean(list(acc_dict.values()))
     
-    cat_res_dict.update({'f1_score':f1})
+    cat_res_dict.update({'all_f1_score':f1})
+    cat_res_dict.update({'all_balanced_accuracy':acc})
     cat_res_dict.update(f1_dict)
+
+    
             
     return mAP, cat_res_dict
 

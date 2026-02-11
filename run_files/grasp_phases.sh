@@ -1,7 +1,9 @@
+sh install.sh
+
 # Experiment setup
-TRAIN_FOLD="fold2" # or fold1, train
-TEST_FOLD="fold1" # or fold2, test
-EXP_PREFIX="test_run" # costumize
+TRAIN_FOLD="train" # or fold1, train
+TEST_FOLD="test" # or fold2, test
+EXP_PREFIX="Provolone" # costumize
 TASK="PHASES"
 ARCH="TAPIS"
 
@@ -16,13 +18,17 @@ FRAME_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frames"
 FRAME_LIST="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frame_lists"
 ANNOT_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations"
 COCO_ANN_PATH="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations/grasp_long-term_"$TEST_FOLD".json"
-CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_models/"$TRAIN_FOLD"/"$TASK".pyth"
+CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_models/fold1/"$TASK".pyth"
 
 #-------------------------
 # Run experiment
 
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/tapis:$PYTHONPATH
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/region_proposals:$PYTHONPATH
+
+# export $(cut -f1 .secret/.export_vars.txt)
+# echo "Using WANDB_API_KEY: $WANDB_API"
+# wandb login --relogin --key $WANDB_API
 
 mkdir -p $OUTPUT_DIR
 
@@ -32,7 +38,7 @@ NUM_GPUS 1 \
 TRAIN.CHECKPOINT_FILE_PATH $CHECKPOINT \
 TRAIN.CHECKPOINT_EPOCH_RESET True \
 TEST.ENABLE True \
-TRAIN.ENABLE False \
+TRAIN.ENABLE True \
 ENDOVIS_DATASET.FRAME_DIR $FRAME_DIR \
 ENDOVIS_DATASET.FRAME_LIST_DIR $FRAME_LIST \
 ENDOVIS_DATASET.TRAIN_LISTS $TRAIN_FOLD".csv" \

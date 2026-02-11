@@ -26,6 +26,10 @@ CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/tapis:$PYTHONPATH
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/region_proposals:$PYTHONPATH
 
+export $(cut -f1 .secret/.export_vars.txt)
+echo "Using WANDB_API_KEY: $WANDB_API"
+wandb login --relogin --key $WANDB_API
+
 # # Uncomment to calculate region proposals on the fly
 # export PYTHONPATH=/home/nayobi/Endovis/GraSP/TAPIS/region_proposals:$PYTHONPATH
 

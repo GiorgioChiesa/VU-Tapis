@@ -29,6 +29,9 @@ export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/region_pr
 
 mkdir -p $OUTPUT_DIR
 
+export $(cut -f1 .secret/.export_vars.txt)
+echo "Using WANDB_API_KEY: $WANDB_API"
+wandb login --relogin --key $WANDB_API
 
 # removed # TRAIN.CHECKPOINT_FILE_PATH $CHECKPOINT \ from original
 python -B tools/run_net.py \

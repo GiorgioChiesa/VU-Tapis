@@ -1,7 +1,7 @@
 # Experiment setup
 TRAIN_FOLD="train" # or fold1, fold2
 TEST_FOLD="test" # or fold1, fold2
-EXP_PREFIX="test_run" # costumize
+EXP_PREFIX="Prova" # costumize
 TASK="ACTIONS"
 ARCH="TAPIS"
 
@@ -26,6 +26,10 @@ CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/tapis:$PYTHONPATH
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/region_proposals:$PYTHONPATH
 
+
+# export $(cut -f1 .secret/.export_vars.txt)
+# echo "Using WANDB_API_KEY: $WANDB_API"
+
 # # Uncomment to calculate region proposals on the fly during training
 # export PYTHONPATH=/home/nayobi/Endovis/GraSP/TAPIS/region_proposals:$PYTHONPATH
 
@@ -37,7 +41,7 @@ NUM_GPUS 1 \
 TRAIN.CHECKPOINT_FILE_PATH $CHECKPOINT \
 TRAIN.CHECKPOINT_EPOCH_RESET True \
 TEST.ENABLE True \
-TRAIN.ENABLE False \
+TRAIN.ENABLE True \
 ENDOVIS_DATASET.FRAME_DIR $FRAME_DIR \
 ENDOVIS_DATASET.FRAME_LIST_DIR $FRAME_LIST \
 ENDOVIS_DATASET.TRAIN_LISTS $TRAIN_FOLD".csv" \

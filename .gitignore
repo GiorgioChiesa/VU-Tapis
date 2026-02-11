@@ -1,9 +1,9 @@
-.secret
+.secret/
 .vscode
 checkpoints
 data
 outputs
-
+wandb/
 # output dir
 output
 instant_test_output

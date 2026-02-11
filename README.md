@@ -192,9 +192,9 @@ To run our baseline, first go to the region proposal directory and install the c
 $ conda activate tapis
 $ cd ./region_proposals
 $ pip install -r requirements.txt
-$ cd mask2former/modeling/pixel_decoder/ops
-$ sh make.sh
-$ cd ../../../..
+$ cd mask2former/modeling/pixel_decoder
+$ pip install ops
+$ cd ../../..
 ```
 ### Running the Segmentation Baseline
 

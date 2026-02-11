@@ -111,7 +111,7 @@ class SurgeryMeter(object):
             cur_iter (int): the current iteration.
         """
 
-        if (cur_iter + 1) % self.cfg.LOG_PERIOD != 0:
+        if (cur_iter + 1) % self.cfg.LOG_PERIOD != 0 and cur_iter != self.overall_iters - 1:
             return
 
         eta_sec = self.iter_timer.seconds() * (self.overall_iters - cur_iter)
@@ -157,6 +157,7 @@ class SurgeryMeter(object):
             raise NotImplementedError("Unknown mode: {}".format(self.mode))
 
         logging.log_json_stats(stats)
+        return stats
 
     def iter_tic(self):
         """
@@ -268,8 +269,8 @@ class SurgeryMeter(object):
                 stats["{}_map".format(task)] = self.full_map[task]
 
             logging.log_json_stats(stats)
-            
-            return metrics_val, mean_map, out_files
+
+            return metrics_val, mean_map, out_files, stats
 
     def save_json(self, task, epoch):
         """

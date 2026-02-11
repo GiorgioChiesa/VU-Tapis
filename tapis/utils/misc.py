@@ -313,3 +313,17 @@ def launch_job(cfg, init_method, func, daemon=False):
         )
     else:
         func(cfg=cfg)
+
+def flatten_dict(d, parent_key="", sep="_"):
+    items = {}
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k.capitalize()}" if parent_key else str(k.capitalize())
+        # new_key = new_key.capitalize()  # Capitalize the key to match the config format
+
+        # If it's a dict-like object (CfgNode behaves like dict)
+        if hasattr(v, "items"):
+            items.update(flatten_dict(v, new_key, sep=sep))
+        else:
+            items[new_key] = v
+
+    return items

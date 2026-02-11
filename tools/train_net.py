@@ -28,8 +28,26 @@ from tapis.models import build_model
 from tapis.utils.meters import EpochTimer, SurgeryMeter
 import torch.backends.cudnn as cudnn
 import torch.backends.cudnn
+import wandb
+
 
 logger = logging.get_logger(__name__)
+wanbrun = None
+
+def wandgb_log(stats):
+    global wanbrun
+    if wanbrun is not None:
+        if stats["mode"].lower() in ['test', 'val']:
+            cur_epoch = int(stats["cur_epoch"])
+            stats ={f'{stats["mode"]}_{k}': v for k, v in stats["phases_map"].items()}
+            stats["cur_epoch"] = int(cur_epoch)
+            wanbrun.log(stats)
+        elif stats["mode"].lower() == 'train':
+            cur_epoch = int(stats["cur_epoch"])
+            stats = {f'{stats["mode"]}_{k}': v for k, v in stats.items()}
+            stats["cur_epoch"] = int(cur_epoch)
+            wanbrun.log(stats)
+
 
 def train_epoch(
     train_loader,
@@ -146,11 +164,13 @@ def train_epoch(
         # Update and log stats.
         train_meter.update_stats(None, None, None, final_loss, loss, lr)
         train_meter.iter_toc()  # measure allreduce for this meter
-        train_meter.log_iter_stats(cur_epoch, cur_iter)
+        stats = train_meter.log_iter_stats(cur_epoch, cur_iter)
         train_meter.iter_tic()
     
     # Log epoch stats.
     train_meter.log_epoch_stats(cur_epoch)
+    if cfg.WANDB_ENABLE:
+        wandgb_log(stats)
     train_meter.reset()
 
 @torch.no_grad()
@@ -250,12 +270,14 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
 
     if cfg.NUM_GPUS > 1:
         if du.is_master_proc():
-            task_map, mean_map, out_files = val_meter.log_epoch_stats(cur_epoch)
+            task_map, mean_map, out_files, stats = val_meter.log_epoch_stats(cur_epoch)
         else:
-            task_map, mean_map, out_files =  [0, 0, 0]
+            task_map, mean_map, out_files, stats =  [0, 0, 0, {}]
         torch.distributed.barrier()
     else:
-        task_map, mean_map, out_files = val_meter.log_epoch_stats(cur_epoch)
+        task_map, mean_map, out_files, stats = val_meter.log_epoch_stats(cur_epoch)
+    if cfg.WANDB_ENABLE:
+        wandgb_log(stats)
     val_meter.reset()
 
     return task_map, mean_map, out_files
@@ -283,6 +305,13 @@ def train(cfg):
     # Print config.
     logger.info("Train with config:")
     logger.info(pprint.pformat(cfg))
+    if cfg.WANDB_ENABLE:
+        global wanbrun
+        wandb.login()
+        wanbrun = wandb.init(project=cfg.WANDB_PROJECT, 
+                         name=cfg.NAME,
+                        entity=cfg.WANDB_ENTITY,
+                        config= misc.flatten_dict(cfg))
 
     # Build the video model and print model statistics.
     model = build_model(cfg)

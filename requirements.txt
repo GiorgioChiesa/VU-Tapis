@@ -12,3 +12,4 @@ av
 iopath
 opencv-python
 pycocotools
+wandb

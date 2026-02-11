@@ -1,9 +1,9 @@
 sh install.sh
-
+export $(grep -v '^#' .secret/.export_vars.txt | xargs)
 # Experiment setup
 TRAIN_FOLD="train" # or fold1, train
 TEST_FOLD="test" # or fold2, test
-EXP_PREFIX="Provolone" # costumize
+EXP_PREFIX=$NAME # costumize
 TASK="PHASES"
 ARCH="TAPIS"
 

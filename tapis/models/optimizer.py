@@ -79,7 +79,7 @@ def construct_optimizer(model, cfg):
         )
     )
 
-    if cfg.SOLVER.OPTIMIZING_METHOD == "sgd":
+    if cfg.SOLVER.OPTIMIZING_METHOD.lower() == "sgd":
         return torch.optim.SGD(
             optim_params,
             lr=cfg.SOLVER.BASE_LR,
@@ -88,14 +88,14 @@ def construct_optimizer(model, cfg):
             dampening=cfg.SOLVER.DAMPENING,
             nesterov=cfg.SOLVER.NESTEROV,
         )
-    elif cfg.SOLVER.OPTIMIZING_METHOD == "adam":
+    elif cfg.SOLVER.OPTIMIZING_METHOD.lower() == "adam":
         return torch.optim.Adam(
             optim_params,
             lr=cfg.SOLVER.BASE_LR,
             betas=(0.9, 0.999),
             weight_decay=cfg.SOLVER.WEIGHT_DECAY,
         )
-    elif cfg.SOLVER.OPTIMIZING_METHOD == "adamw" and cfg.MODEL.MODEL_NAME == "VideoSwinTransformer":
+    elif cfg.SOLVER.OPTIMIZING_METHOD.lower() == "adamw" and cfg.MODEL.MODEL_NAME == "VideoSwinTransformer":
         return torch.optim.AdamW(
                 lr=cfg.SOLVER.BASE_LR,
                 betas=(0.9, 0.999),
@@ -105,7 +105,7 @@ def construct_optimizer(model, cfg):
                                                  'norm': dict(decay_mult=0.),
                                                  'patch_embed': dict(lr_mult=0.1),
                                                  'layers': dict(lr_mult=0.1)}))
-    elif cfg.SOLVER.OPTIMIZING_METHOD == "adamw":
+    elif cfg.SOLVER.OPTIMIZING_METHOD.lower() == "adamw":
         return torch.optim.AdamW(
             optim_params,
             lr=cfg.SOLVER.BASE_LR,

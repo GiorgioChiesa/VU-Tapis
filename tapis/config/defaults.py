@@ -951,6 +951,10 @@ _C.FEATURES.PRECALCULATE_TEST = True
 # Path to Mask2Former pretrained weights
 _C.FEATURES.RPN_CHECKPOINT = ""
 
+#Additional configs for wandb logging
+_C.WANDB_ENABLE = False
+_C.NAME = "tapis_experiment"
+
 # Add custom config with default values.
 custom_config.add_custom_config(_C)
 

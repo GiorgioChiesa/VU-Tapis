@@ -23,7 +23,7 @@ def add_custom_config(_C):
     # Add your own customized configs.
     _C.CUSTOM = "Add your own customized configs here"
     _C.secret_txt = "/scratch/Video_Understanding/GraSP/TAPIS/.secret/.export_vars.txt"
-
+    
     secrets = read_secret_txt(_C.secret_txt)
         # Add each secret variable to config
     for key, value in secrets.items():

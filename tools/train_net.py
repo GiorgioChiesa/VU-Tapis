@@ -29,6 +29,9 @@ from tapis.utils.meters import EpochTimer, SurgeryMeter
 import torch.backends.cudnn as cudnn
 import torch.backends.cudnn
 import wandb
+from tqdm import tqdm
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
 
 
 logger = logging.get_logger(__name__)
@@ -47,6 +50,49 @@ def wandgb_log(stats):
             stats = {f'{stats["mode"]}_{k}': v for k, v in stats.items()}
             stats["cur_epoch"] = int(cur_epoch)
             wanbrun.log(stats)
+
+
+def log_confusion_matrix_wandb(pred, labels, task, mode, epoch, cfg):
+    """
+    Logga la confusion matrix su wandb usando wandb.plot.confusion_matrix.
+
+    Args:
+        pred (list): Lista di liste con le probabilità per ogni classe.
+                     Formato: [[prob_class0, prob_class1, ...], ...]
+        labels (list): Lista con le etichette vere per ogni campione.
+                       Formato: [class_idx, class_idx, ...]
+        task (str): Nome del task.
+        mode (str): Modalità di training ('train', 'val', 'test').
+        epoch (int): Numero dell'epoca corrente.
+        cfg: Configurazione del modello.
+    """
+    global wanbrun
+    if wanbrun is None:
+        return
+
+    try:
+        # Converti le probabilità in predizioni tramite argmax
+        pred_classes = np.argmax(np.array(pred), axis=1)
+
+        # Crea una lista di nomi delle classi
+        num_classes = len(pred[0]) if len(pred) > 0 else 0
+        class_names = [f"Class {i}" for i in range(num_classes)]
+
+        # Log using wandb.plot.confusion_matrix
+        cm_plot = wandb.plot.confusion_matrix(
+            y_true=labels,
+            preds=pred_classes,
+            class_names=class_names,
+            title=f"Confusion Matrix - {task} ({mode}) - Epoch {epoch}"
+        )
+
+        wanbrun.log({
+            f"confusion_matrix/{task}/{mode}": cm_plot,
+            "epoch": epoch
+        })
+
+    except Exception as e:
+        logger.warning(f"Errore nel logging della confusion matrix per task {task}: {e}")
 
 
 def train_epoch(
@@ -87,88 +133,92 @@ def train_epoch(
         loss_dict.update(pres_loss_dict)
         type_dict.update(pres_type_dict)
         loss_weights += cfg.TASKS.PRESENCE_WEIGHTS
-    
-    for cur_iter, (inputs, labels, data, image_names) in enumerate(train_loader):
 
-        # Transfer the data to the current GPU device.
-        if cfg.NUM_GPUS:
-            inputs = [input.cuda(non_blocking=True) for input in inputs]
-            if cfg.MODEL.PRECISION == 64:
-                inputs[0] = inputs[0].double()
-
-            for key, val in data.items():
-                data[key] = val.cuda(non_blocking=True)
+    with tqdm(total=data_size, desc=f"Train Epoch {cur_epoch+1}/{cfg.SOLVER.MAX_EPOCH}", unit="it") as t:     
+        for cur_iter, (inputs, labels, data, image_names) in enumerate(train_loader):
+            t.update(1)
+            # Transfer the data to the current GPU device.
+            if cfg.NUM_GPUS:
+                inputs = [input.cuda(non_blocking=True) for input in inputs]
                 if cfg.MODEL.PRECISION == 64:
-                    data[key]  = data[key].double()
+                    inputs[0] = inputs[0].double()
 
-            for key, val in labels.items():
-                labels[key] = val.cuda(non_blocking=True)
-                if cfg.MODEL.PRECISION == 64:
-                    labels[key]  = labels[key].double()
-            
-            if cfg.NUM_GPUS>1:
-                image_names = image_names.cuda(non_blocking=True)
-                    
-        # Update the learning rate.
-        lr = optim.get_epoch_lr(cur_epoch + float(cur_iter) / data_size, cfg)
-        optim.set_lr(optimizer, lr)
+                for key, val in data.items():
+                    data[key] = val.cuda(non_blocking=True)
+                    if cfg.MODEL.PRECISION == 64:
+                        data[key]  = data[key].double()
 
-        train_meter.data_toc()
+                for key, val in labels.items():
+                    labels[key] = val.cuda(non_blocking=True)
+                    if cfg.MODEL.PRECISION == 64:
+                        labels[key]  = labels[key].double()
+                
+                if cfg.NUM_GPUS>1:
+                    image_names = image_names.cuda(non_blocking=True)
+                        
+            # Update the learning rate.
+            lr = optim.get_epoch_lr(cur_epoch + float(cur_iter) / data_size, cfg)
+            optim.set_lr(optimizer, lr)
 
-        with torch.cuda.amp.autocast(enabled=cfg.TRAIN.MIXED_PRECISION):
-            rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
-            boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
-            boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
-            images = data["images"] if cfg.FEATURES.USE_RPN else None
-            preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images)
+            train_meter.data_toc()
 
-            # Explicitly declare reduction to mean and compute the loss for each task.
-            loss = []
-            for task in loss_dict:
-                loss_fun = loss_dict[task]
-                target_type = type_dict[task]
-                loss.append(loss_fun(preds[task], labels[task].to(target_type))) 
+            with torch.cuda.amp.autocast(enabled=cfg.TRAIN.MIXED_PRECISION):
+                rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
+                boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
+                boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
+                images = data["images"] if cfg.FEATURES.USE_RPN else None
+                preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images)
 
-        if len(loss_dict) >1:
-            final_loss = losses.compute_weighted_loss(loss, loss_weights)
-        else:
-            final_loss = loss[0]
-            
-        # check Nan Loss.
-        misc.check_nan_losses(final_loss)
+                # Explicitly declare reduction to mean and compute the loss for each task.
+                loss = []
+                for task in loss_dict:
+                    loss_fun = loss_dict[task]
+                    target_type = type_dict[task]
+                    loss.append(loss_fun(preds[task], labels[task].to(target_type))) 
 
-        # Perform the backward pass.
-        optimizer.zero_grad()
-        scaler.scale(final_loss).backward()
+            if len(loss_dict) >1:
+                final_loss = losses.compute_weighted_loss(loss, loss_weights)
+            else:
+                final_loss = loss[0]
+                
+            # check Nan Loss.
+            misc.check_nan_losses(final_loss)
 
-        # Unscales the gradients of optimizer's assigned params in-place
-        scaler.unscale_(optimizer)
+            # Perform the backward pass.
+            optimizer.zero_grad()
+            scaler.scale(final_loss).backward()
 
-        # Clip gradients if necessary
-        if cfg.SOLVER.CLIP_GRAD_VAL:
-            torch.nn.utils.clip_grad_value_(
-                model.parameters(), cfg.SOLVER.CLIP_GRAD_VAL
-            )
-        elif cfg.SOLVER.CLIP_GRAD_L2NORM:
-            torch.nn.utils.clip_grad_norm_(
-                model.parameters(), cfg.SOLVER.CLIP_GRAD_L2NORM
-            )
-        # Update the parameters.
-        scaler.step(optimizer)
-        scaler.update()
+            # Unscales the gradients of optimizer's assigned params in-place
+            scaler.unscale_(optimizer)
 
-        if cfg.NUM_GPUS > 1:
-            final_loss = du.all_reduce([final_loss])[0]
-        final_loss = final_loss.item()
+            # Clip gradients if necessary
+            if cfg.SOLVER.CLIP_GRAD_VAL:
+                torch.nn.utils.clip_grad_value_(
+                    model.parameters(), cfg.SOLVER.CLIP_GRAD_VAL
+                )
+            elif cfg.SOLVER.CLIP_GRAD_L2NORM:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), cfg.SOLVER.CLIP_GRAD_L2NORM
+                )
+            # Update the parameters.
+            scaler.step(optimizer)
+            scaler.update()
 
-        # Update and log stats.
-        train_meter.update_stats(None, None, None, final_loss, loss, lr)
-        train_meter.iter_toc()  # measure allreduce for this meter
-        stats = train_meter.log_iter_stats(cur_epoch, cur_iter)
-        train_meter.iter_tic()
-    
+            if cfg.NUM_GPUS > 1:
+                final_loss = du.all_reduce([final_loss])[0]
+            final_loss = final_loss.item()
+
+            # Update and log stats.
+            train_meter.update_stats(None, None, None, final_loss, loss, lr)
+            train_meter.iter_toc()  # measure allreduce for this meter
+            stats = train_meter.log_iter_stats(cur_epoch, cur_iter)
+            train_meter.iter_tic()
+            t.set_postfix(stats.items())
+    t.close()
     # Log epoch stats.
     train_meter.log_epoch_stats(cur_epoch)
+
+    # Log confusion matrix for each task
     if cfg.WANDB_ENABLE:
         wandgb_log(stats)
     train_meter.reset()
@@ -195,79 +245,83 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
         if cfg.TASKS.PRESENCE_RECOGNITION and cfg.TASKS.EVAL_PRESENCE:
             pres_tasks = [f'{task}_presence' for task in cfg.TASKS.PRESENCE_TASKS]
             complete_tasks += pres_tasks
-
-    for cur_iter, (inputs, labels, data, image_names) in enumerate(val_loader):
-        if cfg.NUM_GPUS:
-            inputs[0] = inputs[0].cuda(non_blocking=True)
-            if cfg.MODEL.PRECISION == 64:
-                inputs[0] = inputs[0].double()
-
-            for key, val in data.items():
-                data[key] = val.cuda(non_blocking=True)
+    with tqdm(total=len(val_loader), desc=f"Eval Epoch {cur_epoch+1}/{cfg.SOLVER.MAX_EPOCH}", unit="it") as t:
+        for cur_iter, (inputs, labels, data, image_names) in enumerate(val_loader):
+            t.update(1)
+            if cfg.NUM_GPUS:
+                inputs[0] = inputs[0].cuda(non_blocking=True)
                 if cfg.MODEL.PRECISION == 64:
-                    data[key]  = data[key].double()
+                    inputs[0] = inputs[0].double()
 
-            for key, val in labels.items():
-                labels[key] = val.cuda(non_blocking=True)
-                if cfg.MODEL.PRECISION == 64:
-                    labels[key]  = labels[key].double()
-            
-            if cfg.NUM_GPUS>1:
-                image_names = image_names.cuda(non_blocking=True)
-                    
-        val_meter.data_toc()
+                for key, val in data.items():
+                    data[key] = val.cuda(non_blocking=True)
+                    if cfg.MODEL.PRECISION == 64:
+                        data[key]  = data[key].double()
 
-        rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
-        boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
-        ori_boxes = data["ori_boxes"] if cfg.REGIONS.ENABLE else None
-        boxes_idxs = data["ori_boxes_idxs"] if cfg.REGIONS.ENABLE else None
-        boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
-        images = data["images"] if cfg.FEATURES.USE_RPN else None
+                for key, val in labels.items():
+                    labels[key] = val.cuda(non_blocking=True)
+                    if cfg.MODEL.PRECISION == 64:
+                        labels[key]  = labels[key].double()
+                
+                if cfg.NUM_GPUS>1:
+                    image_names = image_names.cuda(non_blocking=True)
+                        
+            val_meter.data_toc()
 
-        assert (not (cfg.REGIONS.ENABLE and cfg.FEATURES.ENABLE)) or len(rpn_ftrs)==len(image_names)==len(boxes), f'Inconsistent lenghts {len(rpn_ftrs)} & {len(image_names)} & {len(boxes)}'
+            rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
+            boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
+            ori_boxes = data["ori_boxes"] if cfg.REGIONS.ENABLE else None
+            boxes_idxs = data["ori_boxes_idxs"] if cfg.REGIONS.ENABLE else None
+            boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
+            images = data["images"] if cfg.FEATURES.USE_RPN else None
 
-        preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images)
-        # breakpoint()
-        if cfg.NUM_GPUS:
-            preds = {task: preds[task].cpu() for task in preds}
-            ori_boxes = ori_boxes.cpu() if cfg.REGIONS.ENABLE else None
-            boxes_idxs = boxes_idxs.cpu() if cfg.REGIONS.ENABLE else None
-            boxes_mask = boxes_mask.cpu() if cfg.REGIONS.ENABLE else None
+            assert (not (cfg.REGIONS.ENABLE and cfg.FEATURES.ENABLE)) or len(rpn_ftrs)==len(image_names)==len(boxes), f'Inconsistent lenghts {len(rpn_ftrs)} & {len(image_names)} & {len(boxes)}'
 
-            if cfg.NUM_GPUS>1:
-                image_names = image_names.cpu()
-                image_names = torch.cat(du.all_gather_unaligned(image_names),dim=0).tolist()
+            preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images)
+            # breakpoint()
+            if cfg.NUM_GPUS:
+                preds = {task: preds[task].cpu() for task in preds}
+                ori_boxes = ori_boxes.cpu() if cfg.REGIONS.ENABLE else None
+                boxes_idxs = boxes_idxs.cpu() if cfg.REGIONS.ENABLE else None
+                boxes_mask = boxes_mask.cpu() if cfg.REGIONS.ENABLE else None
 
-                preds = {task: torch.cat(du.all_gather_unaligned(preds[task]), dim=0) for task in preds}
+                if cfg.NUM_GPUS>1:
+                    image_names = image_names.cpu()
+                    image_names = torch.cat(du.all_gather_unaligned(image_names),dim=0).tolist()
 
-                if cfg.REGIONS.ENABLE:
-                    ori_boxes = torch.cat(du.all_gather_unaligned(ori_boxes), dim=0)
-                    boxes_mask = torch.cat(du.all_gather_unaligned(boxes_mask), dim=0)
-                    idxs_gather = du.all_gather_unaligned(boxes_idxs)
-                    for i in range(len(idxs_gather)):
-                        idxs_gather[i]+= torch.tensor((cfg.TEST.BATCH_SIZE/cfg.NUM_GPUS)*i).long()
+                    preds = {task: torch.cat(du.all_gather_unaligned(preds[task]), dim=0) for task in preds}
 
-                    boxes_idxs = torch.cat(idxs_gather, dim=0)
+                    if cfg.REGIONS.ENABLE:
+                        ori_boxes = torch.cat(du.all_gather_unaligned(ori_boxes), dim=0)
+                        boxes_mask = torch.cat(du.all_gather_unaligned(boxes_mask), dim=0)
+                        idxs_gather = du.all_gather_unaligned(boxes_idxs)
+                        for i in range(len(idxs_gather)):
+                            idxs_gather[i]+= torch.tensor((cfg.TEST.BATCH_SIZE/cfg.NUM_GPUS)*i).long()
 
-        val_meter.iter_toc()
+                        boxes_idxs = torch.cat(idxs_gather, dim=0)
 
-        if cfg.REGIONS.ENABLE:
-            for task in region_tasks:
-                preds[task] = [preds[task][boxes_idxs==idx].tolist() for idx in range(len(boxes_mask))]
-            if 'masks' in preds:
-                ori_boxes = [preds['boxes'][boxes_mask][boxes_idxs==idx].numpy().tolist() for idx in range(len(boxes_mask))]
-                preds['masks'] = [preds['masks'][boxes_mask][boxes_idxs==idx].numpy() for idx in range(len(boxes_mask))]
-            else:
-                ori_boxes = [ori_boxes[boxes_idxs==idx].tolist() for idx in range(len(boxes_mask))]
-        for task in complete_tasks:
-            if task not in region_tasks:
-                preds[task] = preds[task].tolist()
-        
-        # Update and log stats.
-        val_meter.update_stats(preds, image_names, ori_boxes)
-        val_meter.log_iter_stats(cur_epoch, cur_iter)
-        val_meter.iter_tic()
+            val_meter.iter_toc()
 
+            if cfg.REGIONS.ENABLE:
+                for task in region_tasks:
+                    preds[task] = [preds[task][boxes_idxs==idx].tolist() for idx in range(len(boxes_mask))]
+                if 'masks' in preds:
+                    ori_boxes = [preds['boxes'][boxes_mask][boxes_idxs==idx].numpy().tolist() for idx in range(len(boxes_mask))]
+                    preds['masks'] = [preds['masks'][boxes_mask][boxes_idxs==idx].numpy() for idx in range(len(boxes_mask))]
+                else:
+                    ori_boxes = [ori_boxes[boxes_idxs==idx].tolist() for idx in range(len(boxes_mask))]
+            for task in complete_tasks:
+                if task not in region_tasks:
+                    preds[task] = preds[task].tolist()
+
+            # Update and log stats.
+            val_meter.update_stats(preds, image_names, ori_boxes, labels=labels)
+            stats = val_meter.log_iter_stats(cur_epoch, cur_iter)
+            val_meter.iter_tic()
+            t.set_postfix(stats.items())
+
+
+    t.close()
     if cfg.NUM_GPUS > 1:
         if du.is_master_proc():
             task_map, mean_map, out_files, stats = val_meter.log_epoch_stats(cur_epoch)
@@ -276,8 +330,21 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
         torch.distributed.barrier()
     else:
         task_map, mean_map, out_files, stats = val_meter.log_epoch_stats(cur_epoch)
-    if cfg.WANDB_ENABLE:
+
+    # Log confusion matrix for each task
+    if cfg.WANDB_ENABLE and cfg.NUM_GPUS <= 1:
         wandgb_log(stats)
+        for task in complete_tasks:
+            if len(val_meter.all_preds[task]) > 0 and len(val_meter.all_labels[task]) > 0:
+                log_confusion_matrix_wandb(
+                    val_meter.all_preds[task],
+                    val_meter.all_labels[task],
+                    task,
+                    "val",
+                    cur_epoch,
+                    cfg
+                )
+        
     val_meter.reset()
 
     return task_map, mean_map, out_files

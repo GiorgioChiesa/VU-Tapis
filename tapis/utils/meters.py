@@ -77,6 +77,7 @@ class SurgeryMeter(object):
         self.overall_iters = overall_iters
         self.groundtruth = cfg.ENDOVIS_DATASET.TEST_COCO_ANNS
         self.segmentation = cfg.REGIONS.ENABLE and cfg.REGIONS.LEVEL=='segmentation'
+        self.all_labels = {k: [] for k in self.tasks}
         
         if self.segmentation and os.path.isdir(cfg.ENDOVIS_DATASET.MASKS_PATH):
             self.mask_path = cfg.ENDOVIS_DATASET.MASKS_PATH
@@ -110,9 +111,6 @@ class SurgeryMeter(object):
             cur_epoch (int): the current epoch.
             cur_iter (int): the current iteration.
         """
-
-        if (cur_iter + 1) % self.cfg.LOG_PERIOD != 0 and cur_iter != self.overall_iters - 1:
-            return
 
         eta_sec = self.iter_timer.seconds() * (self.overall_iters - cur_iter)
         eta = str(datetime.timedelta(seconds=int(eta_sec)))
@@ -155,8 +153,9 @@ class SurgeryMeter(object):
             }
         else:
             raise NotImplementedError("Unknown mode: {}".format(self.mode))
-
-        logging.log_json_stats(stats)
+        
+        if (cur_iter + 1) % self.cfg.LOG_PERIOD == 0 or cur_iter == self.overall_iters - 1:
+            logging.log_json_stats(stats)
         return stats
 
     def iter_tic(self):
@@ -185,29 +184,36 @@ class SurgeryMeter(object):
         self.task_loss.reset()
         self.full_map = {}
         self.all_preds = {task:[] for task in self.tasks}
+        self.all_labels = {task:[] for task in self.tasks}
         self.all_names = []
         self.all_boxes = []
 
         if self.generate_masks:
             self.all_masks = []
 
-    def update_stats(self, preds, names, boxes, final_loss= None, losses=None, lr=None):
+    def update_stats(self, preds, names, boxes, final_loss=None, losses=None, lr=None, labels=None):
         """
         Update the current stats.
         Args:
             preds (tensor): prediction embedding.
-            keep_box(tensor): tensor of boolean to keep the original bounding boxes. 
+            keep_box(tensor): tensor of boolean to keep the original bounding boxes.
             boxes (tensor): predicted boxes (x1, y1, x2, y2).
             d_names (list): names of the keyframes with detection anns.
             names (list): names of all the keyframes.
             final_loss (float): final loss value.
             lr (float): learning rate.
-        """ 
+            labels (dict): labels per task (optional, for confusion matrix logging).
+        """
         if self.eval_train or self.mode in ["val", "test"]:
-            
+
             for task in self.tasks:
                 self.all_preds[task].extend(preds[task])
-            
+                if labels is not None and task in labels:
+                    if isinstance(labels[task], torch.Tensor):
+                        self.all_labels[task].extend(labels[task].cpu().numpy().tolist())
+                    else:
+                        self.all_labels[task].extend(labels[task])
+
             if self.parallel:
                 try:
                     names = [self.join_funct(name[0],name[1]) for name in names] #[IDENT_FUNCT_DICT[self.dataset_name](*name) for name in names]
@@ -221,7 +227,7 @@ class SurgeryMeter(object):
                 if 'masks' in preds:
                     for masks in preds['masks']:
                         self.all_masks.append([mask_to_rle(mask.astype('uint8')) for mask in masks])
-                    
+
                     assert all(len(names)==len(boxes)==len(preds['masks'])==len(preds[t]) for t in self.tasks)
             else:
                 assert all(len(names)==len(preds[t]) for t in self.tasks)

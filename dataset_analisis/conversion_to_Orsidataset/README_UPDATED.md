@@ -216,6 +216,20 @@ python orsi2coco.py \
   --csv
 ```
 
+
+### Con salvataggio dei frame:
+
+```bash
+python orsi2coco.py \
+ --input annotations \
+ --output output_COCO \
+ --fps 60 \
+ --frame-step 30 \
+ --csv-output output_COCO/train.csv \
+ --frame-root frames \
+ --video-root mp4_videos 
+```
+
 ## 🧠 Spiegazione semantica della conversione
 
 ### Step 1: Caricamento Annotazioni ORSI

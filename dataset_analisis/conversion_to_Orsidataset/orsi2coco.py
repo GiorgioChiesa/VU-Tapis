@@ -6,9 +6,12 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Tuple, Set, Optional
 from collections import defaultdict
+import argparse
+import cv2
+from tqdm import tqdm
 
 # FPS configuration - adjust based on your video fps
-FPS = 25  # Change this to match your video frame rate
+FPS = 60  # Change this to match your video frame rate
 
 # Try to import PIL for reading image dimensions
 try:
@@ -93,6 +96,16 @@ class ORSI2COCO:
         self.dimensions_cache = {}
         self.event_margins = {}  # Will be populated with event timing margins
         self._init_event_margins()
+    
+    def reset_counters(self):
+        """Reset image and annotation ID counters for a new video"""
+        self.image_id_counter = 1
+        self.annotation_id_counter = 1
+        self.phase_to_id.clear()
+        self.step_to_id.clear()
+        self.annotated_frames.clear()
+        self.dimensions_cache.clear()
+
 
     def _init_event_margins(self):
         """Initialize event timing margins based on RARP specifications"""
@@ -111,7 +124,8 @@ class ORSI2COCO:
         return self.event_margins.get(event_name, 0.0)
 
     def extract_frames_from_video(self, video_path: str, output_dir: str, 
-                                   video_name: str, skip_existing: bool = True) -> Tuple[int, str]:
+                                   video_name: str, skip_existing: bool = True, 
+                                   sorted_frames: list = []) -> Tuple[int, str]:
         """
         Extract frames from MP4 video using ffmpeg.
         
@@ -123,11 +137,15 @@ class ORSI2COCO:
             output_dir: Root directory for frame output
             video_name: Name of the video (folder name)
             skip_existing: If True, skip extraction if frames already exist
+            sorted_frames: Optional list of specific frame numbers to extract (if empty, extract all frames)
             
         Returns:
             Tuple of (total_frames_extracted, frame_output_dir)
         """
         frame_output_dir = os.path.join(output_dir, video_name)
+        if not os.path.exists(video_path):
+            print(f"⚠️  Video file not found: {video_path}. Skipping frame extraction.")
+            return 0, frame_output_dir
         
         # Check if frames already exist
         if skip_existing and os.path.exists(frame_output_dir):
@@ -145,29 +163,35 @@ class ORSI2COCO:
         
         print(f"  📹 Extracting frames from {video_name}...")
         
-        # FFmpeg command to extract frames at specified FPS
-        output_pattern = os.path.join(frame_output_dir, "%09d.jpg")
-        cmd = [
-            "ffmpeg",
-            "-i", video_path,
-            "-vf", f"fps={self.fps}",
-            "-q:v", "2",  # Quality (2 = high quality)
-            output_pattern
-        ]
-        
         try:
-            # Run ffmpeg with minimal output
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
             
-            if result.returncode != 0:
-                print(f"  ❌ FFmpeg error: {result.stderr}")
-                raise RuntimeError(f"FFmpeg extraction failed: {result.stderr}")
+            # Open video file
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                raise RuntimeError(f"Failed to open video: {video_path}")
             
-            # Count extracted frames
-            extracted_frames = len([f for f in os.listdir(frame_output_dir) 
-                                   if f.endswith('.jpg')])
+            total_frames = int(len(sorted_frames) )
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            print(f"  🎞️  Video FPS: {fps:.2f}, Total frames to extract: {total_frames}")
             
-            print(f"  ✅ Extracted {extracted_frames} frames to {frame_output_dir}")
+            extracted_frames = 0
+            
+            with tqdm(total=total_frames, desc=f"Extracting {video_name}", unit="frame") as pbar:
+                for frame_num in sorted_frames:
+                    # Set video position to the desired frame
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    
+                    frame_path = os.path.join(frame_output_dir, f"{frame_num:09d}.jpg")
+                    cv2.imwrite(frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    
+                    extracted_frames += 1
+                    pbar.update(1)
+            
+            cap.release()
+            print(f"  ✅ Extracted {extracted_frames} frames to {frame_output_dir} \n")
             
             return extracted_frames, frame_output_dir
             
@@ -686,7 +710,7 @@ class ORSI2COCO:
     def convert_batch(self, annotation_dir: str, output_dir: str,
                      frame_step: int = 46, width: int = 1280, height: int = 800,
                      generate_csv: bool = True, csv_output_path: str = None,
-                     frame_root: Optional[str] = None):
+                     frame_root: Optional[str] = None, video_root: Optional[str] = None):
         """
         Convert all annotation files in a directory
 
@@ -699,6 +723,7 @@ class ORSI2COCO:
             generate_csv: Whether to generate a combined CSV file
             csv_output_path: Path for combined CSV file (default: output_dir/train.csv)
             frame_root: Optional root directory for frames to read actual dimensions from images
+            video_root: Optional root directory for videos to extract frames from
         """
         os.makedirs(output_dir, exist_ok=True)
 
@@ -745,6 +770,13 @@ class ORSI2COCO:
                         row = [video_name, "1", str(idx), image["file_name"]]
                         all_csv_rows.append(row)
 
+                if video_root and os.path.isdir(video_root):
+                    video_path = os.path.join(video_root, f"{video_name}.mp4")
+                    print(f"\n🎬 Frame Extraction Mode:")
+                    self.extract_frames_from_video(video_path, frame_root, video_name, sorted_frames=sorted_frames)
+
+
+
             except Exception as e:
                 print(f"  Error processing {json_file}: {str(e)}")
 
@@ -759,7 +791,7 @@ class ORSI2COCO:
 
 
 if __name__ == "__main__":
-    import argparse
+
 
     parser = argparse.ArgumentParser(description="Convert ORSI dataset to COCO format with optional frame extraction")
     parser.add_argument("--input", type=str, help="Input JSON file or directory with JSON files")
@@ -768,46 +800,60 @@ if __name__ == "__main__":
     parser.add_argument("--frame-step", type=int, default=46, help="Extract every N frames (default: 46)")
     parser.add_argument("--width", type=int, default=1280, help="Video width (default: 1280)")
     parser.add_argument("--height", type=int, default=800, help="Video height (default: 800)")
-    parser.add_argument("--csv", action="store_true", help="Generate CSV files")
+    # parser.add_argument("--csv", action="store_true", help="Generate CSV files")
     parser.add_argument("--csv-output", type=str, help="Path for combined CSV file (default: output_dir/train.csv)")
     parser.add_argument("--frame-root", type=str, help="Root directory for existing frames (reads dimensions)")
-    parser.add_argument("--extract-frames", action="store_true", help="Extract frames from videos using ffmpeg")
+    # parser.add_argument("--extract-frames", action="store_true", help="Extract frames from videos using ffmpeg")
     parser.add_argument("--video-root", type=str, help="Root directory containing MP4 videos (for --extract-frames)")
-    parser.add_argument("--frames-output", type=str, help="Directory for saved frames (default: frame-root or current/frames)")
-    parser.add_argument("--batch", action="store_true", help="Process all RARP*.json files in input directory")
+    # parser.add_argument("--frames-output", type=str, help="Directory for saved frames (default: frame-root or current/frames)")
+    # parser.add_argument("--batch", action="store_true", help="Process all RARP*.json files in input directory")
 
     args = parser.parse_args()
     
     # Validate arguments
-    if args.extract_frames and not args.video_root:
-        print("❌ Error: --extract-frames requires --video-root")
+    if args.video_root and os.path.isdir(args.video_root):
+        args.extract_frames = True  # Ensure frame extraction if video_root is provided
+    else:
+        args.extract_frames = False
+    if args.extract_frames and (not args.video_root or not os.path.isdir(args.video_root)):
+        print("❌ Error: --extract-frames requires --video-root or --video_root to be a directory")
         exit(1)
+    if not args.input or not args.output:
+        print("--input and --output are required")
+        exit(1)
+    if os.path.isdir(args.input) and not os.path.isdir(args.output):
+        print("❌ Error: When --input is a directory, --output must also be a directory")
+        exit(1)
+    if args.csv_output:
+        args.csv = True  # Ensure CSV generation if csv_output is specified
+    else:
+        args.csv = False
+    
+
+
+        
+    
+
 
     converter = ORSI2COCO(fps=args.fps)
-
-    if args.batch:
-        if not args.input or not args.output:
-            print("--batch mode requires both --input and --output directories")
-            exit(1)
-        
+    if os.path.isdir(args.input):
         # Extract frames if requested
-        frames_root = args.frames_output or args.frame_root
-        if args.extract_frames:
-            frames_root = args.frames_output or os.path.join(args.output, "frames")
-            print(f"\n🎬 Frame Extraction Mode:")
-            print(f"   Video root: {args.video_root}")
-            print(f"   Frames output: {frames_root}")
+        frames_root = args.frame_root
+        # if args.extract_frames:
+        #     print(f"\n🎬 Frame Extraction Mode:")
+        #     print(f"   Video root: {args.video_root}")
+        #     print(f"   Frames output: {args.frame_root}")
             
-            # Find all annotation files
-            annotation_files = sorted(Path(args.input).glob("RARP*.json"))
-            for json_file in annotation_files:
-                video_name = json_file.stem
-                video_path = os.path.join(args.video_root, f"{video_name}.mp4")
-                print(f"\n📄 {video_name}:")
-                try:
-                    converter.extract_frames_from_video(video_path, frames_root, video_name)
-                except Exception as e:
-                    print(f"   ⚠️  Skipping frame extraction: {e}")
+        #     # Find all annotation files
+        #     annotation_files = sorted(Path(args.input).glob("RARP*.json"))
+        #     for json_file in annotation_files:
+        #         video_name = json_file.stem
+        #         video_path = os.path.join(args.video_root, f"{video_name}.mp4")
+        #         print(f"\n📄 {video_name}:")
+        #         if os.path.exists(video_path):
+        #             converter.extract_frames_from_video(video_path, args.frame_root, video_name)
+        #         else:
+        #             print(f"   ⚠️  Skipping frame extraction: {video_path} does not exist")
         
         # Convert annotations
         print(f"\n📊 Converting annotations to COCO format...")
@@ -819,27 +865,13 @@ if __name__ == "__main__":
             args.height,
             generate_csv=args.csv,
             csv_output_path=args.csv_output,
-            frame_root=frames_root
+            frame_root=args.frame_root,
+            video_root=args.video_root
         )
+        
     else:
-        if not args.input or not args.output:
-            print("--input and --output are required")
-            exit(1)
-        
-        # Extract frames if requested
-        frame_root = args.frame_root
-        if args.extract_frames:
-            frame_root = args.frames_output or os.path.join(os.path.dirname(args.output), "frames")
-            video_name = Path(args.input).stem
-            video_path = os.path.join(args.video_root, f"{video_name}.mp4")
-            
-            print(f"🎬 Extracting frames...")
-            try:
-                converter.extract_frames_from_video(video_path, frame_root, video_name)
-            except Exception as e:
-                print(f"⚠️  Frame extraction warning: {e}")
-                print(f"   Continuing with annotation conversion...")
-        
+
+
         print(f"\n📊 Converting annotation to COCO format...")
         coco_data, sorted_frames = converter.convert_annotation(
             args.input,
@@ -848,10 +880,25 @@ if __name__ == "__main__":
             args.frame_step,
             args.width,
             args.height,
-            frame_root
+            args.frame_root
         )
 
         # Generate CSV if requested
         if args.csv:
             video_name = Path(args.input).stem
             converter.generate_csv_from_coco(coco_data, video_name, args.csv_output or f"{args.output}.csv")
+        
+        # Extract frames if requested
+        if args.extract_frames:
+            video_name = Path(args.input).stem
+            video_path = os.path.join(args.video_root, f"{video_name}.mp4")
+            print(f"🎬 Extracting frames...")
+            if os.path.exists(video_path):
+                converter.extract_frames_from_video(video_path, args.frame_root, video_name, sorted_frames=sorted_frames)
+            else:
+                print(f"⚠️  Skipping frame extraction: {video_path} does not exist")
+        
+    print("\n✅ Conversion complete!")
+    import subprocess
+    subprocess.run(["python", "merge_json.py", "--output-dir", args.output])  # Debugging line to show output directory contents
+        

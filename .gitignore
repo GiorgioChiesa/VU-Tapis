@@ -9,7 +9,7 @@ output
 instant_test_output
 inference_test_output
 
-
+*.mp4
 *.csv
 *.png
 *.json

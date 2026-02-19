@@ -1,13 +1,14 @@
 import json
 import os
 import csv
+import argparse
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Tuple, Set, Optional
 from collections import defaultdict
 
 # FPS configuration - adjust based on your video fps
 FPS = 25  # Change this to match your video frame rate
-INSTANT_EVENT_DURATION = 3  # seconds to keep instant events active (default 3)
 
 # Try to import PIL for reading image dimensions
 try:
@@ -16,27 +17,164 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
+# ===== RARP Event Timing Specifications from "Phases of Robot-Assisted Radical Prostatectomy" =====
+# Events categorized by temporal precision requirement
+
+# Events that occur in 1 frame (exact frame)
+INSTANT_FRAME_EVENTS = {
+    "Out of body", "Instrument swap: removal", "Instrument swap: insertion",
+    "Insert gauze", "Remove gauze", "Insert hemostatic agens", "Remove hemostatic agens",
+    "Test image start", "Test image stop", "Inside abdomen", "Instrument insertion",
+    "Adhesion removal", "Fat removal", "Remove needle bladder stretch stitch",
+    "Needle removal DVC ligation", "V-lock", "Cutting the needles", "Removing the needles",
+    "Threads removal", "Vessel loop removal", "Hemolock clip removal", "Endobag removal",
+    "Drain placement", "Removal of robotic instruments", "Camera out of body", "Camera stop"
+}
+
+# Events with ±1 second margin
+MARGIN_1SEC_EVENTS = {
+    "Unsuccesful clip placement", "Hemostatic metal clip placement",
+    "Incision peritoneum - left", "Incision peritoneum - right",
+    "Incision of the fascia - left", "Incision of the fascia - right",
+    "Placement stitch for bladder stretch", "Start dissection",
+    "Visualisation of urethra opening", "Grasping catheter tip",
+    "Continue posterior dissection", "Hemolock clip on bladder pedicle attached to prostate",
+    "Identify and dissect vas deferens - left", "Clip or coagulate vas deferens - left",
+    "Identification and clipping of SV arteries - left",
+    "Identify and dissect vas deferens - right", "Clip or coagulate vas deferens - right",
+    "Identification and clipping of SV arteries - right",
+    "Lift both seminal vesicles", "Incision of Denonvilliers fascia",
+    "Lift right seminal vesicle", "Start dissection and cutting right pedicle",
+    "Hemolock clip on right pedicle", "Metal clip on right pedicle",
+    "Lift left seminal vesicle", "Start dissection and cutting left pedicle",
+    "Hemolock clip on left pedicle", "Metal clip on left pedicle",
+    "Start dissection DVC", "Stitch in DVC before apical dissection",
+    "Transection of the urethra", "Tighten endobag",
+    "Stitch in DVC after apical dissection", "Stitch of posterior reconstruction",
+    "Stitch in bladder", "Stitch in urethra", "Tie suture",
+    "Final reinforcing suture", "Endobag removal"
+}
+
+# Events with ±5 seconds margin
+MARGIN_5SEC_EVENTS = {
+    "Port placement", "Leak test"
+}
+
+# Paired events that form START/END ranges
+PAIRED_EVENT_TEMPLATES = [
+    ("Out of body", "Back inside body"),
+    ("Insert gauze", "Remove gauze"),
+    ("Insert hemostatic agens", "Remove hemostatic agens"),
+]
+
 class ORSI2COCO:
     """
     Convert ORSI dataset format (RARP01.json) to COCO format compatible with GraSP
 
-    Source format: RARP01.json with EVENTS (steps) and PHASES
-    Target format: grasp_long-term_train.json (COCO format)
-
-    Event types:
-    - Start/End events: paired events that define a time range
-    - Instant events: single point in time events active for X seconds
+    Source format: RARP01.json with EVENTS (steps/azioni) and PHASES (fasi chirurgiche)
+    Target format: COCO JSON with phases_categories and steps_categories
+    
+    Semantic mapping:
+    - RARP Events → COCO steps_categories (EVENTS = STEPS)
+    - RARP Phases → COCO phases_categories
+    
+    Event classification:
+    - Instant events: Single timestamp, active for margin duration
+    - Paired events: START + END timestamps create continuous ranges
     """
 
-    def __init__(self, fps: int = FPS, instant_event_duration: float = INSTANT_EVENT_DURATION):
+    def __init__(self, fps: int = FPS):
         self.fps = fps
-        self.instant_event_duration = instant_event_duration
         self.image_id_counter = 1
         self.annotation_id_counter = 1
         self.phase_to_id = {}
         self.step_to_id = {}
-        self.annotated_frames = set()  # Track frames with annotations
-        self.dimensions_cache = {}  # Cache for image dimensions
+        self.annotated_frames = set()
+        self.dimensions_cache = {}
+        self.event_margins = {}  # Will be populated with event timing margins
+        self._init_event_margins()
+
+    def _init_event_margins(self):
+        """Initialize event timing margins based on RARP specifications"""
+        # Each event has a temporal margin (in seconds) based on RARP document
+        for event_name in INSTANT_FRAME_EVENTS:
+            self.event_margins[event_name] = 0.0  # Exact frame
+
+        for event_name in MARGIN_1SEC_EVENTS:
+            self.event_margins[event_name] = 1.0  # ±1 second margin
+
+        for event_name in MARGIN_5SEC_EVENTS:
+            self.event_margins[event_name] = 5.0  # ±5 seconds margin
+
+    def get_event_margin(self, event_name: str) -> float:
+        """Get temporal margin (in seconds) for an event based on RARP specifications"""
+        return self.event_margins.get(event_name, 0.0)
+
+    def extract_frames_from_video(self, video_path: str, output_dir: str, 
+                                   video_name: str, skip_existing: bool = True) -> Tuple[int, str]:
+        """
+        Extract frames from MP4 video using ffmpeg.
+        
+        Frames are saved as: {output_dir}/{video_name}/%09d.jpg
+        This matches GraSP frame naming convention.
+        
+        Args:
+            video_path: Path to input MP4 video
+            output_dir: Root directory for frame output
+            video_name: Name of the video (folder name)
+            skip_existing: If True, skip extraction if frames already exist
+            
+        Returns:
+            Tuple of (total_frames_extracted, frame_output_dir)
+        """
+        frame_output_dir = os.path.join(output_dir, video_name)
+        
+        # Check if frames already exist
+        if skip_existing and os.path.exists(frame_output_dir):
+            existing_frames = len([f for f in os.listdir(frame_output_dir) 
+                                  if f.endswith('.jpg')])
+            if existing_frames > 0:
+                print(f"  ℹ️  Frames already exist for {video_name}: {existing_frames} frames")
+                return existing_frames, frame_output_dir
+        
+        # Create output directory
+        os.makedirs(frame_output_dir, exist_ok=True)
+        
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"Video file not found: {video_path}")
+        
+        print(f"  📹 Extracting frames from {video_name}...")
+        
+        # FFmpeg command to extract frames at specified FPS
+        output_pattern = os.path.join(frame_output_dir, "%09d.jpg")
+        cmd = [
+            "ffmpeg",
+            "-i", video_path,
+            "-vf", f"fps={self.fps}",
+            "-q:v", "2",  # Quality (2 = high quality)
+            output_pattern
+        ]
+        
+        try:
+            # Run ffmpeg with minimal output
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            
+            if result.returncode != 0:
+                print(f"  ❌ FFmpeg error: {result.stderr}")
+                raise RuntimeError(f"FFmpeg extraction failed: {result.stderr}")
+            
+            # Count extracted frames
+            extracted_frames = len([f for f in os.listdir(frame_output_dir) 
+                                   if f.endswith('.jpg')])
+            
+            print(f"  ✅ Extracted {extracted_frames} frames to {frame_output_dir}")
+            
+            return extracted_frames, frame_output_dir
+            
+        except subprocess.TimeoutExpired:
+            raise TimeoutError(f"FFmpeg extraction timeout (>1 hour) for {video_name}")
+        except Exception as e:
+            raise RuntimeError(f"Frame extraction failed: {str(e)}")
 
     def seconds_to_frame(self, seconds: float) -> int:
         """Convert time in seconds to frame number"""
@@ -78,38 +216,61 @@ class ORSI2COCO:
 
     def identify_instant_events(self, events_data: Dict) -> Set[str]:
         """
-        Identify which events are instant (point-in-time) vs range events
-
-        Events are considered instant if:
-        - They have few timestamps (typically 1)
-        - They are not clearly part of a start/end pair
+        Identify which events are instant vs paired range events.
+        
+        From RARP document:
+        - Instant: Single timestamp events (most events)
+        - Paired: START→END events like "Out of body"↔"Back inside body"
+          where consecutive timestamp pairs form a continuous range
         """
-        instant_events = set()
+        paired_events = set()
+        all_event_names = set()
+        
+        # Collect all event names
+        for category in events_data.values():
+            all_event_names.update(category.keys())
+        
+        # Check for paired events from predefined templates
+        for start_name, end_name in PAIRED_EVENT_TEMPLATES:
+            if start_name in all_event_names and end_name in all_event_names:
+                paired_events.add((start_name, end_name))
+        
+        # Generic pattern detection: "Start X" + "End X", "Insert" + "Remove", etc.
+        event_list = sorted(list(all_event_names))
+        for event in event_list:
+            event_lower = event.lower()
+            
+            # Look for complementary pairs in same category first
+            for category_data in events_data.values():
+                if event not in category_data:
+                    continue
+                    
+                for other_event in category_data.keys():
+                    other_lower = other_event.lower()
+                    
+                    # Check for start/end patterns
+                    if ("start" in event_lower and "end" in other_lower) or \
+                       ("begin" in event_lower and "end" in other_lower) or \
+                       ("insert" in event_lower and "remove" in other_lower) or \
+                       ("inside" in event_lower and "out of" in other_lower):
+                        
+                        # Verify they have matching timestamp counts
+                        try:
+                            event_timestamps = category_data[event]
+                            other_timestamps = category_data[other_event]
+                            # If both have even number of timestamps or matching lengths, likely paired
+                            if event_timestamps and other_timestamps and \
+                               len(event_timestamps) == len(other_timestamps):
+                                paired_events.add(set([event, other_event]))
+                        except:
+                            pass
+        
+        # All other events are instant
+        p_event = set(x for sublist in paired_events for x in sublist)
 
-        for category_name, events in events_data.items():
-            for event_name, timestamps in events.items():
-                # Check if this event has a corresponding start/end pair
-                has_end_event = False
-
-                # Look for complementary end events
-                for other_event_name in events.keys():
-                    if event_name != other_event_name:
-                        # Check if one is start and other is end
-                        if "start" in event_name.lower() or "begin" in event_name.lower():
-                            # This is a start event, check if there's an end
-                            end_name = other_event_name.lower()
-                            if "end" in end_name or (
-                                event_name.lower().replace("start", "end") == end_name
-                                or event_name.lower().replace("begin", "end") == end_name
-                            ):
-                                has_end_event = True
-                                break
-
-                # If no clear start/end pattern, it's an instant event
-                if not has_end_event:
-                    instant_events.add(event_name)
-
-        return instant_events
+        instant_events = all_event_names - p_event
+        
+        return instant_events, paired_events
 
     def load_annotation_file(self, json_path: str) -> Dict:
         """Load RARP01.json annotation file"""
@@ -197,37 +358,68 @@ class ORSI2COCO:
 
         return 0  # Idle if no phase matches
 
-    def get_frame_step(self, frame_num: int, events_data: Dict, instant_events: Set[str]) -> int:
+    def get_frame_step(self, frame_num: int, events_data: Dict, instant_events: Set[str], paired_events: Set[Tuple[str,str]]) -> int:
         """
-        Determine which step/event a frame belongs to based on timing
+        Determine which step/event a frame belongs to based on timing and RARP semantics.
 
-        For instant events: the event is active for instant_event_duration seconds
-        For non-instant events: use the most recent event before this frame
+        Priority:
+        1. Paired events: Check if frame is within START→END range
+        2. Instant events: Check if frame is within margin window of event timestamp
+        3. Most recent event: Fallback to closest event before this frame
+        
+        RARP timing margins from document:
+        - Instant (1 frame): exact match only
+        - ±1 second margin: ±1s window around timestamp
+        - ±5 seconds margin: ±5s window around timestamp
         """
         frame_time = frame_num / self.fps
 
-        # First, check for instant events that are active at this time
-        for category_name in events_data.keys():
-            for event_name, timestamps in events_data[category_name].items():
-                if event_name in instant_events:
-                    # Check if any instant event is active at this frame
-                    for timestamp in timestamps:
-                        event_start = timestamp
-                        event_end = timestamp + self.instant_event_duration
-                        if event_start <= frame_time <= event_end:
-                            return self.step_to_id.get(event_name, 0)
+        # Priority 1: Check paired (range) events
+        # These are START→END pairs where consecutive timestamps form a range
+        paired_events = set()
+        for category, events in events_data.items():
+            for start_event, end_event in paired_events:
+                if start_event in category and end_event in category:
+                    start_timestamps = category[start_event]
+                    end_timestamps = category[end_event]
+                    # Pair consecutive timestamps as start-end
+                    sorted_start_ts = sorted(start_timestamps)
+                    sorted_end_ts = sorted(end_timestamps)
+                    for s, e in zip(sorted_start_ts, sorted_end_ts):
+                        if s <= frame_time < e:
+                            return self.step_to_id.get(start_event, 0)
+                        if frame_time == e:
+                            return self.step_to_id.get(end_event, 0)
 
-        # If no instant event, find the most recent non-instant event
+        # Priority 2: Check instant events with RARP timing margins
+        closest_instant_event = None
+        closest_instant_time = -float('inf')
+        
+        for category_name, events in events_data.items():
+            for event_name, timestamps in events.items():
+                if event_name in instant_events:
+                    margin = self.get_event_margin(event_name)
+                    for timestamp in timestamps:
+                        # Check if frame is within margin window of this event
+                        if timestamp - margin <= frame_time <= timestamp + margin:
+                            # If multiple instant events active, use most recent
+                            if timestamp > closest_instant_time:
+                                closest_instant_time = timestamp
+                                closest_instant_event = event_name
+
+        if closest_instant_event:
+            return self.step_to_id.get(closest_instant_event, 0)
+
+        # Priority 3: Fallback to most recent event before this frame
         closest_event = None
         closest_time = -float('inf')
 
-        for category_name in events_data.keys():
-            for event_name, timestamps in events_data[category_name].items():
-                if event_name not in instant_events:
-                    for timestamp in timestamps:
-                        if timestamp <= frame_time and timestamp > closest_time:
-                            closest_time = timestamp
-                            closest_event = event_name
+        for category_name, events in events_data.items():
+            for event_name, timestamps in events.items():
+                for timestamp in timestamps:
+                    if timestamp <= frame_time and timestamp > closest_time:
+                        closest_time = timestamp
+                        closest_event = event_name
 
         if closest_event:
             return self.step_to_id.get(closest_event, 0)
@@ -313,15 +505,15 @@ class ORSI2COCO:
         phases_data = data.get("PHASES", {})
 
         # Identify instant events
-        instant_events = self.identify_instant_events(events_data)
+        instant_events, paired_events = self.identify_instant_events(events_data)
 
         # Build COCO structure
         coco_output = {
             "info": {
                 "description": "ORSI Dataset",
-                "url": "https://example.com",
+                "url": "https://www.orsi-online.com/",
                 "version": "1",
-                "year": "2024",
+                "year": "2026",
                 "contributor": "ORSI"
             },
             "phases_categories": self.build_phase_categories(phases_data),
@@ -330,53 +522,83 @@ class ORSI2COCO:
             "annotations": []
         }
 
-        # Determine total duration
+        # Determine total duration from all timestamps
         max_time = 0
+        
+        # Find max time from events
         for category in events_data.values():
             for timestamps in category.values():
                 if timestamps:
                     max_time = max(max_time, max(timestamps))
 
+        # Find max time from phases
         for category in phases_data.values():
             end_times = category.get("END", [])
             if end_times:
                 max_time = max(max_time, max(end_times))
 
-        total_frames = self.seconds_to_frame(max_time)
+        total_frames = self.seconds_to_frame(max_time) + 1
 
-        # Collect all frames that have annotations (either from events or phases)
+        # Collect frames with important annotations (events, phase boundaries)
         frames_with_annotations = set()
 
-        # Add frames from instant events
+        # Add frames around instant events
         for category in events_data.values():
             for event_name, timestamps in category.items():
                 if event_name in instant_events:
+                    margin = self.get_event_margin(event_name)
                     for timestamp in timestamps:
-                        # Add frames during the instant event duration
-                        start_frame = self.seconds_to_frame(timestamp)
-                        end_frame = self.seconds_to_frame(timestamp + self.instant_event_duration)
-                        for f in range(start_frame, end_frame + 1, frame_step):
+                        # Add frames within the event's temporal margin (from RARP specs)
+                        start_frame = max(0, self.seconds_to_frame(timestamp - margin))
+                        end_frame = min(total_frames - 1, 
+                                       self.seconds_to_frame(timestamp + margin))
+                        for f in range(start_frame, end_frame + 1, max(1, frame_step // 2)):
                             frames_with_annotations.add(f)
 
-        # Add frames from non-instant events
+        # Add frames for paired events (ranges)
         for category in events_data.values():
-            for event_name, timestamps in category.items():
-                if event_name not in instant_events:
-                    for timestamp in timestamps:
-                        # Add frames during the instant event duration
-                        start_frame = self.seconds_to_frame(timestamp)
-                        end_frame = self.seconds_to_frame(timestamp + self.instant_event_duration)
-                        for f in range(start_frame, end_frame + 1, frame_step):
+            for start_event, end_event in paired_events:
+                if start_event in category and end_event in category:
+                    start_timestamps = category[start_event]
+                    end_timestamps = category[end_event]
+                    # Pair consecutive timestamps as start-end
+                    sorted_start_ts = sorted(start_timestamps)
+                    sorted_end_ts = sorted(end_timestamps)
+                    for s, e in zip(sorted_start_ts, sorted_end_ts):
+                        start_frame = max(0, self.seconds_to_frame(s))
+                        end_frame = min(total_frames - 1, self.seconds_to_frame(e))
+                        # Add frames at boundaries and some in between
+                        frames_with_annotations.add(start_frame)
+                        frames_with_annotations.add(end_frame)
+                        for f in range(start_frame, end_frame + 1, max(1, frame_step // 2)):
                             frames_with_annotations.add(f)
+                
 
-        # Add frames from phases
+
+            # for event_name, timestamps in category.items():
+            #     if event_name not in instant_events and len(timestamps) >= 2:
+            #         # Pair consecutive timestamps as start-end
+            #         sorted_ts = sorted(timestamps)
+            #         for i in range(0, len(sorted_ts) - 1, 2):
+            #             start_time = sorted_ts[i]
+            #             end_time = sorted_ts[i + 1]
+            #             start_frame = max(0, self.seconds_to_frame(start_time))
+            #             end_frame = min(total_frames - 1, self.seconds_to_frame(end_time))
+            #             # Add frames at boundaries and some in between
+            #             frames_with_annotations.add(start_frame)
+            #             frames_with_annotations.add(end_frame)
+            #             for f in range(start_frame, end_frame + 1, max(1, frame_step // 2)):
+            #                 frames_with_annotations.add(f)
+
+        # Add frames at phase boundaries
         for phase_name, phase_timing in phases_data.items():
             start_times = phase_timing.get("START", [])
             end_times = phase_timing.get("END", [])
-            if start_times and end_times:
-                start_frame = self.seconds_to_frame(start_times[0])
-                end_frame = self.seconds_to_frame(end_times[0])
+            if start_times:
+                start_frame = max(0, self.seconds_to_frame(start_times[0]))
                 frames_with_annotations.add(start_frame)
+            if end_times:
+                end_frame = min(total_frames - 1, self.seconds_to_frame(end_times[0]))
                 frames_with_annotations.add(end_frame)
 
         # Generate frames: combine regular sampling with annotation frames
@@ -386,7 +608,7 @@ class ORSI2COCO:
         for frame_num in range(0, total_frames, frame_step):
             all_frames.add(frame_num)
 
-        # Add all frames with annotations
+        # Add all frames with important annotations
         all_frames.update(frames_with_annotations)
 
         # Sort frames
@@ -394,7 +616,7 @@ class ORSI2COCO:
 
         # Create images and annotations
         for frame_num in sorted_frames:
-            if frame_num < 0 or frame_num > total_frames:
+            if frame_num < 0 or frame_num >= total_frames:
                 continue
 
             image_entry = self.create_image_entry(video_name, frame_num, width, height, frame_root)
@@ -402,7 +624,7 @@ class ORSI2COCO:
 
             # Get phase and step for this frame
             phase_id = self.get_frame_phase(frame_num, phases_data)
-            step_id = self.get_frame_step(frame_num, events_data, instant_events)
+            step_id = self.get_frame_step(frame_num, events_data, instant_events, paired_events)
 
             annotation_entry = self.create_annotation_entry(
                 image_entry["id"],
@@ -421,10 +643,11 @@ class ORSI2COCO:
             json.dump(coco_output, f, indent=4)
 
         print(f"Converted: {json_path}")
-        print(f"  Total frames: {total_frames}")
+        print(f"  Total duration: {max_time:.2f}s ({total_frames} frames)")
         print(f"  Extracted frames: {len(coco_output['images'])}")
-        print(f"  Frames with annotations: {len(frames_with_annotations)}")
-        print(f"  Instant events: {len(instant_events)}")
+        print(f"  Frames with key annotations: {len(frames_with_annotations)}")
+        print(f"  Instant events identified: {len(instant_events)}")
+        print(f"  Paired events identified: {len([e for e in events_data.values()])}")
         print(f"  Phases: {len(coco_output['phases_categories'])}")
         print(f"  Steps: {len(coco_output['steps_categories'])}")
         print(f"  Output: {output_json_path}")
@@ -538,27 +761,56 @@ class ORSI2COCO:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Convert ORSI dataset to COCO format")
+    parser = argparse.ArgumentParser(description="Convert ORSI dataset to COCO format with optional frame extraction")
     parser.add_argument("--input", type=str, help="Input JSON file or directory with JSON files")
     parser.add_argument("--output", type=str, help="Output JSON file or directory")
     parser.add_argument("--fps", type=int, default=25, help="Video FPS (default: 25)")
     parser.add_argument("--frame-step", type=int, default=46, help="Extract every N frames (default: 46)")
     parser.add_argument("--width", type=int, default=1280, help="Video width (default: 1280)")
     parser.add_argument("--height", type=int, default=800, help="Video height (default: 800)")
-    parser.add_argument("--instant-duration", type=float, default=3.0, help="Duration for instant events in seconds (default: 3.0)")
     parser.add_argument("--csv", action="store_true", help="Generate CSV files")
     parser.add_argument("--csv-output", type=str, help="Path for combined CSV file (default: output_dir/train.csv)")
-    parser.add_argument("--frame-root", type=str, help="Root directory for frames to read actual image dimensions")
+    parser.add_argument("--frame-root", type=str, help="Root directory for existing frames (reads dimensions)")
+    parser.add_argument("--extract-frames", action="store_true", help="Extract frames from videos using ffmpeg")
+    parser.add_argument("--video-root", type=str, help="Root directory containing MP4 videos (for --extract-frames)")
+    parser.add_argument("--frames-output", type=str, help="Directory for saved frames (default: frame-root or current/frames)")
     parser.add_argument("--batch", action="store_true", help="Process all RARP*.json files in input directory")
 
     args = parser.parse_args()
+    
+    # Validate arguments
+    if args.extract_frames and not args.video_root:
+        print("❌ Error: --extract-frames requires --video-root")
+        exit(1)
 
-    converter = ORSI2COCO(fps=args.fps, instant_event_duration=args.instant_duration)
+    converter = ORSI2COCO(fps=args.fps)
 
     if args.batch:
         if not args.input or not args.output:
             print("--batch mode requires both --input and --output directories")
             exit(1)
+        
+        # Extract frames if requested
+        frames_root = args.frames_output or args.frame_root
+        if args.extract_frames:
+            frames_root = args.frames_output or os.path.join(args.output, "frames")
+            print(f"\n🎬 Frame Extraction Mode:")
+            print(f"   Video root: {args.video_root}")
+            print(f"   Frames output: {frames_root}")
+            
+            # Find all annotation files
+            annotation_files = sorted(Path(args.input).glob("RARP*.json"))
+            for json_file in annotation_files:
+                video_name = json_file.stem
+                video_path = os.path.join(args.video_root, f"{video_name}.mp4")
+                print(f"\n📄 {video_name}:")
+                try:
+                    converter.extract_frames_from_video(video_path, frames_root, video_name)
+                except Exception as e:
+                    print(f"   ⚠️  Skipping frame extraction: {e}")
+        
+        # Convert annotations
+        print(f"\n📊 Converting annotations to COCO format...")
         converter.convert_batch(
             args.input,
             args.output,
@@ -567,12 +819,28 @@ if __name__ == "__main__":
             args.height,
             generate_csv=args.csv,
             csv_output_path=args.csv_output,
-            frame_root=args.frame_root
+            frame_root=frames_root
         )
     else:
         if not args.input or not args.output:
             print("--input and --output are required")
             exit(1)
+        
+        # Extract frames if requested
+        frame_root = args.frame_root
+        if args.extract_frames:
+            frame_root = args.frames_output or os.path.join(os.path.dirname(args.output), "frames")
+            video_name = Path(args.input).stem
+            video_path = os.path.join(args.video_root, f"{video_name}.mp4")
+            
+            print(f"🎬 Extracting frames...")
+            try:
+                converter.extract_frames_from_video(video_path, frame_root, video_name)
+            except Exception as e:
+                print(f"⚠️  Frame extraction warning: {e}")
+                print(f"   Continuing with annotation conversion...")
+        
+        print(f"\n📊 Converting annotation to COCO format...")
         coco_data, sorted_frames = converter.convert_annotation(
             args.input,
             Path(args.input).stem,
@@ -580,7 +848,7 @@ if __name__ == "__main__":
             args.frame_step,
             args.width,
             args.height,
-            args.frame_root
+            frame_root
         )
 
         # Generate CSV if requested

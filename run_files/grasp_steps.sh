@@ -29,7 +29,7 @@ export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/region_pr
 
 mkdir -p $OUTPUT_DIR
 
-echo -B tools/run_net.py \
+python -B tools/run_net.py \
 --cfg $CONFIG_PATH \
 NUM_GPUS 1 \
 TRAIN.CHECKPOINT_FILE_PATH $CHECKPOINT \

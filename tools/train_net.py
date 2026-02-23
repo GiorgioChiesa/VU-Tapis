@@ -8,6 +8,7 @@ from pathlib import Path
 
 # Add parent directory to path so tapis can be imported
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.joinpath('detectron2')))
 
 import random
 import numpy as np
@@ -40,6 +41,10 @@ wanbrun = None
 def wandgb_log(stats):
     global wanbrun
     if wanbrun is not None:
+        if "phases_map" not in stats:
+            stats = {f'{stats["mode"]}_{k}': v for k, v in stats.items()}
+            wanbrun.log(stats)
+            return
         if stats["mode"].lower() in ['test', 'val']:
             cur_epoch = int(stats["cur_epoch"])
             stats ={f'{stats["mode"]}_{k}': v for k, v in stats["phases_map"].items()}

@@ -199,7 +199,6 @@ class StepVisualizer:
             annot=True,
             fmt=".3f",
             linewidth=.5,
-            min=0,
         )
 
         ax.set_title('Step × Video Occurrence Matrix', fontsize=self.title_size)
@@ -349,14 +348,14 @@ class StepVisualizer:
         sns.heatmap(
             pivot_df,
             cmap='viridis',
-            cbar_kws={'label': '% Count'},
+            cbar_kws={'label': 'Count'},
             ax=ax,
             annot=True,
             fmt=".3f",
             linewidth=.5,
         )
 
-        ax.set_title('Step-Phase Correlation Matrix', fontsize=self.title_size)
+        ax.set_title('Step-Phase Correlation Matrix (min-max scaling)', fontsize=self.title_size)
         ax.set_xlabel('Phase', fontsize=self.label_size)
         ax.set_ylabel('Step', fontsize=self.label_size)
 
@@ -374,8 +373,8 @@ class StepVisualizer:
 
         # Build pivot table
         pivot_df = temporal_progression_df.pivot_table(
-            index='from_step_name',
-            columns='to_step_name',
+            index='to_step_name',
+            columns='from_step_name',
             values='count',
             fill_value=0,
         )
@@ -387,16 +386,16 @@ class StepVisualizer:
         sns.heatmap(
             pivot_df,
             cmap='viridis',
-            cbar_kws={'label': '% Count'},
+            cbar_kws={'label': 'Count'},
             ax=ax,
             annot=True,
             fmt=".2f",
             linewidth=.5,
         )
 
-        ax.set_title('Step-Step Correlation Matrix', fontsize=self.title_size)
-        ax.set_xlabel('To Step', fontsize=self.label_size)
-        ax.set_ylabel('From Step', fontsize=self.label_size)
+        ax.set_title('Step-Step Correlation Matrix (min-max scaling)', fontsize=self.title_size)
+        ax.set_xlabel('From Step', fontsize=self.label_size)
+        ax.set_ylabel('To Step', fontsize=self.label_size)
 
         fig.tight_layout()
         self._save_figure(fig, '08-1_step_step_correlation_heatmap')

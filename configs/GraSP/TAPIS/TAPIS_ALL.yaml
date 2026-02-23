@@ -1,14 +1,14 @@
 TRAIN:
   ENABLE: True
   DATASET: grasp
-  BATCH_SIZE: 24
+  BATCH_SIZE: 8
   EVAL_PERIOD: 1
   CHECKPOINT_PERIOD: 1
   AUTO_RESUME: True
 TEST:
   ENABLE: True
   DATASET: grasp
-  BATCH_SIZE: 24
+  BATCH_SIZE: 16
 DATA:
   NUM_FRAMES: 16
   SAMPLING_RATE: 1
@@ -65,17 +65,17 @@ AUG:
   RE_SPLIT: False
 SOLVER:
   BASE_LR_SCALE_NUM_SHARDS: True
-  BASE_LR: 0.0125
+  BASE_LR: 0.00125
   CLIP_GRAD_L2NORM: 1.0
   LR_POLICY: cosine
   COSINE_AFTER_WARMUP: True
-  COSINE_END_LR: 1e-3
+  COSINE_END_LR: 1e-4
   MAX_EPOCH: 50
   WARMUP_EPOCHS: 5.0
   MOMENTUM: 0.9
   WEIGHT_DECAY: 1e-4
   ZERO_WD_1D_PARAM: True
-  WARMUP_START_LR:  0.00125
+  WARMUP_START_LR:  0.000125
   OPTIMIZING_METHOD: adam
 MODEL:
   ARCH: mvit
@@ -87,13 +87,14 @@ MODEL:
   DECODER_NUM_HEADS: 8
   DECODER_NUM_LAYERS: 1
   PRECISION: 32
+
 TASKS:
-  TASKS:  ["actions","instruments"]
-  NUM_CLASSES: [14,7]
-  LOSS_FUNC: ["bce","cross_entropy"]
-  HEAD_ACT:  ["sigmoid","softmax"]
-  LOSS_WEIGHTS:  [1.0,0.1]
-  METRICS: ["mAP@0.5IoU_box","mAP@0.5IoU_segm"]
+  TASKS:  ["actions","instruments","phases","steps"]
+  NUM_CLASSES: [14,7,11,21]
+  LOSS_FUNC: ["bce","cross_entropy","cross_entropy","cross_entropy"]
+  HEAD_ACT:  ["sigmoid","softmax","softmax","softmax"]
+  LOSS_WEIGHTS:  [1.0,0.5,1.0,1.0]
+  METRICS: ["mAP@0.5IoU_box","mAP@0.5IoU_segm","mAP","mAP"]
 DATA_LOADER:
   NUM_WORKERS: 5
   PIN_MEMORY: True

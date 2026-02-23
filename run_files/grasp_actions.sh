@@ -1,7 +1,10 @@
+sh install.sh
+export $(grep -v '^#' .secret/.export_vars.txt | xargs)
+
 # Experiment setup
 TRAIN_FOLD="train" # or fold1, fold2
 TEST_FOLD="test" # or fold1, fold2
-EXP_PREFIX="Prova" # costumize
+EXP_PREFIX="Action_tapis" # costumize
 TASK="ACTIONS"
 ARCH="TAPIS"
 
@@ -15,7 +18,7 @@ OUTPUT_DIR="/scratch/Video_Understanding/GraSP/TAPIS/outputs/"$DATASET"/"$TASK"/
 FRAME_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frames"
 FRAME_LIST="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frame_lists"
 ANNOT_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations"
-COCO_ANN_PATH="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations/grasp_long-term_"$TEST_FOLD".json"
+COCO_ANN_PATH="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations/grasp_short-term_"$TEST_FOLD".json"
 FF_TRAIN="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/features/"$TRAIN_FOLD"_train_region_features.pth" 
 FF_TEST="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/features/"$TEST_FOLD"_val_region_features.pth"
 CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_models/"$TRAIN_FOLD"/"$TASK".pyth"
@@ -42,6 +45,8 @@ TRAIN.CHECKPOINT_FILE_PATH $CHECKPOINT \
 TRAIN.CHECKPOINT_EPOCH_RESET True \
 TEST.ENABLE True \
 TRAIN.ENABLE True \
+WANDB_ENABLE True \
+NAME $EXPERIMENT_NAME \
 ENDOVIS_DATASET.FRAME_DIR $FRAME_DIR \
 ENDOVIS_DATASET.FRAME_LIST_DIR $FRAME_LIST \
 ENDOVIS_DATASET.TRAIN_LISTS $TRAIN_FOLD".csv" \

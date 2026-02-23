@@ -346,7 +346,7 @@ class TransformerRoIHead(nn.Module):
         # Use additional linear layers before temporal pooling
         self.use_prev = cfg.MODEL.TIME_MLP and cfg.MODEL.PREV_MLP
         
-        if self.use_video:
+commit -         if self.use_video:
         
             if cfg.MODEL.DECODER:
                 # Transform features to the same dimensions as MViT's output

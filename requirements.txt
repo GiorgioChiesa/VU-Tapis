@@ -13,3 +13,6 @@ iopath
 opencv-python
 pycocotools
 wandb
+matplotlib
+seaborn
+openpyxl

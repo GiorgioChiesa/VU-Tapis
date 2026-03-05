@@ -57,7 +57,7 @@ class StepVisualizer:
     # PLOT 1: STEP DISTRIBUTION HISTOGRAM
     # ========================================================================
 
-    def plot_step_distribution_histogram(self, step_dist_df: pd.DataFrame):
+    def plot_step_distribution_histogram(self, step_dist_df: pd.DataFrame, prefix: Optional[str] = ''):
         """
         Generate histogram of step distribution (train vs test).
 
@@ -71,39 +71,43 @@ class StepVisualizer:
         x = np.arange(len(step_dist_df))
         width = 0.35
 
-        bars1 = ax.bar(
-            x - width / 2,
-            step_dist_df['train_count'],
-            width,
-            label='Train',
-            alpha=0.8,
-            color='steelblue',
-        )
-        bars2 = ax.bar(
-            x + width / 2,
-            step_dist_df['test_count'],
-            width,
-            label='Test',
-            alpha=0.8,
-            color='coral',
-        )
+        bars = [
+                ax.bar(
+                x - width / len(VISUALIZATION_CONFIG['datasets']),
+                step_dist_df[f'{dataset}_count'],
+                width,
+                label=dataset.capitalize(),
+                alpha=0.8,
+                color='steelblue',
+            )
+            for dataset in VISUALIZATION_CONFIG['datasets']
+        ]
+
+        # bars2 = ax.bar(
+        #     x + width / 2,
+        #     step_dist_df['test_count'],
+        #     width,
+        #     label='Test',
+        #     alpha=0.8,
+        #     color='coral',
+        # )
 
         ax.set_xlabel('Step ID', fontsize=self.label_size)
         ax.set_ylabel('Count', fontsize=self.label_size)
-        ax.set_title('Step Distribution: Train vs Test', fontsize=self.title_size)
+        ax.set_title('Step Distribution:', fontsize=self.title_size)
         ax.set_xticks(x)
         ax.set_xticklabels(step_dist_df['step_name'], rotation=45, ha='right')
         ax.legend(fontsize=self.font_size)
         ax.grid(axis='y', alpha=0.3)
 
         fig.tight_layout()
-        self._save_figure(fig, '01_step_distribution_histogram')
+        self._save_figure(fig, f'01_{prefix}step_distribution_histogram')
 
     # ========================================================================
     # PLOT 2: STEP DISTRIBUTION BARPLOT
     # ========================================================================
 
-    def plot_step_distribution_barplot(self, step_dist_df: pd.DataFrame):
+    def plot_step_distribution_barplot(self, step_dist_df: pd.DataFrame, prefix: Optional[str] = ''):
         """
         Generate barplot of step counts ordered by frequency.
 
@@ -131,13 +135,13 @@ class StepVisualizer:
                    ha='left', va='center', fontsize=self.font_size - 2)
 
         fig.tight_layout()
-        self._save_figure(fig, '02_step_distribution_barplot')
+        self._save_figure(fig, f'02_{prefix}step_distribution_barplot')
 
     # ========================================================================
     # PLOT 3: STEP DISTRIBUTION PIE CHART
     # ========================================================================
 
-    def plot_step_distribution_pie(self, step_dist_df: pd.DataFrame):
+    def plot_step_distribution_pie(self, step_dist_df: pd.DataFrame, prefix: Optional[str] = ''):
         """
         Generate pie chart of step distribution.
 
@@ -165,13 +169,13 @@ class StepVisualizer:
         ax.set_title('Step Distribution (Pie Chart)', fontsize=self.title_size)
 
         fig.tight_layout()
-        self._save_figure(fig, '03_step_distribution_pie')
+        self._save_figure(fig, f'03_{prefix}step_distribution_pie')
 
     # ========================================================================
     # PLOT 4: STEP × VIDEO HEATMAP
     # ========================================================================
 
-    def plot_step_video_heatmap(self, step_video_df: pd.DataFrame):
+    def plot_step_video_heatmap(self, step_video_df: pd.DataFrame, prefix: Optional[str] = ''):
         """
         Generate heatmap of step × video occurrence matrix.
 
@@ -196,7 +200,7 @@ class StepVisualizer:
             cmap='YlOrRd',
             cbar_kws={'label': '% Count'},
             ax=ax,
-            annot=True,
+            annot=False,
             fmt=".3f",
             linewidth=.5,
         )
@@ -206,7 +210,7 @@ class StepVisualizer:
         ax.set_ylabel('Step', fontsize=self.label_size)
 
         fig.tight_layout()
-        self._save_figure(fig, '04_step_video_heatmap')
+        self._save_figure(fig, f'04_{prefix}step_video_heatmap')
 
 
 
@@ -214,7 +218,7 @@ class StepVisualizer:
     # PLOT 5: STEP TEMPORAL SEQUENCES
     # ========================================================================
 
-    def plot_step_temporal_sequences(self, temporal_df: pd.DataFrame, sample_videos: int = 3):
+    def plot_step_temporal_sequences(self, temporal_df: pd.DataFrame, sample_videos: int = 3, prefix: Optional[str] = ''):
         """
         Generate temporal sequence plot for sample videos.
 
@@ -260,13 +264,61 @@ class StepVisualizer:
               ncol=min(4, len(STEP_CATEGORIES)), fontsize=self.font_size - 2)
 
         fig.tight_layout()
-        self._save_figure(fig, '05_step_temporal_sequences')
+        self._save_figure(fig, f'05_{prefix}step_temporal_sequences')
 
+    def plot_phase_temporal_sequences(self, temporal_df: pd.DataFrame, sample_videos: int = 3, prefix: Optional[str] = ''):
+        """
+        Generate temporal sequence plot for sample videos.
+
+        Args:
+            temporal_df: DataFrame with temporal progression
+            sample_videos: Number of videos to plot
+        """
+        self.logger.info("Generating step temporal sequences...")
+
+        videos = temporal_df['video_name'].unique()[:sample_videos]
+
+        num_videos = len(videos)
+        fig, axes = plt.subplots(num_videos, 1, figsize=(16, 3 * num_videos))
+        if num_videos == 1:
+            axes = [axes]
+
+        for idx, (ax, video) in enumerate(zip(axes, videos)):
+            video_data = temporal_df[temporal_df['video_name'] == video]
+
+            # Create timeline with colors for each step
+            colors_map = sns.color_palette(VISUALIZATION_CONFIG['color_palette'], len(PHASE_CATEGORIES))
+            step_colors = [colors_map[int(row['phase_id'])] for _, row in video_data.iterrows()]
+
+            bars = ax.barh(
+            [0] * len(video_data),
+            video_data['duration_frames'],
+            left=video_data['start_frame'],
+            color=step_colors,
+            edgecolor='black',
+            linewidth=0.5,
+            )
+
+            ax.set_xlim(0, video_data['end_frame'].max() + 10)
+            ax.set_xlabel('Frame', fontsize=self.label_size)
+            ax.set_title(f'Step Sequence: {video}', fontsize=self.title_size)
+            ax.set_yticks([])
+            ax.grid(axis='x', alpha=0.3)
+
+        # Add color legend for steps
+        legend_patches = [mpatches.Patch(color=colors_map[i], label=PHASE_CATEGORIES[i])
+                 for i in range(len(PHASE_CATEGORIES))]
+        fig.legend(handles=legend_patches, loc='upper center', bbox_to_anchor=(0.5, -0.02),
+              ncol=min(4, len(PHASE_CATEGORIES)), fontsize=self.font_size - 2)
+
+        fig.tight_layout()
+        self._save_figure(fig, f'05_{prefix}phase_temporal_sequences')
+        
     # ========================================================================
     # PLOT 6: PHASE DISTRIBUTION BARPLOT
     # ========================================================================
 
-    def plot_phase_distribution_barplot(self, phase_dist_df: pd.DataFrame):
+    def plot_phase_distribution_barplot(self, phase_dist_df: pd.DataFrame, prefix: Optional[str] = ''):
         """Generate barplot of phase distribution."""
         self.logger.info("Generating phase distribution barplot...")
 
@@ -289,13 +341,13 @@ class StepVisualizer:
                    ha='left', va='center', fontsize=self.font_size - 2)
 
         fig.tight_layout()
-        self._save_figure(fig, '06_phase_distribution_barplot')
+        self._save_figure(fig, f'06_{prefix}phase_distribution_barplot')
 
     # ========================================================================
     # PLOT 7: PHASE × VIDEO HEATMAP
     # ========================================================================
 
-    def plot_phase_video_heatmap(self, phase_video_df: pd.DataFrame):
+    def plot_phase_video_heatmap(self, phase_video_df: pd.DataFrame, prefix: Optional[str] = ''):
         """Generate heatmap of phase × video occurrence matrix."""
         self.logger.info("Generating phase × video heatmap...")
 
@@ -323,13 +375,13 @@ class StepVisualizer:
         ax.set_ylabel('Phase', fontsize=self.label_size)
 
         fig.tight_layout()
-        self._save_figure(fig, '07_phase_video_heatmap')
+        self._save_figure(fig, f'07_{prefix}phase_video_heatmap')
 
     # ========================================================================
     # PLOT 8: STEP-PHASE CORRELATION HEATMAP
     # ========================================================================
 
-    def plot_step_phase_correlation(self, step_phase_df: pd.DataFrame):
+    def plot_step_phase_correlation(self, step_phase_df: pd.DataFrame, prefix: Optional[str] = ''):
         """Generate heatmap of step-phase correlation."""
         self.logger.info("Generating step-phase correlation heatmap...")
 
@@ -360,14 +412,14 @@ class StepVisualizer:
         ax.set_ylabel('Step', fontsize=self.label_size)
 
         fig.tight_layout()
-        self._save_figure(fig, '08_step_phase_correlation_heatmap')
+        self._save_figure(fig, f'08_{prefix}step_phase_correlation_heatmap')
 
 
     # ========================================================================
     # PLOT 8-1: STEP-STEP CORRELATION HEATMAP
     # ========================================================================
 
-    def plot_temporal_progression(self, temporal_progression_df: pd.DataFrame):
+    def plot_temporal_progression(self, temporal_progression_df: pd.DataFrame, prefix: Optional[str] = ''):
         """Generate heatmap of step-step correlation."""
         self.logger.info("Generating temporal progression heatmap...")
 
@@ -398,14 +450,14 @@ class StepVisualizer:
         ax.set_ylabel('To Step', fontsize=self.label_size)
 
         fig.tight_layout()
-        self._save_figure(fig, '08-1_step_step_correlation_heatmap')
+        self._save_figure(fig, f'08-1_{prefix}step_step_correlation_heatmap')
 
 
     # ========================================================================
     # PLOT 9: TRAIN VS TEST COMPARISON BOXPLOT
     # ========================================================================
 
-    def plot_train_test_comparison(self, step_dist_df: pd.DataFrame):
+    def plot_train_test_comparison(self, step_dist_df: pd.DataFrame, prefix: Optional[str] = ''):
         """Generate boxplot comparing train and test distributions."""
         self.logger.info("Generating train vs test comparison boxplot...")
 
@@ -432,13 +484,13 @@ class StepVisualizer:
         ax.grid(axis='y', alpha=0.3)
 
         fig.tight_layout()
-        self._save_figure(fig, '09_train_test_step_comparison_boxplot')
+        self._save_figure(fig, f'09_{prefix}train_test_step_comparison_boxplot')
 
     # ========================================================================
     # PLOT 10: STEP IMBALANCE ANALYSIS
     # ========================================================================
 
-    def plot_step_imbalance_analysis(self, step_dist_df: pd.DataFrame):
+    def plot_step_imbalance_analysis(self, step_dist_df: pd.DataFrame, prefix: Optional[str] = ''):
         """Generate visualization of step imbalance."""
         self.logger.info("Generating step imbalance analysis...")
 
@@ -479,13 +531,13 @@ class StepVisualizer:
         ax.axis('off')
 
         fig.tight_layout()
-        self._save_figure(fig, '10_step_imbalance_analysis')
+        self._save_figure(fig, f'10_{prefix}step_imbalance_analysis')
 
     # ========================================================================
     # PLOT 11: MISSING STEPS HEATMAP
     # ========================================================================
 
-    def plot_missing_steps_heatmap(self, step_video_df: pd.DataFrame):
+    def plot_missing_steps_heatmap(self, step_video_df: pd.DataFrame, prefix: Optional[str] = ''):
         """Generate heatmap showing which steps are missing in which videos."""
         self.logger.info("Generating missing steps heatmap...")
 
@@ -514,13 +566,13 @@ class StepVisualizer:
         ax.set_ylabel('Step', fontsize=self.label_size)
 
         fig.tight_layout()
-        self._save_figure(fig, '11_missing_steps_heatmap')
+        self._save_figure(fig, f'11_{prefix}missing_steps_heatmap')
 
     # ========================================================================
     # PLOT 12: PHASE COMPOSITION STACKED BARS
     # ========================================================================
 
-    def plot_phase_composition_stacked(self, phase_composition_df: pd.DataFrame):
+    def plot_phase_composition_stacked(self, phase_composition_df: pd.DataFrame, prefix: Optional[str] = ''):
         """Generate stacked barplot showing step composition per phase."""
         self.logger.info("Generating phase composition stacked bars...")
 
@@ -556,7 +608,7 @@ class StepVisualizer:
         ax.grid(axis='x', alpha=0.3)
 
         fig.tight_layout()
-        self._save_figure(fig, '12_phase_composition_stacked_bars')
+        self._save_figure(fig, f'12_{prefix}phase_composition_stacked_bars')
 
     # ========================================================================
     # MASTER GENERATION METHOD
@@ -579,13 +631,21 @@ class StepVisualizer:
                 step_dist = analysis_results['step_distribution']
                 self.plot_step_distribution_histogram(step_dist)
                 self.plot_step_distribution_barplot(step_dist)
-                self.plot_step_distribution_pie(step_dist)
+                step_dist_no_Idle = step_dist[step_dist['step_name'] != 'Idle']  # Exclude Idle for pie chart
+                self.plot_step_distribution_histogram(step_dist_no_Idle, prefix='no_idle_')
+                self.plot_step_distribution_barplot(step_dist_no_Idle, prefix='no_idle_')
+                # self.plot_step_distribution_pie(step_dist)
 
             # Plot 4-5: Step spatial and temporal
             if 'step_video_matrix' in analysis_results:
                 self.plot_step_video_heatmap(analysis_results['step_video_matrix'])
-            if 'temporal_progression' in analysis_results:
-                self.plot_step_temporal_sequences(analysis_results['temporal_progression'])
+                self.plot_step_video_heatmap(analysis_results['step_video_matrix'][analysis_results['step_video_matrix']['step_name'] != 'Idle'], prefix='no_idle_')
+            if 'temporal_steps_progression' in analysis_results:
+                self.plot_step_temporal_sequences(analysis_results['temporal_steps_progression'])
+                self.plot_step_temporal_sequences(analysis_results['temporal_steps_progression'][analysis_results['temporal_steps_progression']['step_name'] != 'Idle'], prefix='no_idle_')
+            if 'temporal_phases_progression' in analysis_results:
+                self.plot_phase_temporal_sequences(analysis_results['temporal_phases_progression'])
+            
 
             # Plot 6-7: Phase distributions
             if 'phase_distribution' in analysis_results:

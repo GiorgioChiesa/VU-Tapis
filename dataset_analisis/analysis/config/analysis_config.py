@@ -11,10 +11,10 @@ from pathlib import Path
 # ============================================================================
 
 # Root data directory
-DATA_ROOT = '/scratch/Video_Understanding/GraSP/TAPIS/data/GraSP'
+DATA_ROOT = '/home/gchie/workspace/nas_private/data'
 
 # Output directory (analysis results)
-ANALYSIS_ROOT = os.path.join("/scratch/Video_Understanding/GraSP/TAPIS", 'dataset_analisis')
+ANALYSIS_ROOT = os.path.join("/home/gchie/workspace/VU-Tapis", 'dataset_analisis')
 
 # ============================================================================
 # INPUT DATA CONFIGURATION
@@ -22,14 +22,14 @@ ANALYSIS_ROOT = os.path.join("/scratch/Video_Understanding/GraSP/TAPIS", 'datase
 
 INPUT_CONFIG = {
     'annotations': {
-        'train': os.path.join(DATA_ROOT, 'annotations/grasp_long-term_train.json'),
-        'test': os.path.join(DATA_ROOT, 'annotations/grasp_long-term_test.json'),
+        'orsi': os.path.join(DATA_ROOT, 'coco/all_merged.json'),
+        # 'test': os.path.join(DATA_ROOT, 'annotations/grasp_long-term_test.json'),
     },
     'frame_lists': {
-        'train': os.path.join(DATA_ROOT, 'frame_lists/train.csv'),
-        'test': os.path.join(DATA_ROOT, 'frame_lists/test.csv'),
+        'orsi': os.path.join(DATA_ROOT, 'coco/all_merged.csv'),
+        # 'test': os.path.join(DATA_ROOT, 'frame_lists/test.csv'),
     },
-    'frames_dir': os.path.join(DATA_ROOT, 'frames'),
+    'frames_dir': os.path.join(DATA_ROOT, 'coco/frames'),
 }
 
 # ============================================================================
@@ -58,6 +58,8 @@ VISUALIZATION_CONFIG = {
     'label_size': 11,
     'color_palette': 'tab20',  # Changed from 'husl' (deprecated in newer matplotlib)
     'save_formats': ['png'],  # Could add 'pdf' here
+    'datasets': list(INPUT_CONFIG['annotations'].keys()),  # List of dataset keys to analyze
+
 }
 
 # ============================================================================
@@ -65,27 +67,27 @@ VISUALIZATION_CONFIG = {
 # ============================================================================
 
 STEP_CATEGORIES = {
-    0: 'Idle',
-    1: 'Id_Illiac_Vein_Artery',
-    2: 'Dissection_Illiac_Lymph_Nodes',
-    3: 'Dissection_Obturator_Lymph_Nodes',
-    4: 'Pack_Lymph_Nodes',
-    5: 'Prevessical_Dissection',
-    6: 'Ligation_Dorsal_Venous_Complex',
-    7: 'Prostate_Dissection',
-    8: 'Seminal_Vessicle_Dissection',
-    9: 'Denon_Dissection',
-    10: 'Cut_Prostate',
-    11: 'Hold_Prostate',
-    12: 'Pack_Prostate',
-    13: 'Pass_Suture_Urethra',
-    14: 'Pass_Suture_Neck',
-    15: 'Pull_Suture',
-    16: 'Tie_Suture',
-    17: 'Suction',
-    18: 'Cut',
-    19: 'Cut_Bladder',
-    20: 'Clip_Pedicles',
+    # 0: 'Idle',
+    # 1: 'Id_Illiac_Vein_Artery',
+    # 2: 'Dissection_Illiac_Lymph_Nodes',
+    # 3: 'Dissection_Obturator_Lymph_Nodes',
+    # 4: 'Pack_Lymph_Nodes',
+    # 5: 'Prevessical_Dissection',
+    # 6: 'Ligation_Dorsal_Venous_Complex',
+    # 7: 'Prostate_Dissection',
+    # 8: 'Seminal_Vessicle_Dissection',
+    # 9: 'Denon_Dissection',
+    # 10: 'Cut_Prostate',
+    # 11: 'Hold_Prostate',
+    # 12: 'Pack_Prostate',
+    # 13: 'Pass_Suture_Urethra',
+    # 14: 'Pass_Suture_Neck',
+    # 15: 'Pull_Suture',
+    # 16: 'Tie_Suture',
+    # 17: 'Suction',
+    # 18: 'Cut',
+    # 19: 'Cut_Bladder',
+    # 20: 'Clip_Pedicles',
 }
 
 # ============================================================================
@@ -93,17 +95,17 @@ STEP_CATEGORIES = {
 # ============================================================================
 
 PHASE_CATEGORIES = {
-    0: 'Idle',
-    1: 'LPIL',  # Left pelvic isolated lymphadenectomy
-    2: 'RPIL',  # Right pelvic isolated lymphadenectomy
-    3: 'Retzius_Space',
-    4: 'Dorsal_Venous_Complex',
-    5: 'Id_Bladder_Neck',
-    6: 'Seminal_Vesicles',
-    7: 'Denonvilliers_Fascia',
-    8: 'Pedicle_Control',
-    9: 'Severing_Prostate_Urethra',
-    10: 'Bladder_Neck_Rec',
+    # 0: 'Idle',
+    # 1: 'LPIL',  # Left pelvic isolated lymphadenectomy
+    # 2: 'RPIL',  # Right pelvic isolated lymphadenectomy
+    # 3: 'Retzius_Space',
+    # 4: 'Dorsal_Venous_Complex',
+    # 5: 'Id_Bladder_Neck',
+    # 6: 'Seminal_Vesicles',
+    # 7: 'Denonvilliers_Fascia',
+    # 8: 'Pedicle_Control',
+    # 9: 'Severing_Prostate_Urethra',
+    # 10: 'Bladder_Neck_Rec',
 }
 
 # ============================================================================
@@ -165,6 +167,7 @@ VALIDATION_CONFIG = {
     'validate_json_structure': True,
     'validate_data_integrity': True,
     'skip_missing_frames': True,
+    'update_step_phase_categories': True,
 }
 
 # ============================================================================
@@ -189,6 +192,26 @@ def get_step_class(step_id: int) -> str:
             return category
     return 'unknown'
 
+def get_phase_class(phase_id: int) -> str:
+    """Get phase classification (could be extended if we define phase taxonomy)."""
+    # For now, we don't have a defined phase taxonomy, so we'll return 'unknown'
+    return 'unknown'
+
+def update_phase_categories_from_data(phases: dict):
+    """Update phase categories based on data."""
+    for phase_id, phase_name in phases.items():
+        if phase_id not in PHASE_CATEGORIES:
+            PHASE_CATEGORIES[phase_id] = phase_name
+        assert phase_name == PHASE_CATEGORIES.get(phase_id), f"Phase ID {phase_id} has name '{phase_name}' which differs from existing name '{PHASE_CATEGORIES.get(phase_id)}'. Updating category."
+
+            
+            
+def update_step_categories_from_data(steps: dict):
+    """Update step categories based on data."""
+    for step_id, step_name in steps.items():
+        if step_id not in STEP_CATEGORIES:
+            STEP_CATEGORIES[step_id] = step_name
+        assert step_name == STEP_CATEGORIES.get(step_id), f"Step ID {step_id} has name '{step_name}' which differs from existing name '{STEP_CATEGORIES.get(step_id)}'. Updating category."
 
 def ensure_output_dirs():
     """Create all output directories if they don't exist."""

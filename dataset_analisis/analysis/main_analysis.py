@@ -22,6 +22,7 @@ from core.data_loader import DataLoader, DataLoaderException
 from core.step_analyzer import StepAnalyzer
 from visualization.plots import StepVisualizer
 from visualization.tables import TableExporter
+import pickle
 
 
 def setup_logging():
@@ -66,7 +67,7 @@ def main(args=None):
     # Setup logging
     logger = setup_logging()
     logger.info("=" * 40)
-    logger.info("GRASP DATASET ANALYSIS - MAIN EXECUTION")
+    logger.info("ORSI DATASET ANALYSIS - MAIN EXECUTION")
     logger.info("=" * 40)
 
     try:
@@ -78,11 +79,13 @@ def main(args=None):
         logger.info("=" * 40)
 
         data_loader = DataLoader(logger)
-        train_df, test_df = data_loader.load_and_prepare()
+        dfs = data_loader.load_and_prepare()
         data_loader.save_dataframes()
         
-        logger.info(f"\nTrain DataFrame shape: {train_df.shape}")
-        logger.info(f"Test DataFrame shape: {test_df.shape}")
+        for dataset, df in dfs.items():
+            logger.info(f"\n{dataset} DataFrame shape: {dfs[dataset].shape}")
+            # logger.info(f"Test DataFrame shape: {dfs['test'].shape}")
+        # logger.info(f"Test DataFrame shape: {dfs['test'].shape}")
 
         # ====================================================================
         # PHASE 2: COMPREHENSIVE ANALYSIS
@@ -91,9 +94,20 @@ def main(args=None):
         logger.info("PHASE 2: COMPREHENSIVE ANALYSIS")
         logger.info("=" * 40)
 
-        analyzer = StepAnalyzer(train_df, test_df, logger)
-        analysis_results = analyzer.execute_all_analysis()
+        analyzer = StepAnalyzer(dfs, logger)
+        # Save analysis results to pickle file
+        results_pickle = Path(OUTPUT_CONFIG['base_dir']) / 'analysis_results.pkl'
+        if results_pickle.exists():
+            logger.warning(f"Using saved analysis results at: {results_pickle}")
+            with open(results_pickle, 'rb') as f:
+                analysis_results = pickle.load(f)
+        else:
+            analysis_results = analyzer.execute_all_analysis()
+            with open(results_pickle, 'wb') as f:
+                pickle.dump(analysis_results, f)
+            logger.info(f"Analysis results saved to: {results_pickle}")
 
+        
         logger.info(f"\nCompleted analysis with {len(analysis_results)} result types")
 
         # ====================================================================

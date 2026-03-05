@@ -8,10 +8,11 @@ from typing import Dict, List, Tuple, Set, Optional
 from collections import defaultdict
 import argparse
 import cv2
+from glob import glob
 from tqdm import tqdm
 
 # FPS configuration - adjust based on your video fps
-FPS = 60  # Change this to match your video frame rate
+FPS = 59  # Change this to match your video frame rate
 
 # Try to import PIL for reading image dimensions
 try:
@@ -20,18 +21,22 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
+
 # ===== RARP Event Timing Specifications from "Phases of Robot-Assisted Radical Prostatectomy" =====
 # Events categorized by temporal precision requirement
 
 # Events that occur in 1 frame (exact frame)
 INSTANT_FRAME_EVENTS = {
-    "Out of body", "Instrument swap: removal", "Instrument swap: insertion",
+    # "Out of body",
+    "Instrument swap: removal", "Instrument swap: insertion",
     "Insert gauze", "Remove gauze", "Insert hemostatic agens", "Remove hemostatic agens",
-    "Test image start", "Test image stop", "Inside abdomen", "Instrument insertion",
+    # "Test image start", "Test image stop",
+    "Inside abdomen", "Instrument insertion",
     "Adhesion removal", "Fat removal", "Remove needle bladder stretch stitch",
     "Needle removal DVC ligation", "V-lock", "Cutting the needles", "Removing the needles",
     "Threads removal", "Vessel loop removal", "Hemolock clip removal", "Endobag removal",
-    "Drain placement", "Removal of robotic instruments", "Camera out of body", "Camera stop"
+    "Drain placement", "Removal of robotic instruments", "Camera out of body", "Camera stop",
+    "Prostate bagging"
 }
 
 # Events with ±1 second margin
@@ -66,9 +71,11 @@ MARGIN_5SEC_EVENTS = {
 # Paired events that form START/END ranges
 PAIRED_EVENT_TEMPLATES = [
     ("Out of body", "Back inside body"),
-    ("Insert gauze", "Remove gauze"),
-    ("Insert hemostatic agens", "Remove hemostatic agens"),
+    # ("Insert gauze", "Remove gauze"),
+    # ("Insert hemostatic agens", "Remove hemostatic agens"),
+    ("Test image start", "Test image stop"),
 ]
+
 
 class ORSI2COCO:
     """
@@ -111,17 +118,20 @@ class ORSI2COCO:
         """Initialize event timing margins based on RARP specifications"""
         # Each event has a temporal margin (in seconds) based on RARP document
         for event_name in INSTANT_FRAME_EVENTS:
-            self.event_margins[event_name] = 0.0  # Exact frame
+            self.event_margins[event_name] = [0.0, 0.5]  # Exact frame
 
         for event_name in MARGIN_1SEC_EVENTS:
-            self.event_margins[event_name] = 1.0  # ±1 second margin
+            self.event_margins[event_name] = [0.5, 0.5]  # ±1 second margin
 
         for event_name in MARGIN_5SEC_EVENTS:
-            self.event_margins[event_name] = 5.0  # ±5 seconds margin
+            self.event_margins[event_name] = [2.5, 2.5]  # ±5 seconds margin
 
     def get_event_margin(self, event_name: str) -> float:
         """Get temporal margin (in seconds) for an event based on RARP specifications"""
-        return self.event_margins.get(event_name, 0.0)
+        if event_name not in self.event_margins:
+            print(f"⚠️  Warning: Event '{event_name}' not found in margin specifications. Defaulting to -0,5 and +1,0s margin.")
+            self.event_margins[event_name] = [0.5, 1.0]  # Default margin for unknown events
+        return self.event_margins.get(event_name, [0.5, 1.0])
 
     def extract_frames_from_video(self, video_path: str, output_dir: str, 
                                    video_name: str, skip_existing: bool = True, 
@@ -142,13 +152,14 @@ class ORSI2COCO:
         Returns:
             Tuple of (total_frames_extracted, frame_output_dir)
         """
-        frame_output_dir = os.path.join(output_dir, video_name)
+        # frame_output_dir = os.path.join(output_dir, video_name)
+        frame_output_dir = output_dir
         if not os.path.exists(video_path):
             print(f"⚠️  Video file not found: {video_path}. Skipping frame extraction.")
             return 0, frame_output_dir
         
         # Check if frames already exist
-        if skip_existing and os.path.exists(frame_output_dir):
+        if skip_existing and os.path.exists(frame_output_dir) and any(os.scandir(frame_output_dir)):
             existing_frames = len([f for f in os.listdir(frame_output_dir) 
                                   if f.endswith('.jpg')])
             if existing_frames > 0:
@@ -218,8 +229,9 @@ class ORSI2COCO:
             (width, height) tuple
         """
         # Check cache first
-        if image_path in self.dimensions_cache:
-            return self.dimensions_cache[image_path]
+        
+        if Path(image_path).parent in self.dimensions_cache:
+            return self.dimensions_cache[Path(image_path).parent]
 
         # If PIL not available, use defaults
         if not PIL_AVAILABLE:
@@ -230,7 +242,7 @@ class ORSI2COCO:
             if os.path.exists(image_path):
                 with Image.open(image_path) as img:
                     width, height = img.size
-                    self.dimensions_cache[image_path] = (width, height)
+                    self.dimensions_cache[Path(image_path).parent] = (width, height)
                     return (width, height)
         except Exception as e:
             # Silently fallback to defaults on error
@@ -261,33 +273,32 @@ class ORSI2COCO:
         
         # Generic pattern detection: "Start X" + "End X", "Insert" + "Remove", etc.
         event_list = sorted(list(all_event_names))
-        for event in event_list:
-            event_lower = event.lower()
+        # for event in event_list:
+        #     event_lower = event.lower()
             
-            # Look for complementary pairs in same category first
-            for category_data in events_data.values():
-                if event not in category_data:
-                    continue
+        #     # Look for complementary pairs in same category first
+        #     for category_data in events_data.values():
+        #         if event not in category_data:
+        #             continue
                     
-                for other_event in category_data.keys():
-                    other_lower = other_event.lower()
+        #         for other_event in category_data.keys():
+        #             other_lower = other_event.lower()
                     
-                    # Check for start/end patterns
-                    if ("start" in event_lower and "end" in other_lower) or \
-                       ("begin" in event_lower and "end" in other_lower) or \
-                       ("insert" in event_lower and "remove" in other_lower) or \
-                       ("inside" in event_lower and "out of" in other_lower):
+        #             # Check for start/end patterns
+        #             if ("start" in event_lower and "end" in other_lower) or \
+        #                ("begin" in event_lower and "end" in other_lower) or \
+        #                ("inside" in event_lower and "out of" in other_lower):
                         
-                        # Verify they have matching timestamp counts
-                        try:
-                            event_timestamps = category_data[event]
-                            other_timestamps = category_data[other_event]
-                            # If both have even number of timestamps or matching lengths, likely paired
-                            if event_timestamps and other_timestamps and \
-                               len(event_timestamps) == len(other_timestamps):
-                                paired_events.add(set([event, other_event]))
-                        except:
-                            pass
+        #                 # Verify they have matching timestamp counts
+        #                 try:
+        #                     event_timestamps = category_data[event]
+        #                     other_timestamps = category_data[other_event]
+        #                     # If both have even number of timestamps or matching lengths, likely paired
+        #                     if event_timestamps and other_timestamps and \
+        #                        len(event_timestamps) == len(other_timestamps):
+        #                         paired_events.add(set([event, other_event]))
+        #                 except:
+        #                     pass
         
         # All other events are instant
         p_event = set(x for sublist in paired_events for x in sublist)
@@ -315,7 +326,7 @@ class ORSI2COCO:
         self.phase_to_id["Idle"] = 0
         phase_id = 1
 
-        for phase_name in sorted(phases_data.keys()):
+        for phase_name in phases_data.keys():
             if phase_name not in ["Idle"]:
                 categories.append({
                     "id": phase_id,
@@ -344,16 +355,30 @@ class ORSI2COCO:
 
         # Flatten all events from all categories
         seen_steps = set()
+        istant_event, paired_events = self.identify_instant_events(events_data)
 
-        for category_name in sorted(events_data.keys()):
-            for event_name in sorted(events_data[category_name].keys()):
+        for category_name in events_data.keys():
+            for event_name, timestamps in events_data[category_name].items():
                 if event_name not in seen_steps:
                     seen_steps.add(event_name)
+                    if event_name in tuple(x for sublist in paired_events for x in sublist):
+                        for start_event, end_event in paired_events:
+                            if event_name in [start_event, end_event]:
+                                margins = [start_event, end_event]
+                                margins.remove(event_name)
+                                if len(timestamps) != len(events_data[category_name][margins[0]]):  # Just to check if timestamps exist for this event
+                                    print(f"⚠️  Warning: Paired events '{event_name}' and '{margins[0]}' do not have matching timestamp counts. Check RARP annotation for consistency.")
+                                margins = f"Paired with {margins[0]}"  # Get the complementary event for margin info
+                                break
+                    if event_name in istant_event:
+                        margins = self.get_event_margin(event_name)  # Get margin for this instant event
+                        margins = f"Between -{margins[0]} and +{margins[1]}s"  # Format margin info for reference
                     categories.append({
                         "id": step_id,
                         "name": event_name.replace(" ", "_"),
                         "description": event_name,
-                        "supercategory": "step"
+                        "supercategory": "step",
+                        "margins": margins  # Add margin info to category for reference
                     })
                     self.step_to_id[event_name] = step_id
                     step_id += 1
@@ -397,23 +422,26 @@ class ORSI2COCO:
         - ±5 seconds margin: ±5s window around timestamp
         """
         frame_time = frame_num / self.fps
-
+        steps=[]
         # Priority 1: Check paired (range) events
         # These are START→END pairs where consecutive timestamps form a range
-        paired_events = set()
+        # paired_events = set()
+        steps = []
         for category, events in events_data.items():
-            for start_event, end_event in paired_events:
-                if start_event in category and end_event in category:
-                    start_timestamps = category[start_event]
-                    end_timestamps = category[end_event]
-                    # Pair consecutive timestamps as start-end
-                    sorted_start_ts = sorted(start_timestamps)
-                    sorted_end_ts = sorted(end_timestamps)
-                    for s, e in zip(sorted_start_ts, sorted_end_ts):
-                        if s <= frame_time < e:
-                            return self.step_to_id.get(start_event, 0)
-                        if frame_time == e:
-                            return self.step_to_id.get(end_event, 0)
+                for start_event, end_event in paired_events:
+                    if start_event in events and end_event in events:
+                        start_timestamps = events[start_event]
+                        end_timestamps = events[end_event]
+                        # Pair consecutive timestamps as start-end
+                        sorted_start_ts = sorted(start_timestamps)
+                        sorted_end_ts = sorted(end_timestamps)
+                        for s, e in zip(sorted_start_ts, sorted_end_ts):
+                            # if abs(frame_time - e) < 1:
+                            #     steps.append(self.step_to_id.get(end_event, 0))
+                            #     break
+                            if s <= frame_time and frame_time< e:
+                                steps.append(self.step_to_id.get(start_event, 0))
+
 
         # Priority 2: Check instant events with RARP timing margins
         closest_instant_event = None
@@ -422,33 +450,40 @@ class ORSI2COCO:
         for category_name, events in events_data.items():
             for event_name, timestamps in events.items():
                 if event_name in instant_events:
-                    margin = self.get_event_margin(event_name)
+                    margins = self.get_event_margin(event_name)
                     for timestamp in timestamps:
                         # Check if frame is within margin window of this event
-                        if timestamp - margin <= frame_time <= timestamp + margin:
+                        if timestamp - margins[0] <= frame_time <= timestamp + margins[1]:
                             # If multiple instant events active, use most recent
                             if timestamp > closest_instant_time:
                                 closest_instant_time = timestamp
                                 closest_instant_event = event_name
+                                steps.append(self.step_to_id.get(closest_instant_event, 0))
 
         if closest_instant_event:
-            return self.step_to_id.get(closest_instant_event, 0)
+            steps.append(self.step_to_id.get(closest_instant_event, 0))
+            
+        steps = list(set(steps))  # Remove duplicates if any
+        if len(steps) > 1:
+            print(f"⚠️  Multiple active events for frame {frame_num} (time {frame_time:.2f}s): {[k for k,v in self.step_to_id.items() if v in steps]}. Returning the most recent one: {[k for k,v in self.step_to_id.items() if v == max(steps)][0]}")
+        return max(steps) if steps else 0  # If multiple events, return the one with highest ID (most recent)
+        
+        # # Priority 3: Fallback to most recent event before this frame
+        # # No fallback to events out of margin 
+        # closest_event = None
+        # closest_time = -float('inf')
 
-        # Priority 3: Fallback to most recent event before this frame
-        closest_event = None
-        closest_time = -float('inf')
+        # for category_name, events in events_data.items():
+        #     for event_name, timestamps in events.items():
+        #         for timestamp in timestamps:
+        #             if timestamp <= frame_time and timestamp > closest_time:
+        #                 closest_time = timestamp
+        #                 closest_event = event_name
 
-        for category_name, events in events_data.items():
-            for event_name, timestamps in events.items():
-                for timestamp in timestamps:
-                    if timestamp <= frame_time and timestamp > closest_time:
-                        closest_time = timestamp
-                        closest_event = event_name
+        # if closest_event:
+        #     return self.step_to_id.get(closest_event, 0)
 
-        if closest_event:
-            return self.step_to_id.get(closest_event, 0)
-
-        return 0  # Idle if no event matches
+        # return 0  # Idle if no event matches
 
     def create_image_entry(self, video_name: str, frame_num: int,
                           width: int = 1280, height: int = 800,
@@ -466,14 +501,14 @@ class ORSI2COCO:
         Returns:
             COCO image entry dictionary
         """
-        file_name = f"{video_name}/{frame_num:09d}.jpg"
-
+        file_name = f"{video_name}/IMAGES/{frame_num:09d}.jpg"
+        file_basename = f"{frame_num:09d}.jpg"
         # Try to get actual dimensions from image if frame_root is provided
         actual_width = width
         actual_height = height
 
         if frame_root:
-            image_path = os.path.join(frame_root, file_name)
+            image_path = os.path.join(frame_root, file_basename)
             actual_width, actual_height = self.get_image_dimensions(
                 image_path, width, height
             )
@@ -570,12 +605,12 @@ class ORSI2COCO:
         for category in events_data.values():
             for event_name, timestamps in category.items():
                 if event_name in instant_events:
-                    margin = self.get_event_margin(event_name)
+                    margins = self.get_event_margin(event_name)
                     for timestamp in timestamps:
                         # Add frames within the event's temporal margin (from RARP specs)
-                        start_frame = max(0, self.seconds_to_frame(timestamp - margin))
+                        start_frame = max(0, self.seconds_to_frame(timestamp - margins[0]))
                         end_frame = min(total_frames - 1, 
-                                       self.seconds_to_frame(timestamp + margin))
+                                       self.seconds_to_frame(timestamp + margins[1]))
                         for f in range(start_frame, end_frame + 1, max(1, frame_step // 2)):
                             frames_with_annotations.add(f)
 
@@ -633,7 +668,9 @@ class ORSI2COCO:
             all_frames.add(frame_num)
 
         # Add all frames with important annotations
-        all_frames.update(frames_with_annotations)
+        #TODO: Rimosso l'inserimento forzato degli eventiannotati, 
+        # per evitare di sovraccaricare il dataset con troppi frame simili
+        # all_frames.update(frames_with_annotations)
 
         # Sort frames
         sorted_frames = sorted(list(all_frames))
@@ -667,7 +704,7 @@ class ORSI2COCO:
             json.dump(coco_output, f, indent=4)
 
         print(f"Converted: {json_path}")
-        print(f"  Total duration: {max_time:.2f}s ({total_frames} frames)")
+        print(f"  Total duration: {max_time:.2f}s ({total_frames} frames, {max_time/60:.2f} minutes)")
         print(f"  Extracted frames: {len(coco_output['images'])}")
         print(f"  Frames with key annotations: {len(frames_with_annotations)}")
         print(f"  Instant events identified: {len(instant_events)}")
@@ -710,7 +747,8 @@ class ORSI2COCO:
     def convert_batch(self, annotation_dir: str, output_dir: str,
                      frame_step: int = 46, width: int = 1280, height: int = 800,
                      generate_csv: bool = True, csv_output_path: str = None,
-                     frame_root: Optional[str] = None, video_root: Optional[str] = None):
+                     frame_root: Optional[str] = None, video_root: Optional[str] = None, 
+                     extract_frames: bool = False):
         """
         Convert all annotation files in a directory
 
@@ -726,12 +764,13 @@ class ORSI2COCO:
             video_root: Optional root directory for videos to extract frames from
         """
         os.makedirs(output_dir, exist_ok=True)
-
-        annotation_files = sorted(Path(annotation_dir).glob("RARP*.json"))
+        print(f"Scanning for annotation files in: {annotation_dir}")
+        annotation_files = sorted([Path(g) for g in glob(os.path.join(annotation_dir, "RARP*.json"))])
 
         print(f"Found {len(annotation_files)} annotation files")
 
         if csv_output_path is None:
+            generate_csv = True  # Ensure CSV generation if no specific path provided
             csv_output_path = os.path.join(output_dir, "train.csv")
 
         all_csv_rows = []
@@ -739,7 +778,7 @@ class ORSI2COCO:
         for ann_idx, json_file in enumerate(annotation_files):
             # Extract video name from json filename (e.g., RARP01.json -> RARP01)
             video_name = json_file.stem  # Without .json extension
-
+            print(f"\nProcessing ({ann_idx+1}/{len(annotation_files)}): {video_name}")
             # Reset counters for each video
             self.image_id_counter = 1
             self.annotation_id_counter = 1
@@ -750,6 +789,9 @@ class ORSI2COCO:
             output_json = os.path.join(output_dir, f"{video_name}_coco.json")
 
             try:
+                frame_root = os.path.join(json_file.parent.parent.parent.parent,video_name, "IMAGES") 
+                video_root = os.path.join(json_file.parent.parent.parent.parent,video_name, "VIDEO") 
+
                 coco_data, sorted_frames = self.convert_annotation(
                     str(json_file),
                     video_name,
@@ -770,7 +812,7 @@ class ORSI2COCO:
                         row = [video_name, "1", str(idx), image["file_name"]]
                         all_csv_rows.append(row)
 
-                if video_root and os.path.isdir(video_root):
+                if extract_frames and video_root and os.path.isdir(video_root):
                     video_path = os.path.join(video_root, f"{video_name}.mp4")
                     print(f"\n🎬 Frame Extraction Mode:")
                     self.extract_frames_from_video(video_path, frame_root, video_name, sorted_frames=sorted_frames)
@@ -794,16 +836,16 @@ if __name__ == "__main__":
 
 
     parser = argparse.ArgumentParser(description="Convert ORSI dataset to COCO format with optional frame extraction")
-    parser.add_argument("--input", type=str, help="Input JSON file or directory with JSON files")
-    parser.add_argument("--output", type=str, help="Output JSON file or directory")
-    parser.add_argument("--fps", type=int, default=25, help="Video FPS (default: 25)")
-    parser.add_argument("--frame-step", type=int, default=46, help="Extract every N frames (default: 46)")
+    parser.add_argument("--input", type=str, default="/home/gchie/workspace/nas_private/data/orsi/RARP*/ANNOTATIONS/SURGICAL_PHASES", help="Input JSON file or directory with JSON files")
+    parser.add_argument("--output", type=str, default="/home/gchie/workspace/nas_private/data/coco/", help="Output JSON file or directory")
+    parser.add_argument("--fps", type=int, default=FPS, help="Video FPS (default: 59)")
+    parser.add_argument("--frame-step", type=int, default=30, help="Extract every N frames (default: 60)")
     parser.add_argument("--width", type=int, default=1280, help="Video width (default: 1280)")
     parser.add_argument("--height", type=int, default=800, help="Video height (default: 800)")
     # parser.add_argument("--csv", action="store_true", help="Generate CSV files")
-    parser.add_argument("--csv-output", type=str, help="Path for combined CSV file (default: output_dir/train.csv)")
+    parser.add_argument("--csv-output", type=str, default="/home/gchie/workspace/nas_private/data/coco/all_merged.csv", help="Path for combined CSV file (default: output_dir/train.csv)")
     parser.add_argument("--frame-root", type=str, help="Root directory for existing frames (reads dimensions)")
-    # parser.add_argument("--extract-frames", action="store_true", help="Extract frames from videos using ffmpeg")
+    parser.add_argument("--extract-frames", action="store_true", help="Extract frames from videos using ffmpeg")
     parser.add_argument("--video-root", type=str, help="Root directory containing MP4 videos (for --extract-frames)")
     # parser.add_argument("--frames-output", type=str, help="Directory for saved frames (default: frame-root or current/frames)")
     # parser.add_argument("--batch", action="store_true", help="Process all RARP*.json files in input directory")
@@ -811,13 +853,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Validate arguments
-    if args.video_root and os.path.isdir(args.video_root):
-        args.extract_frames = True  # Ensure frame extraction if video_root is provided
-    else:
-        args.extract_frames = False
-    if args.extract_frames and (not args.video_root or not os.path.isdir(args.video_root)):
-        print("❌ Error: --extract-frames requires --video-root or --video_root to be a directory")
-        exit(1)
+    # if args.video_root and args.frame_root:
+    #     args.extract_frames = True  # Ensure frame extraction if video_root is provided
+    # else:
+    #     args.extract_frames = False
+    # if args.extract_frames and (not args.video_root or not os.path.isdir(args.video_root)):
+    #     print("❌ Error: --extract-frames requires --video-root or --video_root to be a directory")
+    #     exit(1)
     if not args.input or not args.output:
         print("--input and --output are required")
         exit(1)
@@ -836,7 +878,8 @@ if __name__ == "__main__":
 
 
     converter = ORSI2COCO(fps=args.fps)
-    if os.path.isdir(args.input):
+
+    if os.path.isdir(args.input) or "*" in args.input:
         # Extract frames if requested
         frames_root = args.frame_root
         # if args.extract_frames:
@@ -866,11 +909,12 @@ if __name__ == "__main__":
             generate_csv=args.csv,
             csv_output_path=args.csv_output,
             frame_root=args.frame_root,
-            video_root=args.video_root
+            video_root=args.video_root,
+            extract_frames = args.extract_frames
+
         )
         
     else:
-
 
         print(f"\n📊 Converting annotation to COCO format...")
         coco_data, sorted_frames = converter.convert_annotation(
@@ -900,5 +944,7 @@ if __name__ == "__main__":
         
     print("\n✅ Conversion complete!")
     import subprocess
-    subprocess.run(["python", "merge_json.py", "--output-dir", args.output])  # Debugging line to show output directory contents
+    subprocess.run(["python", "/home/gchie/workspace/VU-Tapis/dataset_analisis/conversion_to_Orsidataset/merge_json.py", "--output-dir", args.output])  # Debugging line to show output directory contents
+
+    subprocess.run(["python", "/home/gchie/workspace/VU-Tapis/dataset_analisis/analize_dataset.py"])  # Debugging line to show output directory contents
         

@@ -19,18 +19,18 @@ class StepAnalyzer:
     Analyzes from 6 perspectives: quantitative, spatial, temporal, correlation, quality, comparative.
     """
 
-    def __init__(self, train_df: pd.DataFrame, test_df: pd.DataFrame, logger=None):
+    def __init__(self, dfs: Dict[str, pd.DataFrame], logger=None):
         """
         Initialize analyzer with train and test dataframes.
 
         Args:
-            train_df: Training dataset annotations
-            test_df: Testing dataset annotations
+            dfs: Dictionary containing train and test dataframes
             logger: Optional logger instance
         """
-        self.train_df = train_df
-        self.test_df = test_df
-        self.total_df = pd.concat([train_df, test_df], ignore_index=True)
+        # self.train_df = dfs.get('train')
+        # self.test_df = dfs.get('test')
+        self.dfs = dfs
+        self.total_df = pd.concat([d for d in dfs.values()], ignore_index=True)
         self.logger = logger or logging.getLogger(__name__)
 
         self.step_taxonomy = StepTaxonomy()
@@ -56,33 +56,45 @@ class StepAnalyzer:
         for step_id in sorted(STEP_CATEGORIES.keys()):
             step_name = STEP_CATEGORIES[step_id]
 
-            train_count = len(self.train_df[self.train_df['step'] == step_id])
-            test_count = len(self.test_df[self.test_df['step'] == step_id])
-            total_count = train_count + test_count
+            counts = [len(d[d['step'] == step_id]) for d in self.dfs.values()]
+            # train_count = len(self.train_df[self.train_df['step'] == step_id])
+            # test_count = len(self.test_df[self.test_df['step'] == step_id])
+            total_count = sum(counts)
 
-            train_pct = (
-                train_count / len(self.train_df) * 100 if len(self.train_df) > 0 else 0
-            )
-            test_pct = test_count / len(self.test_df) * 100 if len(self.test_df) > 0 else 0
-            total_pct = (
-                total_count / (len(self.train_df) + len(self.test_df)) * 100
-                if (len(self.train_df) + len(self.test_df)) > 0
-                else 0
-            )
+            pct = []
+            for dataset, count in zip(self.dfs.keys(), counts):
+                pct.append(count / len(self.dfs[dataset]) * 100 if len(self.dfs[dataset]) > 0 else 0)
+            
+            total_pct = total_count / len(self.total_df) * 100 if len(self.total_df) > 0 else 0
+            # train_pct = (
+            #     train_count / len(self.train_df) * 100 if len(self.train_df) > 0 else 0
+            # )
+            # test_pct = test_count / len(self.test_df) * 100 if len(self.test_df) > 0 else 0
+            # total_pct = (
+            #     total_count / (len(self.train_df) + len(self.test_df)) * 100
+            #     if (len(self.train_df) + len(self.test_df)) > 0
+            #     else 0
+            # )
 
             step_class = self.step_taxonomy.classify_step(step_id)
 
-            rows.append({
+            row = {
                 'step_id': step_id,
                 'step_name': step_name,
-                'train_count': train_count,
-                'test_count': test_count,
+                # 'train_count': train_count,
+                # 'test_count': test_count,
                 'total_count': total_count,
-                'train_pct': train_pct,
-                'test_pct': test_pct,
+                # 'train_pct': train_pct,
+                # 'test_pct': test_pct,
                 'total_pct': total_pct,
                 'step_class': step_class,
-            })
+            }
+            for dataset, count, percent in zip(self.dfs.keys(), counts, pct):
+                row.update({
+                    f'{dataset}_count': count,
+                    f'{dataset}_pct': percent,
+                })
+            rows.append(row)
 
         df = pd.DataFrame(rows)
         self.results['step_distribution'] = df
@@ -100,31 +112,42 @@ class StepAnalyzer:
         rows = []
         for phase_id in sorted(PHASE_CATEGORIES.keys()):
             phase_name = PHASE_CATEGORIES[phase_id]
+            
+            counts = []
+            pct = []
+            for dataset, df in self.dfs.items():
+                    count = len(df[df['phase'] == phase_id])
+                    counts.append(count)
+                    pct.append(count / len(df) * 100 if len(df) > 0 else 0)
+            # train_count = len(self.train_df[self.train_df['phase'] == phase_id])
+            # test_count = len(self.test_df[self.test_df['phase'] == phase_id])
+            total_count = sum(counts)
 
-            train_count = len(self.train_df[self.train_df['phase'] == phase_id])
-            test_count = len(self.test_df[self.test_df['phase'] == phase_id])
-            total_count = train_count + test_count
-
-            train_pct = (
-                train_count / len(self.train_df) * 100 if len(self.train_df) > 0 else 0
-            )
-            test_pct = test_count / len(self.test_df) * 100 if len(self.test_df) > 0 else 0
+            # train_pct = (
+            #     train_count / len(self.train_df) * 100 if len(self.train_df) > 0 else 0
+            # )
+            # test_pct = test_count / len(self.test_df) * 100 if len(self.test_df) > 0 else 0
             total_pct = (
-                total_count / (len(self.train_df) + len(self.test_df)) * 100
-                if (len(self.train_df) + len(self.test_df)) > 0
+                total_count / len(self.total_df) * 100
+                if len(self.total_df) > 0
                 else 0
             )
-
-            rows.append({
+            row = {
                 'phase_id': phase_id,
                 'phase_name': phase_name,
-                'train_count': train_count,
-                'test_count': test_count,
+                # 'train_count': train_count,
+                # 'test_count': test_count,
                 'total_count': total_count,
-                'train_pct': train_pct,
-                'test_pct': test_pct,
+                # 'train_pct': train_pct,
+                # 'test_pct': test_pct,
                 'total_pct': total_pct,
-            })
+            }
+            for dataset, count, percent in zip(self.dfs.keys(), counts, pct):
+                row.update({
+                    f'{dataset}_count': count,
+                    f'{dataset}_pct': percent,
+                })
+            rows.append(row)
 
         df = pd.DataFrame(rows)
         self.results['phase_distribution'] = df
@@ -276,8 +299,46 @@ class StepAnalyzer:
                 })
 
         df = pd.DataFrame(rows)
-        self.results['temporal_progression'] = df
+        self.results['temporal_steps_progression'] = df
         return df
+
+
+    def temporal_phases_progression(self) -> pd.DataFrame:
+        """
+        Analyze temporal progression of phases within videos.
+
+        Returns:
+            DataFrame with temporal patterns
+        """
+        self.logger.info("Analyzing temporal phase progression...")
+
+        rows = []
+        videos = sorted(self.total_df['video_name'].unique())
+
+        for video in videos:
+            video_df = self.total_df[self.total_df['video_name'] == video].sort_values(
+                'frame_num'
+            )
+
+            # Get contiguous segments
+            segments = self._extract_contiguous_segments(video_df['phase'].values)
+
+            for idx, seg in enumerate(segments):
+                rows.append({
+                    'video_name': video,
+                    'segment_idx': idx,
+                    'phase_id': seg['step'],
+                    'phase_name': PHASE_CATEGORIES.get(seg['step'], 'Unknown'), # Corretto perche la funzione sopra restituice step, ma è passato un array di phases
+                    'start_frame': seg['start'],
+                    'end_frame': seg['end'],
+                    'duration_frames': seg['end'] - seg['start'],
+                    'segment_position': idx,
+                })
+
+        df = pd.DataFrame(rows)
+        self.results['temporal_phases_progression'] = df
+        return df
+
 
     def step_transitions(self) -> pd.DataFrame:
         """
@@ -410,27 +471,37 @@ class StepAnalyzer:
         """
         self.logger.info("Analyzing step coverage...")
 
-        train_steps = set(self.train_df['step'].unique())
-        test_steps = set(self.test_df['step'].unique())
+        steps_in_datasets = {dataset: set(df['step'].unique()) for dataset, df in self.dfs.items()}
+        for dataset, df in self.dfs.items():
+            self.logger.info(f"\n{dataset} DataFrame shape: {df.shape}")
+        # train_steps = set(self.train_df['step'].unique())
+        # test_steps = set(self.test_df['step'].unique())
 
         all_steps = set(STEP_CATEGORIES.keys())
-
-        missing_in_train = all_steps - train_steps
-        missing_in_test = all_steps - test_steps
-        missing_in_both = missing_in_train & missing_in_test
-        present_in_both = train_steps & test_steps
+        missing_in = {dataset: all_steps - steps for dataset, steps in steps_in_datasets.items()}
+        # missing_in_train = all_steps - train_steps
+        # missing_in_test = all_steps - test_steps
+        # missing_in_both = missing_in_train & missing_in_test
+        # present_in_both = train_steps & test_steps
 
         coverage = {
             'total_steps': len(all_steps),
-            'steps_in_train': len(train_steps),
-            'steps_in_test': len(test_steps),
-            'steps_in_both': len(present_in_both),
-            'missing_in_train': list(missing_in_train),
-            'missing_in_test': list(missing_in_test),
-            'missing_in_both': list(missing_in_both),
-            'coverage_train': len(train_steps) / len(all_steps),
-            'coverage_test': len(test_steps) / len(all_steps),
+            # 'steps_in_train': len(train_steps),
+            # 'steps_in_test': len(test_steps),
+            # 'steps_in_both': len(present_in_both),
+            # 'missing_in_train': list(missing_in_train),
+            # 'missing_in_test': list(missing_in_test),
+            # 'missing_in_both': list(missing_in_both),
+            # 'coverage_train': len(train_steps) / len(all_steps),
+            # 'coverage_test': len(test_steps) / len(all_steps),
         }
+        for dataset, steps in steps_in_datasets.items():
+            coverage[f'steps_in_{dataset}'] = len(steps)
+            coverage[f'coverage_{dataset}'] = len(steps) / len(all_steps)
+            coverage[f'missing_in_{dataset}'] = list(missing_in[dataset])
+        # coverage = coverage.update({f'missing_in_{dataset}': list(steps) for dataset, steps in missing_in.items()})
+        # coverage = coverage.update({f'steps_in_{dataset}': len(steps) for dataset, steps in steps_in_datasets.items()})
+        # coverage.update({f'coverage_{dataset}': len(steps) / len(all_steps) for dataset, steps in steps_in_datasets.items()})
 
         self.results['step_coverage'] = coverage
         return coverage
@@ -445,38 +516,50 @@ class StepAnalyzer:
         self.logger.info("Assessing dataset imbalance...")
 
         step_dist = self.distribution_by_step()
-
-        train_counts = step_dist['train_count'].values
-        test_counts = step_dist['test_count'].values
+        counts = [step_dist[f'{dataset}_count'].values for dataset in self.dfs.keys()]  
+        # train_counts = step_dist['train_count'].values
+        # test_counts = step_dist['test_count'].values
 
         # Remove zeros for better calculation
-        train_nonzero = train_counts[train_counts > 0]
-        test_nonzero = test_counts[test_counts > 0]
-
-        imbalance = {
-            'train_min': int(train_nonzero.min()) if len(train_nonzero) > 0 else 0,
-            'train_max': int(train_nonzero.max()) if len(train_nonzero) > 0 else 0,
-            'train_ratio': (
-                int(train_nonzero.max()) / int(train_nonzero.min())
-                if len(train_nonzero) > 0 and train_nonzero.min() > 0
+        non_zero_counts = [counts[i][counts[i] > 0] for i in range(len(counts))]
+        # train_nonzero = train_counts[train_counts > 0]
+        # test_nonzero = test_counts[test_counts > 0]
+        imbalance = {}
+        for dataset, count, non_zero in zip(self.dfs.keys(), counts, non_zero_counts):
+            imbalance[f'{dataset}_min'] = int(non_zero.min()) if len(non_zero) > 0 else 0
+            imbalance[f'{dataset}_max'] = int(non_zero.max()) if len(non_zero) > 0 else 0
+            imbalance[f'{dataset}_ratio'] = (
+                int(non_zero.max()) / int(non_zero.min())
+                if len(non_zero) > 0 and non_zero.min() > 0
                 else 1
-            ),
-            'train_cv': (
-                train_nonzero.std() / train_nonzero.mean()
-                if len(train_nonzero) > 0
-                else 0
-            ),
-            'test_min': int(test_nonzero.min()) if len(test_nonzero) > 0 else 0,
-            'test_max': int(test_nonzero.max()) if len(test_nonzero) > 0 else 0,
-            'test_ratio': (
-                int(test_nonzero.max()) / int(test_nonzero.min())
-                if len(test_nonzero) > 0 and test_nonzero.min() > 0
-                else 1
-            ),
-            'test_cv': (
-                test_nonzero.std() / test_nonzero.mean() if len(test_nonzero) > 0 else 0
-            ),
-        }
+            )
+            imbalance[f'{dataset}_cv'] = (
+                non_zero.std() / non_zero.mean() if len(non_zero) > 0 else 0
+            )
+        # imbalance = {
+        #     'train_min': int(train_nonzero.min()) if len(train_nonzero) > 0 else 0,
+        #     'train_max': int(train_nonzero.max()) if len(train_nonzero) > 0 else 0,
+        #     'train_ratio': (
+        #         int(train_nonzero.max()) / int(train_nonzero.min())
+        #         if len(train_nonzero) > 0 and train_nonzero.min() > 0
+        #         else 1
+        #     ),
+        #     'train_cv': (
+        #         train_nonzero.std() / train_nonzero.mean()
+        #         if len(train_nonzero) > 0
+        #         else 0
+        #     ),
+        #     'test_min': int(test_nonzero.min()) if len(test_nonzero) > 0 else 0,
+        #     'test_max': int(test_nonzero.max()) if len(test_nonzero) > 0 else 0,
+        #     'test_ratio': (
+        #         int(test_nonzero.max()) / int(test_nonzero.min())
+        #         if len(test_nonzero) > 0 and test_nonzero.min() > 0
+        #         else 1
+        #     ),
+        #     'test_cv': (
+        #         test_nonzero.std() / test_nonzero.mean() if len(test_nonzero) > 0 else 0
+        #     ),
+        # }
 
         self.results['imbalance_metrics'] = imbalance
         return imbalance
@@ -595,6 +678,7 @@ class StepAnalyzer:
 
         # Category C: Temporal
         self.temporal_step_progression()
+        self.temporal_phases_progression()
         self.step_transitions()
 
         # Category D: Correlation
@@ -606,8 +690,8 @@ class StepAnalyzer:
         self.imbalance_assessment()
 
         # Category F: Comparative
-        self.train_test_comparison()
-        self.statistical_test_chi_square()
+        # self.train_test_comparison()
+        # self.statistical_test_chi_square()
 
         self.logger.info("=" * 70)
         self.logger.info("ANALYSIS COMPLETE")

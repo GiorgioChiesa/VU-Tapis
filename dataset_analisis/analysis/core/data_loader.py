@@ -12,6 +12,7 @@ import logging
 import pandas as pd
 
 from config.analysis_config import INPUT_CONFIG, VALIDATION_CONFIG, OUTPUT_CONFIG
+from config.analysis_config import STEP_CATEGORIES, PHASE_CATEGORIES, update_step_categories_from_data, update_phase_categories_from_data
 
 
 class DataLoaderException(Exception):
@@ -63,9 +64,9 @@ class DataLoader:
                 data = json.load(f)
 
             # Validate structure
-            required_keys = ['info', 'images', 'annotations']
-            if split == 'train':
-                required_keys.extend(['steps_categories', 'phases_categories'])
+            required_keys = ['info', 'images', 'annotations','steps_categories', 'phases_categories']
+            # if split == 'train':
+            #     required_keys.extend(['steps_categories', 'phases_categories'])
 
             missing_keys = [k for k in required_keys if k not in data]
             if missing_keys:
@@ -146,17 +147,18 @@ class DataLoader:
                 file_name = image_info.get('file_name', '')
                 parts = file_name.split('/')
                 video_name = parts[0] if parts else ''
-                frame_name = parts[1] if len(parts) > 1 else ''
+                frame_name = parts[-1] if len(parts) > 1 else ''
 
                 try:
                     frame_num = int(frame_name.replace('.jpg', ''))
                 except (ValueError, IndexError):
+                    print(f"Warning: Could not extract frame number from {file_name}")
                     frame_num = -1
 
                 rows.append({
                     'annotation_id': ann['id'],
                     'image_id': image_id,
-                    'image_name': file_name,
+                    'image_path': file_name,
                     'video_name': video_name,
                     'frame_num': frame_num,
                     'phase': ann.get('phases', -1),
@@ -173,51 +175,59 @@ class DataLoader:
                 f"Error converting {split} annotations to DataFrame: {e}"
             )
 
-    def load_and_prepare(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def load_and_prepare(self) -> Dict[str, pd.DataFrame]:
         """
         Load all data and prepare DataFrames.
 
         Returns:
-            Tuple of (train_df, test_df)
+            Dictionary mapping dataset names to their corresponding DataFrames
 
         Raises:
             DataLoaderException: If any loading fails
         """
         try:
-            # Load train data
-            self.logger.info("=" * 60)
-            self.logger.info("LOADING TRAIN DATA")
-            self.logger.info("=" * 60)
-            train_data = self.load_json_dataset('train')
-            self.train_df = self.convert_annotations_to_dataframe(train_data, 'train')
+            self.datasets_data={}
+            self.dfs = {}
+            for dataset in INPUT_CONFIG['annotations'].keys():
+                # Load train data
+                self.logger.info("=" * 60)
+                self.logger.info(f"LOADING {dataset} DATA")
+                self.logger.info("=" * 60)
+                self.datasets_data[dataset] = self.load_json_dataset(dataset)
+                self.dfs[dataset] = self.convert_annotations_to_dataframe(self.datasets_data[dataset], dataset)
 
-            # Load test data
-            self.logger.info("=" * 60)
-            self.logger.info("LOADING TEST DATA")
-            self.logger.info("=" * 60)
-            test_data = self.load_json_dataset('test')
-            self.test_df = self.convert_annotations_to_dataframe(test_data, 'test')
+            # # Load test data
+            # self.logger.info("=" * 60)
+            # self.logger.info("LOADING TEST DATA")
+            # self.logger.info("=" * 60)
+            # test_data = self.load_json_dataset('test')
+            # self.test_df = self.convert_annotations_to_dataframe(test_data, 'test')
 
             # Load frame lists
-            self.logger.info("=" * 60)
-            self.logger.info("LOADING FRAME LISTS")
-            self.logger.info("=" * 60)
-            train_frames = self.load_frame_list('train')
-            test_frames = self.load_frame_list('test')
+                # self.logger.info("=" * 60)
+                # self.logger.info("LOADING FRAME LISTS")
+                # self.logger.info("=" * 60)
+                _ = self.load_frame_list(dataset)
+            # test_frames = self.load_frame_list('test')
 
-            # Store references to raw data
-            self.train_data = train_data
-            self.test_data = test_data
+            # # Store references to raw data
+            # self.train_data = train_data
+            # self.test_data = test_data
 
             # Validation
             if VALIDATION_CONFIG['validate_data_integrity']:
                 self._validate_data()
+            
+            if VALIDATION_CONFIG['update_step_phase_categories']:
+                self.logger.info("Updating step and phase categories from data...")
+                update_step_categories_from_data(self.get_step_names())  # This will update STEP_CATEGORIES
+                update_phase_categories_from_data(self.get_phase_names())  # Update PHASE_CATEGORIES
 
             self.logger.info("=" * 60)
             self.logger.info("DATA LOADING COMPLETE")
             self.logger.info("=" * 60)
 
-            return self.train_df, self.test_df
+            return self.dfs # (self.train_df, self.test_df)
 
         except Exception as e:
             self.logger.error(f"Fatal error during data loading: {e}")
@@ -228,52 +238,73 @@ class DataLoader:
         self.logger.info("Validating data integrity...")
 
         # Check for missing values
-        train_nulls = self.train_df.isnull().sum()
-        test_nulls = self.test_df.isnull().sum()
+        for dataset, df in self.dfs.items():
+            nulls = df.isnull().sum()
+            if nulls.any():
+                self.logger.warning(f"Missing values in {dataset} data:\n{nulls}")
+            else:
+                self.logger.info(f"No missing values in {dataset} data")
+            # train_nulls = self.train_df.isnull().sum()
+            # test_nulls = self.test_df.isnull().sum()
 
-        if train_nulls.any():
-            self.logger.warning(f"Missing values in train data:\n{train_nulls}")
-        if test_nulls.any():
-            self.logger.warning(f"Missing values in test data:\n{test_nulls}")
+            # if train_nulls.any():
+            #     self.logger.warning(f"Missing values in train data:\n{train_nulls}")
+            # if test_nulls.any():
+            #     self.logger.warning(f"Missing values in test data:\n{test_nulls}")
 
-        # Check step and phase ranges
-        train_steps = self.train_df['step']
-        test_steps = self.test_df['step']
+            # Check step and phase ranges
 
-        train_phases = self.train_df['phase']
-        test_phases = self.test_df['phase']
+            steps = self.dfs[dataset]['step']
+            # test_steps = self.dfs['test']['step']
 
-        self.logger.info(f"Train steps range: {train_steps.min()} - {train_steps.max()}")
-        self.logger.info(f"Test steps range: {test_steps.min()} - {test_steps.max()}")
-        self.logger.info(f"Train phases range: {train_phases.min()} - {train_phases.max()}")
-        self.logger.info(f"Test phases range: {test_phases.min()} - {test_phases.max()}")
+            phases = self.dfs[dataset]['phase']
+            # test_phases = self.dfs['test']['phase']
+
+            self.logger.info(f"{dataset} steps range: {steps.min()} - {steps.max()}")
+            # self.logger.info(f"Test steps range: {test_steps.min()} - {test_steps.max()}")
+            self.logger.info(f"{dataset} phases range: {phases.min()} - {phases.max()}")
+            # self.logger.info(f"Test phases range: {test_phases.min()} - {test_phases.max()}")
 
         self.logger.info("Data validation complete")
 
     def get_step_names(self) -> dict:
         """Get step names from raw data."""
-        if self.train_data and 'steps_categories' in self.train_data:
-            return self.train_data['steps_categories']
-        return {}
+        step_names = {}
+        for dataset, data in self.datasets_data.items():
+            if data and 'steps_categories' in data:
+                step_cats = data['steps_categories']
+                for  step in step_cats:
+                    step_names[step["id"]] = step["name"]
+        # if self.train_data and 'steps_categories' in self.train_data:
+        #     return self.train_data['steps_categories']
+        return step_names
 
     def get_phase_names(self) -> dict:
         """Get phase names from raw data."""
-        if self.train_data and 'phases_categories' in self.train_data:
-            return self.train_data['phases_categories']
-        return {}
-    
-    def save_dataframes(self):
+        phase_names = {}
+        for dataset, data in self.datasets_data.items():
+            if data and 'phases_categories' in data:
+                phase_cats = data['phases_categories']
+                for  phase in phase_cats:
+                    phase_names[phase["id"]] = phase["name"]
+        return phase_names
+
+    def save_dataframes(self, concat: bool = True):
         """Save DataFrames to CSV for debugging."""
-        if self.train_df is not None:
-            train_csv_path = os.path.join(OUTPUT_CONFIG['tables_dir'], 'train_annotations.csv')
-            self.train_df.to_csv(train_csv_path, index=False)
-            self.logger.info(f"Saved train DataFrame to {train_csv_path}")
-        if self.test_df is not None:
-            test_csv_path = os.path.join(OUTPUT_CONFIG['tables_dir'], 'test_annotations.csv')
-            self.test_df.to_csv(test_csv_path, index=False)
-            self.logger.info(f"Saved test DataFrame to {test_csv_path}")
-        if self.train_df is not None and self.test_df is not None:
-            combined_df = pd.concat([self.train_df, self.test_df], ignore_index=True)
+        for dataset, df in self.dfs.items():
+            csv_path = os.path.join(OUTPUT_CONFIG['tables_dir'], f'{dataset}_annotations.csv')
+            df.to_csv(csv_path, index=False)
+            self.logger.info(f"Saved {dataset} DataFrame to {csv_path}")
+        # if self.train_df is not None:
+        #     train_csv_path = os.path.join(OUTPUT_CONFIG['tables_dir'], 'train_annotations.csv')
+        #     self.train_df.to_csv(train_csv_path, index=False)
+        #     self.logger.info(f"Saved train DataFrame to {train_csv_path}")
+        # if self.test_df is not None:
+        #     test_csv_path = os.path.join(OUTPUT_CONFIG['tables_dir'], 'test_annotations.csv')
+        #     self.test_df.to_csv(test_csv_path, index=False)
+        #     self.logger.info(f"Saved test DataFrame to {test_csv_path}")
+        if concat and len(self.dfs.keys()) > 1:
+            combined_df = pd.concat([df for df in self.dfs.values()], ignore_index=True)
             combined_csv_path = os.path.join(OUTPUT_CONFIG['tables_dir'], 'total_annotations.csv')
             combined_df.to_csv(combined_csv_path, index=False)
             self.logger.info(f"Saved combined DataFrame to {combined_csv_path}")
@@ -286,8 +317,9 @@ if __name__ == '__main__':
 
     logging.basicConfig(level=logging.INFO)
     loader = DataLoader()
-    train_df, test_df = loader.load_and_prepare()
-    print(f"Train shape: {train_df.shape}")
-    print(f"Test shape: {test_df.shape}")
-    print(f"\nTrain columns: {train_df.columns.tolist()}")
-    print(f"\nTrain sample:\n{train_df.head()}")
+    dfs = loader.load_and_prepare()
+    for dataset, df in dfs.items():
+        print(f"\n{dataset} shape: {dfs[dataset].shape}")
+        # print(f"Test shape: {dfs['test'].shape}")
+        print(f"\n{dataset} columns: {dfs[dataset].columns.tolist()}")
+        # print(f"\n{dataset} sample:\n{dfs[dataset].head()}")

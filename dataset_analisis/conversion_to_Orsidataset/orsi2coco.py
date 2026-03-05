@@ -12,7 +12,7 @@ from glob import glob
 from tqdm import tqdm
 
 # FPS configuration - adjust based on your video fps
-FPS = 59  # Change this to match your video frame rate
+FPS = 58.9  # Change this to match your video frame rate
 
 # Try to import PIL for reading image dimensions
 try:
@@ -839,7 +839,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", type=str, default="/home/gchie/workspace/nas_private/data/orsi/RARP*/ANNOTATIONS/SURGICAL_PHASES", help="Input JSON file or directory with JSON files")
     parser.add_argument("--output", type=str, default="/home/gchie/workspace/nas_private/data/coco/", help="Output JSON file or directory")
     parser.add_argument("--fps", type=int, default=FPS, help="Video FPS (default: 59)")
-    parser.add_argument("--frame-step", type=int, default=30, help="Extract every N frames (default: 60)")
+    parser.add_argument("--frame-step", type=int, default=FPS, help="Extract every N frames (default: 60)")
     parser.add_argument("--width", type=int, default=1280, help="Video width (default: 1280)")
     parser.add_argument("--height", type=int, default=800, help="Video height (default: 800)")
     # parser.add_argument("--csv", action="store_true", help="Generate CSV files")

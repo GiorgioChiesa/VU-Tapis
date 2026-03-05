@@ -97,7 +97,7 @@ def main(args=None):
         analyzer = StepAnalyzer(dfs, logger)
         # Save analysis results to pickle file
         results_pickle = Path(OUTPUT_CONFIG['base_dir']) / 'analysis_results.pkl'
-        if results_pickle.exists():
+        if results_pickle.exists() and not args.force_reload:
             logger.warning(f"Using saved analysis results at: {results_pickle}")
             with open(results_pickle, 'rb') as f:
                 analysis_results = pickle.load(f)
@@ -183,8 +183,15 @@ if __name__ == '__main__':
         action='store_true',
         help='Enable verbose logging',
     )
+    parser.add_argument(
+        "--force-reload",
+        action='store_true',
+
+    )
 
     args = parser.parse_args()
+    
+    print(f"Starting analysis with arguments: {args}")
 
     # Override config if needed
     if args.data_dir:

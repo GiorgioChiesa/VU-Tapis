@@ -365,7 +365,7 @@ class StepVisualizer:
             cmap='RdPu',
             cbar_kws={'label': '% Count'},
             ax=ax,
-            annot=True,
+            annot=False,
             fmt=".3f",
             linewidth=.5,
         )
@@ -393,7 +393,7 @@ class StepVisualizer:
             fill_value=0,
         )
         #Normalize for better color scaling
-        pivot_df = (pivot_df - pivot_df.min()) / (pivot_df.max() - pivot_df.min())  # Shift to zero baseline for better color scaling
+        # pivot_df = (pivot_df - pivot_df.min()) / (pivot_df.max() - pivot_df.min())  # Shift to zero baseline for better color scaling
 
         fig, ax = plt.subplots(figsize=self.heatmap_size)
 
@@ -402,7 +402,7 @@ class StepVisualizer:
             cmap='viridis',
             cbar_kws={'label': 'Count'},
             ax=ax,
-            annot=True,
+            annot=False,
             fmt=".3f",
             linewidth=.5,
         )
@@ -431,7 +431,7 @@ class StepVisualizer:
             fill_value=0,
         )
         #Normalize for better color scaling
-        pivot_df = (pivot_df - pivot_df.min()) / (pivot_df.max() - pivot_df.min())  # Shift to zero baseline for better color scaling
+        # pivot_df = (pivot_df - pivot_df.min()) / (pivot_df.max() - pivot_df.min())  # Shift to zero baseline for better color scaling
 
         fig, ax = plt.subplots(figsize=self.heatmap_size)
 
@@ -440,7 +440,7 @@ class StepVisualizer:
             cmap='viridis',
             cbar_kws={'label': 'Count'},
             ax=ax,
-            annot=True,
+            annot=False,
             fmt=".2f",
             linewidth=.5,
         )
@@ -640,6 +640,7 @@ class StepVisualizer:
             if 'step_video_matrix' in analysis_results:
                 self.plot_step_video_heatmap(analysis_results['step_video_matrix'])
                 self.plot_step_video_heatmap(analysis_results['step_video_matrix'][analysis_results['step_video_matrix']['step_name'] != 'Idle'], prefix='no_idle_')
+            
             if 'temporal_steps_progression' in analysis_results:
                 self.plot_step_temporal_sequences(analysis_results['temporal_steps_progression'])
                 self.plot_step_temporal_sequences(analysis_results['temporal_steps_progression'][analysis_results['temporal_steps_progression']['step_name'] != 'Idle'], prefix='no_idle_')

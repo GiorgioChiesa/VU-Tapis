@@ -766,6 +766,66 @@ class MViT(nn.Module):
             nn.init.constant_(m.bias, 0.02)
             nn.init.constant_(m.weight, 1.0)
 
+    def freeze_encoder(self):
+        """
+        Freeze the encoder (patch embedding, transformer blocks, and norm layer).
+        Only the classification heads will be trainable.
+        """
+        # Get the actual model in case it's wrapped by DataParallel
+        model = self.module if isinstance(self, nn.DataParallel) else self
+        
+        # Freeze patch embedding
+        for param in model.patch_embed.parameters():
+            param.requires_grad = False
+        
+        # Freeze transformer blocks
+        for block in model.blocks:
+            for param in block.parameters():
+                param.requires_grad = False
+        
+        # Freeze norm layer
+        for param in model.norm.parameters():
+            param.requires_grad = False
+        
+        # Freeze positional embeddings and class token
+        if model.use_abs_pos:
+            if model.sep_pos_embed:
+                model.pos_embed_spatial.requires_grad = False
+                if model.use_temp_embed:
+                    model.pos_embed_temporal.requires_grad = False
+                if model.cls_embed_on:
+                    model.pos_embed_class.requires_grad = False
+            else:
+                model.pos_embed.requires_grad = False
+        
+        if model.cls_embed_on:
+            model.cls_token.requires_grad = False
+        
+        # Freeze norm_stem if it exists
+        if model.norm_stem is not None:
+            for param in model.norm_stem.parameters():
+                param.requires_grad = False
+        
+        # Freeze pos_drop if it exists
+        if model.drop_rate > 0.0:
+            for param in model.pos_drop.parameters():
+                param.requires_grad = False
+
+        model._print_parameter_counts()
+    
+    def _print_parameter_counts(self):
+        """
+        Print the number of learnable and fixed parameters.
+        """
+        learnable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        fixed = sum(p.numel() for p in self.parameters() if not p.requires_grad)
+        total = learnable + fixed
+        
+        print(f"Learnable parameters: {learnable:,}")
+        print(f"Fixed parameters: {fixed:,}")
+        print(f"Total parameters: {total:,}")
+
+
     @torch.jit.ignore
     def no_weight_decay(self):
         names = []

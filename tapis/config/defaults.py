@@ -84,6 +84,9 @@ _C.TRAIN.EVAL_TRAIN = False
 # Evaluate training performance
 _C.TRAIN.FILTER_EMPTY = True
 
+# Freeze encoder
+_C.TRAIN.FREEZE_ENCODER = False
+
 # ---------------------------------------------------------------------------- #
 # Augmentation options.
 # ---------------------------------------------------------------------------- #
@@ -735,7 +738,7 @@ _C.SOLVER.REDUCTION = "mean"
 
 # Number of GPUs to use (applies to both training and testing).
 _C.NUM_GPUS = 1
-
+_C.GPUIDS = [0]
 # Number of machine to use for the job.
 _C.NUM_SHARDS = 1
 
@@ -965,6 +968,9 @@ def assert_and_infer_cfg(cfg):
     # BN assertions.
     if cfg.BN.USE_PRECISE_STATS:
         assert cfg.BN.NUM_BATCHES_PRECISE >= 0
+        
+    # GPU assertion
+    cfg.NUM_GPU = len(cfg.GPUIDS) 
     # TRAIN assertions.
     assert cfg.TRAIN.CHECKPOINT_TYPE in ["pytorch", "caffe2"]
     assert cfg.NUM_GPUS == 0 or cfg.TRAIN.BATCH_SIZE % cfg.NUM_GPUS == 0

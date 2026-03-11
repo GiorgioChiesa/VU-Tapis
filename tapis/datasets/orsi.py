@@ -43,11 +43,11 @@ class Orsi(SurgicalDataset):
             breakpoint()
     
     def frame_name_spliting(self, video_name, sec):
-        video_num = int(video_name.replace('CASE',''))
+        video_num = int(video_name.replace('RARP',''))
         return [video_num,sec]
     
     def frame_num_joining(self, video_num, sec):
-        return f'CASE{video_num:03d}/{sec:0{self.zero_fill}d}.{self.image_type}'
+        return f'RARP{video_num:03d}/{sec:0{self.zero_fill}d}.{self.image_type}'
     
     def frame_name_joining(self, video_name, sec):
         return f"{video_name}/IMAGES/{sec:0{self.zero_fill}d}.{self.image_type}"

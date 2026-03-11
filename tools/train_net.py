@@ -391,6 +391,8 @@ def train(cfg):
     model = build_model(cfg)
     if cfg.MODEL.PRECISION == 64:
         model = model.double()
+    if cfg.TRAIN.FREEZE_ENCODER:
+        model.freeze_encoder()
 
     # Calculating model info (param & flops). 
     # Remove if it is not working

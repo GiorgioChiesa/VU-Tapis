@@ -1,7 +1,4 @@
-# sh install.sh
-# export $(grep -v '^#' .secret/.export_vars.txt | xargs)
-
-NAME="Orsi-backend"
+NAME="Orsi-finetune_all"
 # Experiment setup
 TRAIN_FOLDS="['RARP01.csv','RARP07.csv','RARP18.csv','RARP23.csv','RARP29.csv','RARP34.csv','RARP40.csv','RARP46.csv','RARP59.csv','RARP02.csv','RARP08.csv','RARP13.csv','RARP19.csv','RARP25.csv','RARP30.csv','RARP35.csv','RARP41.csv','RARP47.csv','RARP61.csv','RARP03.csv','RARP09.csv','RARP15.csv','RARP20.csv','RARP26.csv','RARP31.csv','RARP43.csv','RARP48.csv','RARP62.csv','RARP04.csv','RARP10.csv','RARP16.csv','RARP21.csv','RARP27.csv','RARP32.csv','RARP37.csv','RARP44.csv','RARP49.csv','RARP64.csv']"
 TEST_FOLDS="['RARP06.csv','RARP11.csv','RARP17.csv','RARP22.csv','RARP28.csv','RARP33.csv','RARP38.csv','RARP45.csv','RARP65.csv']"
@@ -39,7 +36,8 @@ python -B tools/run_net.py \
 --cfg $CONFIG_PATH \
 WANDB_ENABLE True \
 NAME $NAME \
-NUM_GPUS 1 \
+GPUIDS "[0,1,2,3]" \
+TRAIN.FREEZE_ENCODER False \
 OUTPUT_DIR $OUTPUT_DIR \
 ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/nas_private/data/orsi \
 ENDOVIS_DATASET.FRAME_LIST_DIR /home/gchie/workspace/nas_private/data/coco \

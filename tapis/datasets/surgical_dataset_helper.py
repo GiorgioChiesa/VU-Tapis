@@ -48,9 +48,13 @@ def load_image_lists(cfg, is_train):
             this video.
         video_idx_to_name (list): a list which stores video names.
     """
-    list_filenames = [
-        os.path.join(cfg.ENDOVIS_DATASET.FRAME_LIST_DIR, cfg.ENDOVIS_DATASET.TRAIN_LISTS if is_train else cfg.ENDOVIS_DATASET.TEST_LISTS)
-    ]
+    if is_train:
+        list_filenames = [os.path.join(cfg.ENDOVIS_DATASET.FRAME_LIST_DIR,train_file) for train_file in cfg.ENDOVIS_DATASET.TRAIN_LISTS]
+    else:
+        list_filenames = [os.path.join(cfg.ENDOVIS_DATASET.FRAME_LIST_DIR, test_file) for test_file in cfg.ENDOVIS_DATASET.TEST_LISTS]
+    # list_filenames = [
+    #     os.path.join(cfg.ENDOVIS_DATASET.FRAME_LIST_DIR, cfg.ENDOVIS_DATASET.TRAIN_LISTS if is_train else cfg.ENDOVIS_DATASET.TEST_LISTS)
+    # ]
     image_paths = defaultdict(list)
     video_name_to_idx = {}
     video_idx_to_name = []
@@ -93,14 +97,22 @@ def load_boxes_and_labels(cfg, mode):
     """
 
     if mode=='train':
-        gt_lists =[cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON] if cfg.ENDOVIS_DATASET.INCLUDE_GT or \
-                                                            not cfg.ENDOVIS_DATASET.USE_PREDS else []
-        pred_lists = [cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON] if cfg.ENDOVIS_DATASET.USE_PREDS else []
+        if cfg.ENDOVIS_DATASET.INCLUDE_GT or not cfg.ENDOVIS_DATASET.USE_PREDS:
+            gt_lists =[cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON] if isinstance(cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON, str) else cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON
+        else:
+            gt_lists = []
+        if cfg.ENDOVIS_DATASET.USE_PREDS:
+            pred_lists = [cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON] if isinstance(cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON, str) else cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON
+        else:
+            pred_lists = []
+        # gt_lists =[cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON] if cfg.ENDOVIS_DATASET.INCLUDE_GT or \
+        #                                                     not cfg.ENDOVIS_DATASET.USE_PREDS else []
+        # pred_lists = [cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON] if cfg.ENDOVIS_DATASET.USE_PREDS else []
     elif cfg.ENDOVIS_DATASET.USE_PREDS:
         gt_lists =[]
-        pred_lists = [cfg.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON]
+        pred_lists = [cfg.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON] if isinstance(cfg.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON, str) else cfg.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON
     else:
-        gt_lists = [cfg.ENDOVIS_DATASET.TEST_GT_BOX_JSON]
+        gt_lists = [cfg.ENDOVIS_DATASET.TEST_GT_BOX_JSON] if isinstance(cfg.ENDOVIS_DATASET.TEST_GT_BOX_JSON, str) else cfg.ENDOVIS_DATASET.TEST_GT_BOX_JSON
         pred_lists = []
 
     ann_filenames = [

@@ -9,11 +9,14 @@ import itertools
 import logging
 import os
 from collections import OrderedDict
+import sys
 from typing import Any, Dict, List, Set
 
 import torch
-if "TAPIS" not in os.getcwd():
-    os.chdir("GraSP/TAPIS")
+check_Tapis_path = os.path.dirname(os.path.dirname(__file__))
+if check_Tapis_path not in sys.path:
+    sys.path.insert(0, check_Tapis_path)
+    print(f"Added {check_Tapis_path} to sys.path")
 print(f"Current working directory: {os.getcwd()}")
 
 import detectron2.utils.comm as comm

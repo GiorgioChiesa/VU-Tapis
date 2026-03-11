@@ -5,8 +5,17 @@
 import sys
 import os
 # Add parent directory to path so tapis can be imported
-if os.getcwd() not in sys.path:
-    sys.path.insert(0, os.getcwd())
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+curr_path = os.getcwd()
+if curr_path not in sys.path:
+    sys.path.insert(0, curr_path)
+# if os.path.join(curr_path, "tapis") not in sys.path:
+#     sys.path.insert(0, os.path.join(curr_path, "tapis"))
+if os.path.join(curr_path, "detectron2") not in sys.path:
+    sys.path.insert(0, os.path.join(curr_path, "detectron2"))
+# if os.path.join(curr_path, "region_proposals") not in sys.path:
+#     sys.path.insert(0, os.path.join(curr_path, "region_proposals"))
+
 print(f"Current working directory: {os.getcwd()}")
 
 from tapis.config.defaults import assert_and_infer_cfg

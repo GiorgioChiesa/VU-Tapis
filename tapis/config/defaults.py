@@ -568,6 +568,8 @@ _C.DATA.NUM_FRAMES = 8
 # The video sampling rate of the input clip.
 _C.DATA.SAMPLING_RATE = 8
 
+_C.DATA.SEQ_MODE = "center" # or "before" or "after"
+
 # Eigenvalues for PCA jittering. Note PCA is RGB based.
 _C.DATA.TRAIN_PCA_EIGVAL = [0.225, 0.224, 0.229]
 
@@ -748,7 +750,7 @@ _C.OUTPUT_DIR = ""
 _C.RNG_SEED = 1
 
 # Log period in iters.
-_C.LOG_PERIOD = 10
+_C.LOG_PERIOD = 500
 
 # If True, log the model info.
 _C.LOG_MODEL_INFO = True
@@ -810,23 +812,23 @@ _C.ENDOVIS_DATASET.FRAME_LIST_DIR = ""
 _C.ENDOVIS_DATASET.ANNOTATION_DIR = ""
 
 # Filenames of training samples list files.
-_C.ENDOVIS_DATASET.TRAIN_LISTS = "train.csv"
+_C.ENDOVIS_DATASET.TRAIN_LISTS = ["train.csv"]
 
 # Filenames of test samples list files.
-_C.ENDOVIS_DATASET.TEST_LISTS = "val.csv"
+_C.ENDOVIS_DATASET.TEST_LISTS = ["val.csv"]
 
 # Filenames of box list files for training. Note that we assume files which
 # contains predicted boxes will have a suffix "predicted_boxes" in the
 # filename.
-_C.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON = "train_coco_anns.json"
+_C.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON = ["train_coco_anns.json"]
 
-_C.ENDOVIS_DATASET.TEST_GT_BOX_JSON = ""
+_C.ENDOVIS_DATASET.TEST_GT_BOX_JSON = ["val_coco_anns.json"]
 
 # Filenames of box list files for train.
-_C.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON = "train_coco_preds.json"
+_C.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON = ["train_coco_preds.json"]
 
 # Filenames of box list files for test.
-_C.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON = "val_coco_preds.json"
+_C.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON = ["val_coco_preds.json"]
 
 # This option controls the score threshold for the predicted boxes to use.
 _C.ENDOVIS_DATASET.DETECTION_SCORE_THRESH = 0.0

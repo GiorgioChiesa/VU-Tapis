@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 # Add parent directory to path so tapis can be imported
-sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent.joinpath('detectron2')))
+if Path(__file__).parent.parent not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+if Path(__file__).parent.parent.joinpath('detectron2') not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent.parent.joinpath('detectron2')))
 
 import random
 import numpy as np

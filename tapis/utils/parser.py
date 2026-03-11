@@ -50,7 +50,7 @@ def parse_args():
         "--cfg",
         dest="cfg_file",
         help="Path to the config file",
-        default="configs/Kinetics/SLOWFAST_4x16_R50.yaml",
+        default="configs/GraSP/TAPIS/TAPIS_LONG.yaml",
         type=str,
     )
     parser.add_argument(
@@ -88,6 +88,10 @@ def load_config(args):
         cfg.RNG_SEED = args.rng_seed
     if hasattr(args, "output_dir"):
         cfg.OUTPUT_DIR = args.output_dir
+    # if "[" in str(cfg.ENDOVIS_DATASET.TRAIN_LISTS) and "]" in str(cfg.ENDOVIS_DATASET.TRAIN_LISTS):
+    #     cfg.ENDOVIS_DATASET.TRAIN_LISTS = eval(cfg.ENDOVIS_DATASET.TRAIN_LISTS)
+    # if "[" in str(cfg.ENDOVIS_DATASET.TEST_LISTS) and "]" in str(cfg.ENDOVIS_DATASET.TEST_LISTS):
+    #     cfg.ENDOVIS_DATASET.TEST_LISTS = eval(cfg.ENDOVIS_DATASET.TEST_LISTS)
 
     # Create the checkpoint dir.
     cu.make_checkpoint_dir(cfg.OUTPUT_DIR)

@@ -57,7 +57,7 @@ def retry_load_images(image_paths, retry=10, backend="pytorch"):
             raise Exception("Failed to load images {}".format(image_paths))
 
 
-def get_sequence(center_idx, half_len, sample_rate, num_frames):
+def get_sequence(center_idx, length, sample_rate, num_frames, mode="center"):
     """
     Sample frames among the corresponding clip.
 
@@ -66,11 +66,19 @@ def get_sequence(center_idx, half_len, sample_rate, num_frames):
         half_len (int): half of the clip length
         sample_rate (int): sampling rate for sampling frames inside of the clip
         num_frames (int): number of expected sampled frames
-
+        mode (str): "center", "before", or "after". If "center", sample frames
+            centered around the center_idx. If "before", sample frames before
     Returns:
         seq (list): list of indexes of sampled frames in this clip.
     """
-    seq = list(range(center_idx - half_len, center_idx + half_len, sample_rate))
+    if mode == "center":
+        seq = list(range(center_idx - length//2, center_idx + length//2, sample_rate))
+    elif mode == "before":
+        seq = list(range(center_idx - length + sample_rate, center_idx + sample_rate, sample_rate))
+    elif mode == "after":
+        seq = list(range(center_idx, center_idx + length, sample_rate))
+    else:
+        raise ValueError(f"Invalid sequence mode: {mode}")
 
     for seq_idx in range(len(seq)):
         if seq[seq_idx] < 0:

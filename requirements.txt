@@ -16,3 +16,8 @@ wandb
 matplotlib
 seaborn
 openpyxl
+torch>2
+torchaudio
+torchvision
+timm
+einops

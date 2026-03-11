@@ -87,13 +87,21 @@ def get_logger(name):
 def log_json_stats(stats):
     """
     Logs json stats.
-    Args:
+    # Args:
         stats (dict): a dictionary of statistical information to log.
     """
-    stats = {
-        k: decimal.Decimal("{:.5f}".format(v)) if isinstance(v, float) else v
-        for k, v in stats.items()
-    }
-    json_stats = simplejson.dumps(stats, sort_keys=True, use_decimal=True)
+    stat={}
+    for k, v in stats.items():
+        if isinstance(v, float): 
+            stat[k] = decimal.Decimal("{:.5f}".format(v))
+        if type(v) == type(float("nan")):
+            continue
+        else:
+            stat[k] = v
+    # stats = {
+    #     k: decimal.Decimal("{:.5f}".format(v)) if isinstance(v, float) else v
+    #     for k, v in stats.items()
+    # }
+    json_stats = simplejson.dumps(stat, sort_keys=True, use_decimal=True)
     logger = get_logger(__name__)
     logger.info("json_stats: {:s}".format(json_stats))

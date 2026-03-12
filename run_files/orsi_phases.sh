@@ -7,7 +7,7 @@ GT_TEST_FOLDS="['RARP06_coco.json','RARP11_coco.json','RARP17_coco.json','RARP22
 EXP_PREFIX=$NAME  #costumize
 TASK="PHASES"
 ARCH="TAPIS"
-
+GPUIDS="2,3"
 #-------------------------
 DATASET="orsi"
 CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_PHASES.yaml"
@@ -25,6 +25,7 @@ CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_
 
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/tapis:$PYTHONPATH
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/region_proposals:$PYTHONPATH
+export CUDA_VISIBLE_DEVICES=$GPUIDS
 
 # export $(cut -f1 .secret/.export_vars.txt)
 # echo "Using WANDB_API_KEY: $WANDB_API"
@@ -36,7 +37,7 @@ python -B tools/run_net.py \
 --cfg $CONFIG_PATH \
 WANDB_ENABLE True \
 NAME $NAME \
-GPUIDS "[0,1,2,3]" \
+GPUIDS "[$GPUIDS]" \
 TRAIN.FREEZE_ENCODER False \
 OUTPUT_DIR $OUTPUT_DIR \
 ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/nas_private/data/orsi \

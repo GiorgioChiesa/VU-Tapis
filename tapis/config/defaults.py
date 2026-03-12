@@ -768,7 +768,7 @@ _C.DIST_BACKEND = "nccl"
 _C.DATA_LOADER = CfgNode()
 
 # Number of data loader workers per training process.
-_C.DATA_LOADER.NUM_WORKERS = 8
+_C.DATA_LOADER.NUM_WORKERS = 50
 
 # Load data to pinned host memory.
 _C.DATA_LOADER.PIN_MEMORY = True
@@ -971,6 +971,10 @@ def assert_and_infer_cfg(cfg):
         
     # GPU assertion
     cfg.NUM_GPU = len(cfg.GPUIDS) 
+    import os, torch
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(cfg.GPUIDS)[1:-1]
+    assert torch.cuda.is_available(), "Cuda is not available"
+    assert torch.cuda.device_count() >= cfg.NUM_GPU, f"Too many GPU required, {torch.cuda.device_count()} available, you ask {cfg.NUM_GPU}({cfg.GPUIDS})"
     # TRAIN assertions.
     assert cfg.TRAIN.CHECKPOINT_TYPE in ["pytorch", "caffe2"]
     assert cfg.NUM_GPUS == 0 or cfg.TRAIN.BATCH_SIZE % cfg.NUM_GPUS == 0

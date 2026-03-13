@@ -976,9 +976,9 @@ def assert_and_infer_cfg(cfg):
     cfg.NUM_GPU = len(cfg.GPUIDS) 
     cfg.NUM_SHARDS = cfg.NUM_GPU
     import os, torch
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(cfg.GPUIDS)[1:-1]
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(cfg.GPUIDS)[1:-1].replace(" ", "")
     assert torch.cuda.is_available(), "Cuda is not available"
-    assert torch.cuda.device_count() >= cfg.NUM_GPU, f"Too many GPU required, {torch.cuda.device_count()} available, you ask {cfg.NUM_GPU}({cfg.GPUIDS})"
+    assert torch.cuda.device_count() == cfg.NUM_GPU, f"Too many GPU required, {torch.cuda.device_count()} available, you ask {cfg.NUM_GPU}({cfg.GPUIDS})"
     # TRAIN assertions.
     assert cfg.TRAIN.CHECKPOINT_TYPE in ["pytorch", "caffe2"]
     assert cfg.NUM_GPUS == 0 or cfg.TRAIN.BATCH_SIZE % cfg.NUM_GPUS == 0

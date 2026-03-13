@@ -16,9 +16,34 @@ import torchvision.transforms as transforms
 from . import transform as transform
 from tapis.utils.env import pathmgr
 from torch.utils.data.distributed import DistributedSampler
+import concurrent.futures
 
 logger = logging.getLogger(__name__)
 
+
+def load_single_image(image_path):
+    
+    try:
+        tensor_path = image_path.replace("/nas_private/", "/").replace("/orsi/", "/orsi_tensors/").replace(".jpg", ".pt")
+        if os.path.exists(tensor_path):
+            img_tensor = torch.load(tensor_path, weights_only=True)  # HxWxC
+            return img_tensor.numpy()
+    except Exception as e:
+        logger.warn(
+            "Failed to load tensor {} with error {}.".format(tensor_path, e)
+        )
+    try:
+        tensor_path = image_path.replace("/nas_private/", "/")
+        with pathmgr.open(image_path, "rb") as f:
+            img_str = np.frombuffer(f.read(), np.uint8)
+            img = cv2.imdecode(img_str, flags=cv2.IMREAD_COLOR)
+            return img
+    except Exception as e:
+        logger.warn(
+            "Failed to load image {} with error {}.".format(image_path, e)
+        )
+        img = cv2.imread(image_path)
+    return img
 
 def retry_load_images(image_paths, retry=2, backend="pytorch"):
     """
@@ -34,28 +59,9 @@ def retry_load_images(image_paths, retry=2, backend="pytorch"):
     """
     for i in range(retry):
         imgs = []
-        for image_path in image_paths:
-            try:
-                tensor_path = image_path.replace("/orsi/", "/orsi_tensors/").replace(".jpg", ".pt")
-                if os.path.exists(tensor_path):
-                    img_tensor = torch.load(tensor_path, weights_only=True)  # HxWxC
-                    imgs.append(img_tensor.numpy())
-                    continue
-            except Exception as e:
-                logger.warn(
-                    "Failed to load tensor {} with error {}.".format(tensor_path, e)
-                )
-            
-            try:
-                with pathmgr.open(image_path, "rb") as f:
-                    img_str = np.frombuffer(f.read(), np.uint8)
-                    img = cv2.imdecode(img_str, flags=cv2.IMREAD_COLOR)
-            except Exception as e:
-                logger.warn(
-                    "Failed to load image {} with error {}.".format(image_path, e)
-                )
-                img = cv2.imread(image_path)
-            imgs.append(img)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            imgs = list(executor.map(load_single_image, image_paths))
 
         if all(img is not None for img in imgs):
             if backend == "pytorch":

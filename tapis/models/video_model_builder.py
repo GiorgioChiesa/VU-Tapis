@@ -772,7 +772,7 @@ class MViT(nn.Module):
         Only the classification heads will be trainable.
         """
         # Get the actual model in case it's wrapped by DataParallel
-        model = self.module if isinstance(self, nn.DataParallel) else self
+        model = self.module if hasattr(self, 'module') else self
         
         # Freeze patch embedding
         for param in model.patch_embed.parameters():

@@ -192,7 +192,6 @@ def train_epoch(
             misc.check_nan_losses(final_loss)
 
             # Perform the backward pass.
-            optimizer.zero_grad()
             scaler.scale(final_loss).backward()
 
             # Unscales the gradients of optimizer's assigned params in-place
@@ -207,10 +206,17 @@ def train_epoch(
                 torch.nn.utils.clip_grad_norm_(
                     model.parameters(), cfg.SOLVER.CLIP_GRAD_L2NORM
                 )
+                
+            if (cur_iter + 1) % cfg.TRAIN.ACCUM_STEPS == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+                
             # Update the parameters.
             scaler.step(optimizer)
             scaler.update()
-
+            optimizer.zero_grad()
+            
             if cfg.NUM_GPUS > 1:
                 final_loss = du.all_reduce([final_loss])[0]
             final_loss = final_loss.item()

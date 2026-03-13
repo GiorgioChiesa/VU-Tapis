@@ -20,7 +20,7 @@ from torch.utils.data.distributed import DistributedSampler
 logger = logging.getLogger(__name__)
 
 
-def retry_load_images(image_paths, retry=10, backend="pytorch"):
+def retry_load_images(image_paths, retry=2, backend="pytorch"):
     """
     This function is to load images with support of retrying for failed load.
 
@@ -36,13 +36,24 @@ def retry_load_images(image_paths, retry=10, backend="pytorch"):
         imgs = []
         for image_path in image_paths:
             try:
+                tensor_path = image_path.replace("/orsi/", "/orsi_tensors/").replace(".jpg", ".pt")
+                if os.path.exists(tensor_path):
+                    img_tensor = torch.load(tensor_path, weights_only=True)  # HxWxC
+                    imgs.append(img_tensor.numpy())
+                    continue
+            except Exception as e:
+                logger.warn(
+                    "Failed to load tensor {} with error {}.".format(tensor_path, e)
+                )
+            
+            try:
                 with pathmgr.open(image_path, "rb") as f:
                     img_str = np.frombuffer(f.read(), np.uint8)
                     img = cv2.imdecode(img_str, flags=cv2.IMREAD_COLOR)
             except Exception as e:
-                # logger.warn(
-                #     "Failed to load image {} with error {}.".format(image_path, e)
-                # )
+                logger.warn(
+                    "Failed to load image {} with error {}.".format(image_path, e)
+                )
                 img = cv2.imread(image_path)
             imgs.append(img)
 

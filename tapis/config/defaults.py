@@ -51,6 +51,9 @@ _C.TRAIN.DATASET = "kinetics"
 # Total mini-batch size.
 _C.TRAIN.BATCH_SIZE = 64
 
+#Accumula il gradiente per n iterazioni prima di fare l'update
+_C.TRAIN.ACCUM_STEPS = 1
+
 # Evaluate model on test data every eval period epochs.
 _C.TRAIN.EVAL_PERIOD = 10
 
@@ -971,6 +974,7 @@ def assert_and_infer_cfg(cfg):
         
     # GPU assertion
     cfg.NUM_GPU = len(cfg.GPUIDS) 
+    cfg.NUM_SHARDS = cfg.NUM_GPU
     import os, torch
     os.environ["CUDA_VISIBLE_DEVICES"] = str(cfg.GPUIDS)[1:-1]
     assert torch.cuda.is_available(), "Cuda is not available"

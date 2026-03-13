@@ -7,7 +7,7 @@ GT_TEST_FOLDS="['RARP06_coco.json','RARP11_coco.json','RARP17_coco.json','RARP22
 EXP_PREFIX=$NAME  #costumize
 TASK="PHASES"
 ARCH="TAPIS"
-GPUIDS="2,3"
+GPUIDS="1"
 #-------------------------
 DATASET="orsi"
 CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_PHASES.yaml"
@@ -33,18 +33,20 @@ export CUDA_VISIBLE_DEVICES=$GPUIDS
 
 mkdir -p $OUTPUT_DIR
 
-python -B tools/run_net.py \
+CUDA_VISIBLE_DEVICES=$GPUIDS python -B tools/run_net.py \
 --cfg $CONFIG_PATH \
 WANDB_ENABLE True \
 NAME $NAME \
 GPUIDS "[$GPUIDS]" \
+TRAIN.ACCUM_STEPS 4 \
+TRAIN.BATCH_SIZE 8 \
 TRAIN.FREEZE_ENCODER False \
 OUTPUT_DIR $OUTPUT_DIR \
-ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/nas_private/data/orsi \
-ENDOVIS_DATASET.FRAME_LIST_DIR /home/gchie/workspace/nas_private/data/coco \
+ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/data/orsi \
+ENDOVIS_DATASET.FRAME_LIST_DIR /home/gchie/workspace/data/coco \
 ENDOVIS_DATASET.TRAIN_LISTS $TRAIN_FOLDS \
 ENDOVIS_DATASET.TEST_LISTS $TEST_FOLDS \
-ENDOVIS_DATASET.ANNOTATION_DIR /home/gchie/workspace/nas_private/data/coco \
+ENDOVIS_DATASET.ANNOTATION_DIR /home/gchie/workspace/data/coco \
 ENDOVIS_DATASET.TRAIN_GT_BOX_JSON $GT_TRAIN_FOLDS \
 ENDOVIS_DATASET.TEST_GT_BOX_JSON $GT_TEST_FOLDS \
-ENDOVIS_DATASET.TEST_COCO_ANNS /home/gchie/workspace/nas_private/data/coco/all_merged.json 
+ENDOVIS_DATASET.TEST_COCO_ANNS /home/gchie/workspace/data/coco/all_merged.json 

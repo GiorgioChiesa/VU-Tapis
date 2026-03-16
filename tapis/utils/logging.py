@@ -107,4 +107,4 @@ def log_json_stats(stats):
         logger = get_logger(__name__)
         logger.info("json_stats: {:s}".format(json_stats))
     except Exception as e:
-        print(f"❌ Error in logger: ",e)
+        print(f"❌ Error in logger: ",e, stats)

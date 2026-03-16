@@ -11,6 +11,7 @@ from collections import defaultdict
 
 import torch
 import torch.utils.data.distributed
+from torchvision.io import read_image
 import torchvision.transforms as transforms
 
 from . import transform as transform
@@ -20,30 +21,76 @@ import concurrent.futures
 
 logger = logging.getLogger(__name__)
 
+def _resolve_paths(image_path: str) -> dict[str, str]:
+    """Resolve all candidate paths from the original image path."""
+    normalized = image_path.replace("/nas_private/", "/")
+    tensor = normalized.replace("/orsi/", "/orsi_tensors/").replace(".jpg", ".pt")
+    return {
+        "tensor": tensor,
+        "normalized_jpg": normalized,
+        "original_jpg": image_path,
+    }
 
-def load_single_image(image_path):
+
+def _load_tensor(tensor_path: str) -> np.ndarray | None:
+    """Try to load a pre-computed .pt tensor. Returns HxWxC numpy array or None."""
+    if not os.path.exists(tensor_path):
+        return None
+    try:
+        return read_image(tensor_path).numpy()
+    except Exception as e:
+        pass
     
     try:
-        tensor_path = image_path.replace("/nas_private/", "/").replace("/orsi/", "/orsi_tensors/").replace(".jpg", ".pt")
-        if os.path.exists(tensor_path):
-            img_tensor = torch.load(tensor_path, weights_only=True)  # HxWxC
-            return img_tensor.numpy()
+        return torch.load(tensor_path).numpy()
     except Exception as e:
-        logger.warn(
-            "Failed to load tensor {} with error {}.".format(tensor_path, e)
-        )
+        return None
+    
+def _load_jpg_with_pathmgr(jpg_path: str) -> np.ndarray | None:
+    """Try to load a JPEG via pathmgr (handles remote/distributed paths)."""
+    if not pathmgr.exists(jpg_path):
+        return None
     try:
-        tensor_path = image_path.replace("/nas_private/", "/")
-        with pathmgr.open(image_path, "rb") as f:
+        with pathmgr.open(jpg_path, "rb") as f:
             img_str = np.frombuffer(f.read(), np.uint8)
-            img = cv2.imdecode(img_str, flags=cv2.IMREAD_COLOR)
-            return img
+            return cv2.imdecode(img_str, flags=cv2.IMREAD_COLOR)
     except Exception as e:
-        logger.warn(
-            "Failed to load image {} with error {}.".format(image_path, e)
-        )
-        img = cv2.imread(image_path)
-    return img
+        return cv2.imread(jpg_path)  # Final fallback to cv2.imread to trigger any potential issues
+        
+
+
+def load_single_image(image_path: str) -> np.ndarray | None:
+    """
+    Load an image from disk with multiple fallback strategies:
+      1. Pre-computed tensor (.pt) from the normalized path
+      2. JPEG via pathmgr from the normalized path
+      3. JPEG via pathmgr from the original path
+      4. Direct cv2.imread as last resort
+
+    Returns a HxWxC numpy array, or None if all strategies fail.
+    """
+    paths = _resolve_paths(image_path)
+
+    # 1. Try pre-computed tensor
+    img = _load_tensor(paths["tensor"])
+    if img is not None:
+        return img
+
+    # 2. Try pathmgr with normalized jpg path
+    img = _load_jpg_with_pathmgr(paths["normalized_jpg"])
+    if img is not None:
+        return img
+
+
+    # 3. Try pathmgr with original path (e.g. /nas_private/ is actually reachable)
+    img = _load_jpg_with_pathmgr(paths["original_jpg"])
+    if img is not None:
+        return img
+
+
+    # 4. Last resort: direct cv2 read
+    logger.warning("Falling back to cv2.imread for %s", image_path)
+    return cv2.imread(image_path)
 
 def retry_load_images(image_paths, retry=2, backend="pytorch"):
     """

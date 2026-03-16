@@ -122,7 +122,6 @@ def train_epoch(
         cur_epoch (int): current epoch of training.
         cfg (CfgNode): configs. Details can be found in
             slowfast/config/defaults.py
-
     """
     # Enable train mode.
     model.train()

@@ -16,7 +16,7 @@ if os.path.join(curr_path, "detectron2") not in sys.path:
 # if os.path.join(curr_path, "region_proposals") not in sys.path:
 #     sys.path.insert(0, os.path.join(curr_path, "region_proposals"))
 
-print(f"Current working directory: {os.getcwd()}")
+# print(f"Current working directory: {os.getcwd()}")
 
 from tapis.config.defaults import assert_and_infer_cfg
 from tapis.utils.misc import launch_job

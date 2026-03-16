@@ -273,6 +273,7 @@ def init_distributed_training(cfg):
         return
     num_gpus_per_machine = cfg.NUM_GPUS
     num_machines = dist.get_world_size() // num_gpus_per_machine
+    num_machines = 1
     for i in range(num_machines):
         ranks_on_i = list(
             range(i * num_gpus_per_machine, (i + 1) * num_gpus_per_machine)

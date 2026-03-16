@@ -1,4 +1,4 @@
-NAME="Orsi-finetune_all"
+NAME="Orsi-all"
 # Experiment setup
 TRAIN_FOLDS="['RARP01.csv','RARP07.csv','RARP18.csv','RARP23.csv','RARP29.csv','RARP34.csv','RARP40.csv','RARP46.csv','RARP59.csv','RARP02.csv','RARP08.csv','RARP13.csv','RARP19.csv','RARP25.csv','RARP30.csv','RARP35.csv','RARP41.csv','RARP47.csv','RARP61.csv','RARP03.csv','RARP09.csv','RARP15.csv','RARP20.csv','RARP26.csv','RARP31.csv','RARP43.csv','RARP48.csv','RARP62.csv','RARP04.csv','RARP10.csv','RARP16.csv','RARP21.csv','RARP27.csv','RARP32.csv','RARP37.csv','RARP44.csv','RARP49.csv','RARP64.csv']"
 TEST_FOLDS="['RARP06.csv','RARP11.csv','RARP17.csv','RARP22.csv','RARP28.csv','RARP33.csv','RARP38.csv','RARP45.csv','RARP65.csv']"
@@ -7,7 +7,7 @@ GT_TEST_FOLDS="['RARP06_coco.json','RARP11_coco.json','RARP17_coco.json','RARP22
 EXP_PREFIX=$NAME  #costumize
 TASK="PHASES"
 ARCH="TAPIS"
-GPUIDS="1"
+GPUIDS="0"
 #-------------------------
 DATASET="orsi"
 CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_PHASES.yaml"
@@ -22,7 +22,6 @@ CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_
 
 #-------------------------
 # Run experiment
-
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/tapis:$PYTHONPATH
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/region_proposals:$PYTHONPATH
 export CUDA_VISIBLE_DEVICES=$GPUIDS
@@ -30,7 +29,8 @@ export CUDA_VISIBLE_DEVICES=$GPUIDS
 # export $(cut -f1 .secret/.export_vars.txt)
 # echo "Using WANDB_API_KEY: $WANDB_API"
 # wandb login --relogin --key $WANDB_API
-
+# eval "$(mamba shell hook --shell bash)"
+# mamba activate Vu-Tapis
 mkdir -p $OUTPUT_DIR
 
 CUDA_VISIBLE_DEVICES=$GPUIDS python -B tools/run_net.py \
@@ -40,9 +40,10 @@ NAME $NAME \
 GPUIDS "[$GPUIDS]" \
 TRAIN.ACCUM_STEPS 4 \
 TRAIN.BATCH_SIZE 8 \
+TEST.BATCH_SIZE 16 \
 TRAIN.FREEZE_ENCODER False \
 OUTPUT_DIR $OUTPUT_DIR \
-ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/data/orsi \
+ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/nas_private/data/orsi \
 ENDOVIS_DATASET.FRAME_LIST_DIR /home/gchie/workspace/data/coco \
 ENDOVIS_DATASET.TRAIN_LISTS $TRAIN_FOLDS \
 ENDOVIS_DATASET.TEST_LISTS $TEST_FOLDS \

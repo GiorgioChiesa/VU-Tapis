@@ -29,7 +29,7 @@ def check_nan_losses(loss):
         loss (loss): loss to check whether is NaN.
     """
     if math.isnan(loss):
-        breakpoint()
+        # breakpoint()
         raise RuntimeError("ERROR: Got NaN losses {}".format(datetime.now()))
 
 

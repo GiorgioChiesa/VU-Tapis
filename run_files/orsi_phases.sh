@@ -1,4 +1,3 @@
-NAME="Orsi-all"
 # Experiment setup
 TRAIN_FOLDS="['RARP01.csv','RARP07.csv','RARP18.csv','RARP23.csv','RARP29.csv','RARP34.csv','RARP40.csv','RARP46.csv','RARP59.csv','RARP02.csv','RARP08.csv','RARP13.csv','RARP19.csv','RARP25.csv','RARP30.csv','RARP35.csv','RARP41.csv','RARP47.csv','RARP61.csv','RARP03.csv','RARP09.csv','RARP15.csv','RARP20.csv','RARP26.csv','RARP31.csv','RARP43.csv','RARP48.csv','RARP62.csv','RARP04.csv','RARP10.csv','RARP16.csv','RARP21.csv','RARP27.csv','RARP32.csv','RARP37.csv','RARP44.csv','RARP49.csv','RARP64.csv']"
 TEST_FOLDS="['RARP06.csv','RARP11.csv','RARP17.csv','RARP22.csv','RARP28.csv','RARP33.csv','RARP38.csv','RARP45.csv','RARP65.csv']"
@@ -58,6 +57,8 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
+NAME="Orsi-all"
+
 DATASET="orsi"
 CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_PHASES.yaml"
 OUTPUT_DIR="/home/gchie/workspace/VU-Tapis/outputs/"$DATASET"/"$TASK"/"$NAME"/totale"
@@ -90,7 +91,7 @@ GPUIDS "[$GPUIDS]" \
 TRAIN.ACCUM_STEPS 10 \
 TRAIN.BATCH_SIZE 16 \
 TEST.BATCH_SIZE 40 \
-SOLVER.MAX_ITER 10000 \
+SOLVER.MAX_ITER 5000 \
 TRAIN.FREEZE_ENCODER False \
 OUTPUT_DIR $OUTPUT_DIR \
 ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/nas_private/data/orsi \

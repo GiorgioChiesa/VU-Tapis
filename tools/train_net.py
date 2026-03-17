@@ -231,8 +231,8 @@ def train_epoch(
                 final_loss = loss[0]
                 
             # check Nan Loss.
-            misc.check_nan_losses(final_loss)
-
+            if cur_iter % 50 == 0:
+                misc.check_nan_losses(final_loss.item())
             # Perform the backward pass.
             # scaler.scale(final_loss).backward()
 
@@ -341,7 +341,9 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
             preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images)
             # breakpoint()
             if cfg.NUM_GPUS:
-                preds = {task: preds[task].cpu() for task in preds}
+                preds = {task: preds[task].cpu(non_blocking=True) for task in preds}
+                # Accumula tutti i risultati prima di accedervi
+                torch.cuda.synchronize()  # una sola sync alla fine
                 ori_boxes = ori_boxes.cpu() if cfg.REGIONS.ENABLE else None
                 boxes_idxs = boxes_idxs.cpu() if cfg.REGIONS.ENABLE else None
                 boxes_mask = boxes_mask.cpu() if cfg.REGIONS.ENABLE else None

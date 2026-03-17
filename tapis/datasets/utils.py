@@ -37,12 +37,21 @@ def _load_tensor(tensor_path: str) -> np.ndarray | None:
     if not os.path.exists(tensor_path):
         return None
     try:
-        return read_image(tensor_path).numpy()
+        tensor = torch.load(tensor_path, map_location='cpu', weights_only=True)
+    
+        # ✅ Se già pre-processato: CHW float32 range ~[-2, 2]
+        if tensor.dtype == torch.float32 and tensor.max() < 10.0:
+            # Converti CHW → HWC per compatibilità con la pipeline esistente
+            # MA segnala che è già normalizzato
+            return tensor.permute(1, 2, 0).numpy()  # HWC float32 normalizzato
+
+        return tensor.numpy()  # HWC uint8 non normalizzato
+        
     except Exception as e:
         pass
     
     try:
-        return torch.load(tensor_path).numpy()
+        return read_image(tensor_path).numpy()
     except Exception as e:
         return None
     
@@ -58,6 +67,24 @@ def _load_jpg_with_pathmgr(jpg_path: str) -> np.ndarray | None:
         return cv2.imread(jpg_path)  # Final fallback to cv2.imread to trigger any potential issues
         
 
+# Aggiungi questa funzione separata
+def load_single_image_preprocessed(image_path: str):
+    """
+    Carica un tensore già pre-processato [3, 224, 224] float32.
+    Ritorna il tensore direttamente senza ulteriore preprocessing.
+    """
+    paths = _resolve_paths(image_path)
+    tensor_path = paths["tensor"]
+    
+    if not os.path.exists(tensor_path):
+        return None
+    try:
+        tensor = torch.load(tensor_path, map_location='cpu', weights_only=True)
+        if tensor.shape[0] == 3:  # CHW → già pre-processato
+            return tensor  # torch.Tensor [3, 224, 224]
+        return None
+    except Exception:
+        return None
 
 def load_single_image(image_path: str) -> np.ndarray | None:
     """
@@ -105,10 +132,10 @@ def retry_load_images(image_paths, retry=2, backend="pytorch"):
         imgs (list): list of loaded images.
     """
     for i in range(retry):
-        imgs = []
+        imgs = [load_single_image(image_path) for image_path in image_paths]
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            imgs = list(executor.map(load_single_image, image_paths))
+        # with concurrent.futures.ThreadPoolExecutor() as executor:
+        #     imgs = list(executor.map(load_single_image, image_paths))
 
         if all(img is not None for img in imgs):
             if backend == "pytorch":

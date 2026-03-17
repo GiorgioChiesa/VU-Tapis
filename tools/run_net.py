@@ -16,7 +16,7 @@ if os.path.join(curr_path, "detectron2") not in sys.path:
 # if os.path.join(curr_path, "region_proposals") not in sys.path:
 #     sys.path.insert(0, os.path.join(curr_path, "region_proposals"))
 
-# print(f"Current working directory: {os.getcwd()}")
+print(f"Current working directory: {os.getcwd()}")
 
 from tapis.config.defaults import assert_and_infer_cfg
 from tapis.utils.misc import launch_job
@@ -31,9 +31,12 @@ def main():
     """
     Main function to spawn the train and test process.
     """
+    
     args = parse_args()
     cfg = load_config(args)
     cfg = assert_and_infer_cfg(cfg)
+    
+    print("Working on gpu: {}".format(cfg.GPUIDS))
     
     if cfg.FEATURES.USE_RPN:
         from detectron2.config import get_cfg

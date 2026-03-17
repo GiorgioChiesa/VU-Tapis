@@ -397,11 +397,11 @@ def load_checkpoint(
             # Load the optimizer state (commonly not done when fine-tuning)
         if "epoch" in checkpoint.keys() and not epoch_reset:
             epoch = checkpoint["epoch"]
-            if optimizer:
+            if optimizer and "optimizer_state" in checkpoint.keys():
                 optimizer.load_state_dict(checkpoint["optimizer_state"])
-            if scaler:
+            if scaler and "scaler_state" in checkpoint.keys():
                 scaler.load_state_dict(checkpoint["scaler_state"])
-            if scheduler:
+            if scheduler and "scheduler_state" in checkpoint.keys():
                 scheduler.load_state_dict(checkpoint["scheduler_state"])
                 
         else:

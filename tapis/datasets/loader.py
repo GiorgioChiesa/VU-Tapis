@@ -101,6 +101,8 @@ def construct_loader(cfg, split, is_precise_bn=False):
             drop_last=drop_last,
             collate_fn=detection_collate,
             worker_init_fn=utils.loader_worker_init_fn(dataset),
+            prefetch_factor=4,       # aggiungere
+            persistent_workers=True, # aggiungere: evita di ricreare i worker ogni epoca
         )
     else:
         # Create a sampler for multi-process training
@@ -118,6 +120,9 @@ def construct_loader(cfg, split, is_precise_bn=False):
             drop_last=drop_last,
             collate_fn=collate_func,
             worker_init_fn=utils.loader_worker_init_fn(dataset),
+            prefetch_factor=4,       # aggiungere
+            persistent_workers=True, # aggiungere: evita di ricreare i worker ogni epoca
+
         )
     return loader
 

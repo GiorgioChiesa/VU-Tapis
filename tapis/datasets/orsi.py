@@ -7,6 +7,9 @@ import logging
 import numpy as np
 
 from copy import deepcopy
+
+from tapis.datasets import cv2_transform
+import torch
 from .surgical_dataset import SurgicalDataset
 from . import utils as utils
 from .build import DATASET_REGISTRY
@@ -173,19 +176,28 @@ class Orsi(SurgicalDataset):
                 
         # Load images of current clip.
         image_paths = [self._image_paths[video_idx][frame] for frame in seq]
-        imgs = utils.retry_load_images(
-            image_paths, backend=self.cfg.ENDOVIS_DATASET.IMG_PROC_BACKEND
-        )
+        image = None
+        preprocessed = [utils.load_single_image_preprocessed(p) for p in image_paths]
+        if all(t is not None for t in preprocessed):
+            # ✅ Tutto pre-processato: stack diretto, skip preprocessing
+            imgs = torch.stack(preprocessed,dim=1)  # [3, T, 224, 224]
+            boxes = cv2_transform.clip_boxes_to_image(boxes, 224, 224)
+        else:
+            # Fallback: caricamento e preprocessing normale
+            imgs = utils.retry_load_images(image_paths, backend=self.cfg.ENDOVIS_DATASET.IMG_PROC_BACKEND)
+            if self.cfg.FEATURES.USE_RPN:
+                image = imgs[len(imgs)//2]
+
+            imgs, boxes, image = self._images_and_boxes_preprocessing_cv2(imgs, boxes=boxes, image=image)
 
         if self.cfg.FEATURES.USE_RPN:
             image = imgs[len(imgs)//2]
-        else:
-            image = None
+
         
         # Preprocess images and boxes
-        imgs, boxes, image = self._images_and_boxes_preprocessing_cv2(
-            imgs, boxes=boxes, image=image
-        )
+        # imgs, boxes, image = self._images_and_boxes_preprocessing_cv2(
+        #     imgs, boxes=boxes, image=image
+        # )
         
         # Padding and masking for a consistent dimensions in batch
         if self.cfg.REGIONS.ENABLE and len(ori_boxes):

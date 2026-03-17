@@ -78,6 +78,7 @@ class SurgeryMeter(object):
         self.groundtruth = cfg.ENDOVIS_DATASET.TEST_COCO_ANNS
         self.segmentation = cfg.REGIONS.ENABLE and cfg.REGIONS.LEVEL=='segmentation'
         self.all_labels = {k: [] for k in self.tasks}
+        self.class_names = {task: [] for task in self.tasks}
         
         if self.segmentation and os.path.isdir(cfg.ENDOVIS_DATASET.MASKS_PATH):
             self.mask_path = cfg.ENDOVIS_DATASET.MASKS_PATH

@@ -692,6 +692,12 @@ _C.SOLVER.LRS = []
 # Maximal number of epochs.
 _C.SOLVER.MAX_EPOCH = 300
 
+#Max iteration for epoch, if None, it will be automatically calculated by the number of samples and batch size.
+_C.SOLVER.MAX_ITER = None
+
+# Early stop if the metric does not improve for this many epochs. Note that the metric should be specified in the config file and higher is better.
+_C.SOLVER.EARLY_STOP_ep_th = [3, 0.02]
+
 # Momentum.
 _C.SOLVER.MOMENTUM = 0.9
 
@@ -818,10 +824,10 @@ _C.ENDOVIS_DATASET.FRAME_LIST_DIR = ""
 _C.ENDOVIS_DATASET.ANNOTATION_DIR = ""
 
 # Filenames of training samples list files.
-_C.ENDOVIS_DATASET.TRAIN_LISTS = ["train.csv"]
+_C.ENDOVIS_DATASET.TRAIN_LISTS = ["train.csv",]
 
 # Filenames of test samples list files.
-_C.ENDOVIS_DATASET.TEST_LISTS = ["val.csv"]
+_C.ENDOVIS_DATASET.TEST_LISTS = ["val.csv",]
 
 # Filenames of box list files for training. Note that we assume files which
 # contains predicted boxes will have a suffix "predicted_boxes" in the

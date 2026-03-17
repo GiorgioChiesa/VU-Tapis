@@ -16,41 +16,48 @@ def eval_classification(task, coco_anns, preds, **kwargs):
     
     classes = coco_anns[f'{task}_categories']
     num_classes = len(classes)
-    bin_labels = np.zeros((len(coco_anns["annotations"]), num_classes))
-    bin_preds = np.zeros((len(coco_anns["annotations"]), num_classes))
+    bin_labels = []
+    bin_preds = []
     ann_preds_dict = {}
-    evaluated_frames = []
     image_not_found_count = 0
-    for idx, ann in tqdm(enumerate(coco_anns["annotations"]), total=len(coco_anns["annotations"])):
-        ann_class = int(ann[task])
-        bin_labels[idx, :] = label_binarize([ann_class], classes=list(range(0, num_classes)))
-        
-
-        if  ann["image_name"] in preds.keys():
-            # TODO: This might be different on other datasets, change in the future
-            video = ann["image_name"].split('/')[0]
-            these_probs = preds[ann["image_name"]]['{}_score_dist'.format(task)]
+    
+    # Create annotation lookup by image name
+    ann_by_image = {}
+    for idx, ann in enumerate(coco_anns["annotations"]):
+        img_name = ann["image_name"]
+        if img_name not in ann_by_image:
+            ann_by_image[img_name] = []
+        ann_by_image[img_name].append((idx, ann))
+    
+    # Loop through predictions (typically fewer than annotations)
+    for img_name, pred_data in tqdm(preds.items()):
+        if img_name not in ann_by_image:
+            continue
             
-            if len(these_probs) == 0:
-                print("Prediction not found for image {}".format(ann["image_name"]))
-                these_probs = np.zeros((1, num_classes))
-            else:
-                evaluated_frames.append(idx)
-            bin_preds[idx, :] = these_probs
+        these_probs = pred_data[f'{task}_score_dist']
+        if len(these_probs) == 0:
+            print(f"Prediction not found for image {img_name}")
+            these_probs = np.zeros((1, num_classes))
+        
+        video = img_name.split('/')[0]
+        
+        for idx, ann in ann_by_image[img_name]:
+            ann_class = int(ann[task])
+            bin_labels.append(label_binarize([ann_class], classes=list(range(0, num_classes)))[0])
+            bin_preds.append(these_probs)
             
             if video in ann_preds_dict:
-                ann_preds_dict[video].append((ann_class,np.argmax(these_probs)))
+                ann_preds_dict[video].append((ann_class, np.argmax(these_probs)))
             else:
-                ann_preds_dict[video] = [(ann_class,np.argmax(these_probs))]
-        else:
-            image_not_found_count += 1
-            # print("Image {} not found in predictions lists".format(ann["image_name"]))
-    print(f"Total images not found in predictions: {image_not_found_count}")
-    print(f"Total for calcculating metrics: {len(coco_anns['annotations']) - image_not_found_count}")
-            
-    bin_labels = bin_labels[evaluated_frames]
-    bin_preds = bin_preds[evaluated_frames]
+                ann_preds_dict[video] = [(ann_class, np.argmax(these_probs))]
     
+    # Count missing annotations
+    image_not_found_count = len(coco_anns["annotations"]) - len(bin_labels)
+    print(f"Total images not found in predictions: {image_not_found_count}")
+    print(f"Total for calculating metrics: {len(bin_labels)}")
+    
+    bin_labels = np.array(bin_labels)
+    bin_preds = np.array(bin_preds)
     precision = {}
     recall = {}
     threshs = {}

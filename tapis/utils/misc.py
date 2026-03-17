@@ -212,6 +212,8 @@ def is_eval_epoch(cfg, cur_epoch, multigrid_schedule):
     """
     if cur_epoch + 1 == cfg.SOLVER.MAX_EPOCH:
         return True
+    if not cfg.TEST.ENABLE:
+        return False
     if multigrid_schedule is not None:
         prev_epoch = 0
         for s in multigrid_schedule:

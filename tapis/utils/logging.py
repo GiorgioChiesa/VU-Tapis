@@ -97,6 +97,8 @@ def log_json_stats(stats):
                 stat[k] = decimal.Decimal("{:.5f}".format(v))
             if type(v) == type(float("nan")):
                 continue
+            if isinstance(v, dict):
+                stat[k] = {k1: decimal.Decimal("{:.5f}".format(v1)) if isinstance(v1, float) else v1 for k1, v1 in v.items()}
             else:
                 stat[k] = v
         # stats = {

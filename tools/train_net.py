@@ -35,6 +35,7 @@ import wandb
 from tqdm import tqdm
 from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
+from pyinstrument import Profiler
 
 
 logger = logging.get_logger(__name__)
@@ -59,9 +60,9 @@ def wandgb_log(stats):
             wanbrun.log(stats)
 
 
-def log_confusion_matrix_wandb(pred, labels, task, mode, epoch, cfg):
+def log_confusion_matrix_wandb(meter, task, mode, epoch, mean_map, name_wandb, cfg):
     """
-    Logga la confusion matrix su wandb usando wandb.plot.confusion_matrix.
+    Crea e salva una confusion matrix come immagine, poi la logga su wandb come artifact.
 
     Args:
         pred (list): Lista di liste con le probabilità per ogni classe.
@@ -74,29 +75,71 @@ def log_confusion_matrix_wandb(pred, labels, task, mode, epoch, cfg):
         cfg: Configurazione del modello.
     """
     global wanbrun
-    if wanbrun is None:
-        return
 
     try:
+        pred = meter.all_preds[task]
+        labels = meter.all_labels[task]
+        
         # Converti le probabilità in predizioni tramite argmax
         pred_classes = np.argmax(np.array(pred), axis=1)
 
+        # Calcola la confusion matrix
+        cm = confusion_matrix(labels, pred_classes )
+
         # Crea una lista di nomi delle classi
-        num_classes = len(pred[0]) if len(pred) > 0 else 0
+        num_classes = cm.shape[0]
+        # class_names = list(set([v.split("-")[0] for v in meter.full_map]))
         class_names = [f"Class {i}" for i in range(num_classes)]
+        # class_names = []
+        # for name in meter.full_map[task]:
+        #     if "RARP" in name:
+        #         continue
+        #     class_names.append("-".join(name.split("-")[:-1]))
+        # class_names = [n for n in set(class_names) if n]
 
-        # Log using wandb.plot.confusion_matrix
-        cm_plot = wandb.plot.confusion_matrix(
-            y_true=labels,
-            preds=pred_classes,
-            class_names=class_names,
-            title=f"Confusion Matrix - {task} ({mode}) - Epoch {epoch}"
-        )
+        # Crea la figura
+        fig, ax = plt.subplots(figsize=(8, 6))
+        im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+        ax.figure.colorbar(im, ax=ax)
 
-        wanbrun.log({
-            f"confusion_matrix/{task}/{mode}": cm_plot,
-            "epoch": epoch
-        })
+        # Aggiungi ticks e labels
+        ax.set(xticks=np.arange(cm.shape[1]),
+               yticks=np.arange(cm.shape[0]),
+               xticklabels=class_names, yticklabels=class_names,
+               title=f"Confusion Matrix - {task} ({mode}) - Epoch {epoch} - mAP: {mean_map:.4f}",
+               ylabel='True label',
+               xlabel='Predicted label')
+
+        # Ruota i tick labels
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+                 rotation_mode="anchor")
+
+        # # Aggiungi i valori nella matrice
+        # thresh = cm.max() / 2.
+        # for i in range(cm.shape[0]):
+        #     for j in range(cm.shape[1]):
+        #         ax.text(j, i, format(cm[i, j], 'd'),
+        #                 ha="center", va="center",
+        #                 color="white" if cm[i, j] > thresh else "black")
+
+        fig.tight_layout()
+
+        # Crea la cartella se non esiste
+        cm_dir = os.path.join(cfg.OUTPUT_DIR, "confusion_matrix")
+        os.makedirs(cm_dir, exist_ok=True)
+
+        # Salva l'immagine
+        cm_path = os.path.join(cm_dir, f"cm_{task}_{mode}_epoch_{epoch}.png")
+        plt.savefig(cm_path)
+        plt.close(fig)
+
+        # Log come artifact su wandb
+        if name_wandb and wanbrun is not None:
+            artifact_name = f"confusion_matrix_{task}_{mode}_{name_wandb}_epoch_{epoch}"
+            # artifact = wandb.Artifact(name=artifact_name, type="confusion_matrix")
+            # artifact.add_file(cm_path)
+            # wanbrun.log_artifact(artifact)
+            wandb.save(artifact_name, base_path=cm_dir)
 
     except Exception as e:
         logger.warning(f"Errore nel logging della confusion matrix per task {task}: {e}")
@@ -191,10 +234,10 @@ def train_epoch(
             misc.check_nan_losses(final_loss)
 
             # Perform the backward pass.
-            scaler.scale(final_loss).backward()
+            # scaler.scale(final_loss).backward()
 
             # Unscales the gradients of optimizer's assigned params in-place
-            scaler.unscale_(optimizer)
+            # scaler.unscale_(optimizer)
 
             # Clip gradients if necessary
             if cfg.SOLVER.CLIP_GRAD_VAL:
@@ -206,15 +249,17 @@ def train_epoch(
                     model.parameters(), cfg.SOLVER.CLIP_GRAD_L2NORM
                 )
                 
+            scaler.scale(final_loss / cfg.TRAIN.ACCUM_STEPS).backward()  # normalizza il loss
+
             if (cur_iter + 1) % cfg.TRAIN.ACCUM_STEPS == 0:
+                scaler.unscale_(optimizer)
+                if cfg.SOLVER.CLIP_GRAD_VAL:
+                    torch.nn.utils.clip_grad_value_(model.parameters(), cfg.SOLVER.CLIP_GRAD_VAL)
+                elif cfg.SOLVER.CLIP_GRAD_L2NORM:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.SOLVER.CLIP_GRAD_L2NORM)
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
-                
-            # Update the parameters.
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
             
             if cfg.NUM_GPUS > 1:
                 final_loss = du.all_reduce([final_loss])[0]
@@ -226,6 +271,10 @@ def train_epoch(
             stats = train_meter.log_iter_stats(cur_epoch, cur_iter)
             train_meter.iter_tic()
             t.set_postfix(stats.items())
+
+            if cfg.SOLVER.MAX_ITER and cur_iter+1 >= cfg.SOLVER.MAX_ITER:
+                break
+            
     t.close()
     # Log epoch stats.
     train_meter.log_epoch_stats(cur_epoch)
@@ -331,6 +380,9 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
             stats = val_meter.log_iter_stats(cur_epoch, cur_iter)
             val_meter.iter_tic()
             t.set_postfix(stats.items())
+            
+            # if cfg.SOLVER.MAX_ITER and cur_iter+1 >= cfg.SOLVER.MAX_ITER:
+            #     break
 
 
     t.close()
@@ -343,21 +395,8 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
     else:
         task_map, mean_map, out_files, stats = val_meter.log_epoch_stats(cur_epoch)
 
-    # Log confusion matrix for each task
     if cfg.WANDB_ENABLE and cfg.NUM_GPUS <= 1:
         wandgb_log(stats)
-        for task in complete_tasks:
-            if len(val_meter.all_preds[task]) > 0 and len(val_meter.all_labels[task]) > 0:
-                log_confusion_matrix_wandb(
-                    val_meter.all_preds[task],
-                    val_meter.all_labels[task],
-                    task,
-                    "val",
-                    cur_epoch,
-                    cfg
-                )
-        
-    val_meter.reset()
 
     return task_map, mean_map, out_files
 
@@ -369,13 +408,16 @@ def train(cfg):
         cfg (CfgNode): configs. Details can be found in
             slowfast/config/defaults.py
     """
+    
+    profiler = Profiler()
+    profiler.start()
     # Set up environment.
     du.init_distributed_training(cfg)
     # Set random seed from configs.
     random.seed(cfg.RNG_SEED)
     np.random.seed(cfg.RNG_SEED)
     torch.manual_seed(cfg.RNG_SEED)
-    cudnn.benchmark = False
+    cudnn.benchmark = True
     cudnn.deterministic = True
 
     # Setup logging format.
@@ -433,6 +475,7 @@ def train(cfg):
     if cfg.TEST.ENABLE:
         logger.info("Evaluating epoch: {}".format(start_epoch))
         map_task, mean_map, out_files = eval_epoch(val_loader, model, val_meter, start_epoch-1, cfg)
+        val_meter.reset()
         if not cfg.TRAIN.ENABLE:
             return
     elif cfg.TRAIN.ENABLE:
@@ -443,6 +486,8 @@ def train(cfg):
     complete_tasks = cfg.TASKS.TASKS
     best_task_map = {task: 0 for task in complete_tasks}
     best_mean_map = 0
+    early_stop_best = -float('inf')
+    early_stop_counter = 0
     epoch_timer = EpochTimer()
     
     for cur_epoch in range(start_epoch, cfg.SOLVER.MAX_EPOCH):
@@ -511,6 +556,7 @@ def train(cfg):
                 best_preds_path = main_path.replace(fold, fold+'/best_predictions')
                 if not os.path.exists(best_preds_path):
                     os.makedirs(best_preds_path)
+                old_best_mean_map = best_mean_map
                 # Save best results
                 if mean_map > best_mean_map:
                     best_mean_map = mean_map
@@ -543,6 +589,32 @@ def train(cfg):
                             cfg,
                             scaler if cfg.TRAIN.MIXED_PRECISION else None,
                         )
+                # Log confusion matrix for best or last epoch
+                is_best = mean_map > old_best_mean_map
+                if cfg.WANDB_ENABLE and cfg.NUM_GPUS <= 1:
+                    name_wandb = "best_epoch" if is_best else "last_epoch"
+                    for task in complete_tasks:
+                        if len(val_meter.all_preds[task]) > 0 and len(val_meter.all_labels[task]) > 0:
+                            log_confusion_matrix_wandb(
+                                val_meter,
+                                task,
+                                "val",
+                                cur_epoch,
+                                mean_map,
+                                name_wandb,
+                                cfg
+                            )
+                
+                # Early stopping check
+                if mean_map - early_stop_best >= cfg.SOLVER.EARLY_STOP_ep_th[1]:
+                    early_stop_best = mean_map
+                    early_stop_counter = 0
+                else:
+                    early_stop_counter += 1
+                if early_stop_counter >= cfg.SOLVER.EARLY_STOP_ep_th[0]:
+                    logger.info(f"Early stopping triggered after {cur_epoch + 1} epochs: no improvement >= {cfg.SOLVER.EARLY_STOP_ep_th[1]} for {cfg.SOLVER.EARLY_STOP_ep_th[0]} epochs")
+                    break
+            val_meter.reset()
     cu.save_checkpoint(
             cfg.OUTPUT_DIR,
             model,
@@ -551,3 +623,8 @@ def train(cfg):
             cfg,
             scaler if cfg.TRAIN.MIXED_PRECISION else None,
             )
+    
+    
+    profiler.stop()
+    profiler.print()
+    profiler.output_html(os.path.join(cfg.OUTPUT_DIR, "profiler.html"))

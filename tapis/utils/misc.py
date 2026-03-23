@@ -49,6 +49,22 @@ def params_count(model, ignore_bn=False):
                     count += p.numel()
     return count
 
+def trainable_params_count(model, ignore_bn=False):
+    """
+    Compute the number of parameters.
+    Args:
+        model (model): model to count the number of parameters.
+    """
+    if not ignore_bn:
+        return np.sum([p.numel() for p in model.parameters() if p.requires_grad]).item()
+    else:
+        count = 0
+        for m in model.modules():
+            if not isinstance(m, nn.BatchNorm3d):
+                for p in m.parameters(recurse=False):
+                    count += p.numel() if p.requires_grad else 0
+    return count
+
 
 def gpu_mem_usage():
     """
@@ -186,6 +202,7 @@ def log_model_info(model, cfg, use_train_input=True):
     """
     logger.info("Model:\n{}".format(model))
     logger.info("Params: {:,}".format(params_count(model)))
+    logger.info("Trainable Params: {:,}".format(trainable_params_count(model)))
     logger.info("Mem: {:,} MB".format(gpu_mem_usage()))
     logger.info(
         "Flops: {:,} G".format(

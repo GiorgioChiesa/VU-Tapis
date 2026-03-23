@@ -156,8 +156,12 @@ class MemoryAugmentedClassifier(nn.Module):
         # Porta current_feat a [B, 1, d_model] per la cross-attention
         # query = current_feat.unsqueeze(1)  # [B, 1, d_model]
         query = current_feat # [B, 1, d_model]
-        if len(memory_context.shape) == 2:
-            memory_context = memory_context.unsqueeze(1)  # [B, 1, d_model]
+        if len(query.shape) == 3:
+            query = query.squeeze(1)  
+        if len(memory_context.shape) ==3:
+            memory_context = memory_context.squeeze(0)  # [B, 1, d_model]
+        # Ensure same dtype for cross-attention
+        memory_context = memory_context.to(query.dtype)
         # Cross-attention: il frame corrente "interroga" la memoria
         attended, _ = self.cross_attn(query, memory_context, memory_context)
         
@@ -193,33 +197,42 @@ class MemoryBank:
         self.d_model = d_model
         self.num_classes = num_classes
         self.bank = deque(maxlen=max_len)  # FIFO automatico con maxlen!
-        self._step_counter = 0
+        self._step_counter = {}
+        self.banks_per_video = {}  # Optional: se vuoi mantenere memorie separate per video
     
-    def update(self, embedding: torch.Tensor, logit: torch.Tensor):
+    def update(self, embedding: torch.Tensor, logit: torch.Tensor, video_id: str = None):
         """
         Chiama questo ad ogni forward pass.
         Salva solo ogni saving_rate passi.
         
         embedding: [d_model] - CLS token del MViT
         logit: [num_classes] - output del modello (prima del softmax)
+        video_id: str - l'ID del video a cui appartiene l'embedding
         """
-        self._step_counter += 1
+        if video_id not in self.banks_per_video:
+            self.banks_per_video[video_id] = deque(maxlen=self.max_len)
+            self._step_counter[video_id] = 0
         
-        if self._step_counter % self.saving_rate == 0:
-            self.bank.append({
+        self._step_counter[video_id] += 1
+        
+        if self._step_counter[video_id] % self.saving_rate == 0:
+            self.banks_per_video[video_id].append({
                 'embedding': embedding.detach().cpu(),
                 'logit': logit.detach().cpu(),
-                'step': self._step_counter
+                'step': self._step_counter[video_id]
             })
     
-    def get_list(self, max_len=None, device='cuda'):
+    def get_list(self, video_id: str = None, max_len=None, device='cuda'):
         """Restituisce la lista di item nella memoria (per debug)."""
-        items = list(self.bank)
+        if video_id is not None and video_id in self.banks_per_video:
+            items = list(self.banks_per_video[video_id])
+        else:
+            items = list(self.bank)
         if max_len is not None:
             items = items[-max_len:]
         return items
 
-    def get_tokens(self, max_len=None, device='cuda'):
+    def get_tokens(self, video_id: str = None, max_len=None, device='cuda'):
         """
         Restituisce i token di memoria come tensore.
         
@@ -228,12 +241,12 @@ class MemoryBank:
         """
         max_len = max_len or self.max_len
         
-        if len(self.bank) == 0:
+        if video_id not in self.banks_per_video or len(self.banks_per_video[video_id]) == 0:
             # Nessuna memoria: restituisce un token zero
             empty = torch.zeros(1, self.d_model + self.num_classes).to(device)
-            return empty, torch.zeros(1, dtype=torch.bool).to(device)
+            return empty # , torch.zeros(1, dtype=torch.bool).to(device)
         
-        items = list(self.bank)
+        items = list(self.banks_per_video[video_id])[-max_len:]
         tokens = torch.stack([
             torch.cat([item['embedding'], item['logit']], dim=-1)
             for item in items
@@ -243,8 +256,17 @@ class MemoryBank:
     
     def reset(self):
         """Reset all'inizio di un nuovo video."""
+        
         self.bank.clear()
-        self._step_counter = 0
-    
+        for video_id, bank in self.banks_per_video.items():
+            bank.clear()
+            self._step_counter[video_id] = 0
+        # self._step_counter = 0
+        
+    def get_step_counter(self, video_id: str):
+        if video_id in self._step_counter:
+            return self._step_counter[video_id]
+        return 0
+
     def __len__(self):
         return len(self.bank)

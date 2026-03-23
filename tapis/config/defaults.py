@@ -464,6 +464,8 @@ _C.MVIT.RESIDUAL_POOLING = False
 # If True, using separate linear layers for Q, K, V in attention blocks.
 _C.MVIT.SEPARATE_QKV = False
 
+# Hidden dimension of the MViT backbone. This is used to control the size of the memory tokens in TAPIS.
+_C.MVIT.D_MODEL = 768 # Not modify with dimension 224
 
 # -----------------------------------------------------------------------------
 # Video Swin Transformer (VST) Configuration Options
@@ -967,6 +969,18 @@ _C.FEATURES.PRECALCULATE_TEST = True
 
 # Path to Mask2Former pretrained weights
 _C.FEATURES.RPN_CHECKPOINT = ""
+
+
+#==============================================
+_C.MODEL.MEMORY_SAVING_RATE = 5
+
+# Memory bank size for temporal streaming. If >0 the model will keep a FIFO
+# queue of previous clip features per video and perform a simple cross-attention
+# at the end of the transformer. Setting this to 0 disables the mechanism and
+# the original TAPIS behaviour is preserved.
+_C.MODEL.MEMORY_BANK_SIZE = 0
+
+_C.MAX_SAVE_VIDEO = 0
 
 #Additional configs for wandb logging
 _C.WANDB_ENABLE = False

@@ -1,7 +1,7 @@
 TRAIN:
   ENABLE: True
   DATASET: orsi
-  BATCH_SIZE: 12 #24
+  BATCH_SIZE: 16 #24
   ACCUM_STEPS: 1
   EVAL_PERIOD: 1
   CHECKPOINT_PERIOD: 1
@@ -13,7 +13,7 @@ TRAIN:
 TEST:
   ENABLE: True
   DATASET: orsi
-  BATCH_SIZE: 64 #24
+  BATCH_SIZE: 60 #24
 DATA:
   NUM_FRAMES: 16
   SAMPLING_RATE: 1
@@ -72,7 +72,7 @@ SOLVER:
   LR_POLICY: cosine
   COSINE_AFTER_WARMUP: True
   COSINE_END_LR: 1e-6 #1e-4
-  MAX_EPOCH: 30
+  MAX_EPOCH: 18
   MAX_ITER: 10000
   EARLY_STOP_ep_th: [5, 0.0] # epoch and threshold for early stopping, if the metric does not improve for this many epochs by at least this threshold, stop training.
   WARMUP_EPOCHS: 5.0
@@ -102,6 +102,7 @@ FEATURES:
 RNG_SEED: 0
 LOG_PERIOD: 50000
 OUTPUT_DIR: .
+MAX_SAVE_VIDEO: 30
 ENDOVIS_DATASET:
   TRAIN_GT_BOX_JSON: [all_merged.json]
   TEST_GT_BOX_JSON: [all_merged.json]

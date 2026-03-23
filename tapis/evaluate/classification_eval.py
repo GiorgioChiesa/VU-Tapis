@@ -187,16 +187,20 @@ def save_missmatches(preds, labels, task, class_name, output_dir="./temp", img_a
     
     plot_video_missmatches(mismatches_by_video, task, output_dir, max_idx=i)
     if imgs_folder is not None:
-        save_missmatches_videos(mismatches, output_dir, imgs_folder)
+        max_save_video = kwargs.get("max_save_video", 0)
+        save_missmatches_videos(mismatches, output_dir, imgs_folder, max_save_video)
     
     
-def save_missmatches_videos(mismatches, output_dir, imgs_folder):
+def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0):
     """
     Save mismatch frames as videos organized by error type.
     """
     if imgs_folder is None or mismatches is None:
         return
+    if max_video <= 0:
+        return
     
+    video_saved = 0
     
     # Group mismatches by error type (pred_class, true_class)
     errors_by_type = {}
@@ -267,9 +271,9 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder):
                             frame_path = frame_path.replace("/nas_private/","/").replace("/orsi/","/orsi_tensors/").replace(".jpg", ".pt")
                     except Exception as e:
                         logging.warning(f"Could not load frame {frame_path}: {e}")
-                
+
                 # Save video if frames exist
-                if frames and len(frames) < 16:
+                if frames and len(frames):
                     video_name = f"{video}_{start_idx}_{end_idx}.mp4"
                     video_path = os.path.join(error_dir, video_name)
                     
@@ -280,6 +284,9 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder):
                     for frame in frames:
                         out.write(frame)
                     out.release()
+                    video_saved +=1
+                    if max_video and video_saved >= max_video:
+                        return
     
 
 

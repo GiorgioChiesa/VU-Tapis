@@ -67,9 +67,6 @@ def wandgb_log(stats):
             stats = {f'{stats["mode"]}_{k}': v for k, v in stats.items()}
             stats["cur_epoch"] = int(cur_epoch)
             wanbrun.log(stats)
-        
-        
-
 
 def log_confusion_matrix_wandb(meter, task, mode, epoch, mean_map, name_wandb, cfg):
     """
@@ -155,7 +152,6 @@ def log_confusion_matrix_wandb(meter, task, mode, epoch, mean_map, name_wandb, c
     except Exception as e:
         logger.warning(f"Errore nel logging della confusion matrix per task {task}: {e}")
 
-
 def train_epoch(
     train_loader,
     model,
@@ -218,7 +214,7 @@ def train_epoch(
                 
                 if cfg.NUM_GPUS>1:
                     image_names = image_names.cuda(non_blocking=True)
-                        
+            image_names = [im.split("/")[0] for im in image_names]  # Rimuovi estensione se presente
             # Update the learning rate.
             lr = optim.get_epoch_lr(cur_epoch + float(cur_iter) / data_size, cfg)
             optim.set_lr(optimizer, lr)
@@ -226,12 +222,23 @@ def train_epoch(
             train_meter.data_toc()
 
             with torch.cuda.amp.autocast(enabled=cfg.TRAIN.MIXED_PRECISION):
-                rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
-                boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
-                boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
-                images = data["images"] if cfg.FEATURES.USE_RPN else None
-                preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images)
-
+                # rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
+                # boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
+                # boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
+                # images = data["images"] if cfg.FEATURES.USE_RPN else None
+                # preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images)
+                if hasattr(model, 'reset_memory_bank'):
+                    model.reset_memory_bank() 
+                for i in tqdm(range(inputs[0].shape[2] - cfg.DATA.NUM_FRAMES+1), desc="Sliding Window", leave=False):
+                    rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
+                    boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
+                    boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
+                    images = data["images"] if cfg.FEATURES.USE_RPN else None
+                    preds = model([inputs[0][:, :, i:i+cfg.DATA.NUM_FRAMES, ... ]], bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images, image_names=image_names)
+                
+                if isinstance(preds, tuple):
+                    preds = preds[0] # 0 = Loss with memory, 1 to don't use memory
+                
                 # Explicitly declare reduction to mean and compute the loss for each task.
                 loss = []
                 for task in loss_dict:
@@ -284,7 +291,7 @@ def train_epoch(
             train_meter.iter_toc()  # measure allreduce for this meter
             stats = train_meter.log_iter_stats(cur_epoch, cur_iter)
             train_meter.iter_tic()
-            t.set_postfix(stats.items())
+            t.set_postfix({"dt_data":stats["dt_data"], "dt_net": stats["dt_net"], "loss": stats["overall_loss"]})
 
             if cfg.SOLVER.MAX_ITER and cur_iter+1 >= cfg.SOLVER.MAX_ITER:
                 break
@@ -320,6 +327,7 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
         if cfg.TASKS.PRESENCE_RECOGNITION and cfg.TASKS.EVAL_PRESENCE:
             pres_tasks = [f'{task}_presence' for task in cfg.TASKS.PRESENCE_TASKS]
             complete_tasks += pres_tasks
+    # last_video = ""
     with tqdm(total=len(val_loader), desc=f"Eval Epoch {cur_epoch+1}/{cfg.SOLVER.MAX_EPOCH}", unit="it") as t:
         for cur_iter, (inputs, labels, data, image_names) in enumerate(val_loader):
             t.update(1)
@@ -340,7 +348,15 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
                 
                 if cfg.NUM_GPUS>1:
                     image_names = image_names.cuda(non_blocking=True)
-                        
+                
+            image_names = [im.split("/")[0] for im in image_names]  # Rimuovi estensione se presente
+            # cur_video = list(set([path.split('/')[0] for path in image_names]))
+            # if len(cur_video) > 1:
+            #     continue
+            # if cur_video[0] != last_video and hasattr(model, 'reset_memory_bank'):
+            #     model.reset_memory_bank()
+            #     last_video = cur_video[0]
+                
             val_meter.data_toc()
 
             rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
@@ -352,10 +368,12 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
 
             assert (not (cfg.REGIONS.ENABLE and cfg.FEATURES.ENABLE)) or len(rpn_ftrs)==len(image_names)==len(boxes), f'Inconsistent lenghts {len(rpn_ftrs)} & {len(image_names)} & {len(boxes)}'
 
-            preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images)
+            preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images, image_names=image_names)
+            if isinstance(preds, tuple):
+                preds = preds[0] # 0 = Loss with memory, 1 to don't use memory
             # breakpoint()
             if cfg.NUM_GPUS:
-                preds = {task: preds[task].to("cpu", non_blocking=True) for task in preds}
+                preds = {task: preds[task].to("cpu", non_blocking=True) for task in complete_tasks}
                 # Accumula tutti i risultati prima di accedervi
                 torch.cuda.synchronize()  # una sola sync alla fine
                 ori_boxes = ori_boxes.cpu() if cfg.REGIONS.ENABLE else None
@@ -637,3 +655,46 @@ def train(cfg):
     profiler.stop()
     profiler.print()
     profiler.output_html()
+
+
+
+print(f"Current working directory: {os.getcwd()}")
+
+from tapis.config.defaults import assert_and_infer_cfg
+from tapis.utils.misc import launch_job
+from tapis.utils.parser import load_config, parse_args
+
+from train_net import train
+import warnings
+warnings.filterwarnings("ignore")
+
+
+def main():
+    """
+    Main function to spawn the train and test process.
+    """
+    
+    args = parse_args()
+    cfg = load_config(args)
+    cfg = assert_and_infer_cfg(cfg)
+    
+    print("Working on gpu: {}".format(cfg.GPUIDS))
+    
+    if cfg.FEATURES.USE_RPN:
+        from detectron2.config import get_cfg
+        from detectron2.projects.deeplab import add_deeplab_config
+        from region_proposals.mask2former import add_maskformer2_config
+        
+        rpn_cfg = get_cfg()
+        add_deeplab_config(rpn_cfg)
+        add_maskformer2_config(rpn_cfg)
+
+        rpn_cfg.merge_from_file(cfg.FEATURES.RPN_CFG_PATH)
+        cfg.FEATURES.RPN_CFG = rpn_cfg
+
+    # Perform training.
+    if cfg.TRAIN.ENABLE or cfg.TEST.ENABLE:
+        launch_job(cfg=cfg, init_method=args.init_method, func=train)
+
+if __name__ == "__main__":
+    main()

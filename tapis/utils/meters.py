@@ -22,6 +22,7 @@ import tapis.utils.logging as logging
 import tapis.utils.misc as misc
 from tapis.evaluate.utils import mask_to_rle, load_json
 
+
 logger = logging.get_logger(__name__)
 
 # IDENT_FUNCT_DICT = {'psi_ava': lambda x,y: 'CASE{:03d}/{:05d}.jpg'.format(x,y),
@@ -82,7 +83,7 @@ class SurgeryMeter(object):
         self.all_labels = {k: [] for k in self.tasks}
         data = load_json(cfg.ENDOVIS_DATASET.TEST_COCO_ANNS)
         self.class_dict = {task: data[f'{task}_categories'] for task in self.tasks}
-        self.early_stop = [0] + [th.copy() for th in cfg.SOLVER.EARLY_STOP_ep_th] + [cfg.SOLVER.MAX_EPOCH] # [last_metric_value, epoch, threshold]
+        self.early_stop = [0] + [deepcopy(th) for th in cfg.SOLVER.EARLY_STOP_ep_th] + [cfg.SOLVER.MAX_EPOCH] # [last_metric_value, epoch, threshold]
         
         if self.segmentation and os.path.isdir(cfg.ENDOVIS_DATASET.MASKS_PATH):
             self.mask_path = cfg.ENDOVIS_DATASET.MASKS_PATH
@@ -276,7 +277,7 @@ class SurgeryMeter(object):
         if mean_map-self.early_stop[0]<self.early_stop[2]:
             self.early_stop[1] -= 1
         else:
-            self.early_stop[1] = self.cfg.SOLVER.EARLY_STOP_ep_th[0].copy()
+            self.early_stop[1] = deepcopy(self.cfg.SOLVER.EARLY_STOP_ep_th[0])
         self.early_stop[0] = max(mean_map, self.early_stop[0])
         
         if self.early_stop[1] <= 0 or epoch >= self.early_stop[3]:
@@ -289,7 +290,8 @@ class SurgeryMeter(object):
                                     class_name=self.class_dict[task], 
                                     output_dir=os.path.join(self.output_dir, task),
                                     img_ann_dict=self.all_names,
-                                    imgs_folder=self.cfg.ENDOVIS_DATASET.FRAME_DIR)
+                                    imgs_folder=self.cfg.ENDOVIS_DATASET.FRAME_DIR,
+                                    max_save_video = self.cfg.MAX_SAVE_VIDEO)
         
         
         return self.full_map, mean_map, out_name

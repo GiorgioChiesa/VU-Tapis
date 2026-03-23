@@ -21,7 +21,7 @@ class SurgicalDataset(torch.utils.data.Dataset):
         self.cfg = cfg
         self._split = split
         self._sample_rate = cfg.DATA.SAMPLING_RATE
-        self._video_length = cfg.DATA.NUM_FRAMES
+        self._video_length = max(cfg.DATA.NUM_FRAMES, cfg.MODEL.MEMORY_BANK_SIZE) if split == "train" else cfg.DATA.NUM_FRAMES
         self._seq_mode = cfg.DATA.SEQ_MODE
         self._seq_len = self._video_length * self._sample_rate
         self._num_classes = {key: n_class for key, n_class in zip(cfg.TASKS.TASKS, cfg.TASKS.NUM_CLASSES)}

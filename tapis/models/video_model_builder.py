@@ -22,6 +22,8 @@ from .utils import (
     validate_checkpoint_wrapper_import,
 )
 
+from sklearn.preprocessing import label_binarize
+
 from . import head_helper, resnet_helper, stem_helper
 from .build import MODEL_REGISTRY
 
@@ -878,7 +880,7 @@ class MViT(nn.Module):
 
         return pos_embed
 
-    def forward(self, x, features=None, boxes_mask=False, images=None, bboxes=None,):
+    def forward(self, x, features=None, boxes_mask=False, images=None, bboxes=None, **kwargs):
         out = {}
 
         if (features is None or self.training or not self.precalc_test) \
@@ -946,6 +948,12 @@ class MViT(nn.Module):
         
         x = self.norm(x)
 
+        out['features'] = x
+        out['thw'] = thw
+        out['bcthw'] = bcthw
+        out['patch_dims'] = self.patch_dims
+        out['cls_tokens'] = x[:, :s, :] if self.cls_embed_on else None
+
         # TAPIS head classification
         for task in self.tasks:
             extra_head = getattr(self, "extra_heads_{}".format(task))
@@ -960,3 +968,131 @@ class MViT(nn.Module):
                 out[f'{task}_presence'] = getattr(self, "extra_heads_{}_presence".format(task))(x=x, features=features, boxes_mask=boxes_mask)
                 
         return out
+    
+# TODO aggiornare con lemon3m model
+@MODEL_REGISTRY.register()  
+class LEMON3M(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
+        self.backbone = MViT(cfg)
+
+    def forward(self, batch_frames, **kwargs):
+        return self.backbone(batch_frames, **kwargs)
+
+from .memory import MemoryTokenizer, LightweightMemoryEncoder, MemoryAugmentedClassifier, MemoryBank
+
+@MODEL_REGISTRY.register()
+class TAPISWithMemory(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        
+        # TAPIS backbone (MViT o SlowFast)
+        model_backbone = {"mvit": MViT,
+                          "slowfast": SlowFast,
+                          # "resnet": ResNetSlowFast,
+                          }
+        self.backbone = model_backbone[cfg.MODEL.ARCH](cfg)
+
+        self.num_classes = deepcopy(cfg.TASKS.NUM_CLASSES)
+        self.tasks = deepcopy(cfg.TASKS.TASKS)
+
+        dim_classification = sum(self.num_classes)
+        
+        # Memory components (tutti allenabili)
+        self.memory_tokenizer = MemoryTokenizer(cfg.MVIT.D_MODEL, cfg.MODEL.MEMORY_BANK_SIZE, dim_classification)
+        self.memory_encoder = LightweightMemoryEncoder(cfg.MVIT.D_MODEL, nhead=8, num_layers=2)
+        self.memory_classifier = MemoryAugmentedClassifier(cfg.MVIT.D_MODEL, nhead=8, tasks=self.tasks,
+                                                            num_classes=self.num_classes)
+        
+        # Memory Bank (stato, non parametri)
+        self.memory_bank = MemoryBank(max_len=cfg.MODEL.MEMORY_BANK_SIZE, saving_rate=cfg.MODEL.MEMORY_SAVING_RATE,
+                                       d_model=cfg.MVIT.D_MODEL, num_classes=dim_classification)
+
+        self.per_video_memory = {}
+        
+        
+    def forward(self, batch_frames, **kwargs):
+        """
+        batch_frames: [B, C, T, H, W] - batch di frame dal DataLoader
+        """
+        # if isinstance(batch_frames, list):
+        #     batch_frames = batch_frames[0]  # Prendi il primo elemento se è una lista (caso SlowFast)
+        
+        # 1. Estrai feature con MViT
+        # In TAPIS il backbone ritorna features a diverse scale; 
+        # qui prendiamo il CLS token dell'ultimo layer
+        backbone_out = self.backbone(batch_frames)
+        current_embedding = backbone_out['cls_tokens']  # [B, d_model]
+        
+        # 2. Predizione baseline (senza memoria) per popolare la bank
+        # Questa si fa con la testa di classificazione originale di TAPIS
+        baseline_logits = {task: backbone_out[task] for task in self.tasks}  # {task: [B, num_classes]}
+        
+        image_names =  kwargs.get('image_names', ["1"]*current_embedding.size(0))  # Lista di nomi o ID per ogni video nel batch
+        # image_names = [im.split("/")[0] for im in image_names]  # Rimuovi estensione se presente
+        
+        gt = kwargs.get('gt', [None]*current_embedding.size(0))  
+        
+        
+        logit_tasks = {task: None for task in self.tasks}
+        for b, image_name in enumerate(image_names):
+            # 3. Leggi dalla Memory Bank e costruisci i token
+            mem_tokens_raw = self.memory_bank.get_list(video_id=image_name)
+            # mem_tokens_raw: [L, d_model + num_classes]
+            
+            # 4. Proietta e aggiungi positional encoding
+            memory_tokens = self.memory_tokenizer(
+                mem_tokens_raw,  # [L, d_model + num_classes]
+                current_step=self.memory_bank.get_step_counter(image_name),
+                device=batch_frames[0].device
+            )  # [1, L+1, d_model]  (con MEM_CLS preposto)
+            
+            # 5. Memory Encoder: comprime la sequenza di memoria
+            # Passa la sequenza completa per la cross-attention nel decoder
+            memory_context = self.memory_encoder(
+                memory_tokens.expand(1, -1, -1) # set B=1 in the loop
+            )  # [B, L+1, d_model]  — tutti i token, non solo il CLS
+            
+            # 6. Memory-Augmented Classification
+            b_logit_tasks = self.memory_classifier(
+                current_embedding[b,...],  # [B, d_model]
+                memory_context      # [B, L+1, d_model]
+            )
+            
+            for task in self.tasks:
+                if logit_tasks[task] == None:
+                    logit_tasks[task] = b_logit_tasks[task]
+                else: 
+                    logit_tasks[task] = torch.vstack([logit_tasks[task], b_logit_tasks[task]])  # Accumula i logit per ogni task
+        
+
+        # 7. Aggiorna la Memory Bank con embedding e predizioni correnti
+        for b in range(current_embedding.size(0)):
+            
+            combined_logit = torch.cat([logit_tasks[task][b,:] for task in self.tasks], dim=-1)
+            if gt[b] is not None:
+                gt_combined = label_binarize(gt[b], classes=combined_logit.shape[-1])
+                combined_logit = 0.5 * combined_logit + 0.5 * gt_combined  # Smoothing tra predizione e ground truth
+            self.memory_bank.update(current_embedding[b], combined_logit, image_names[b])
+        
+        return logit_tasks #, baseline_logits
+
+    def reset_memory_bank(self):
+        self.memory_bank.reset()
+    
+    def freeze_encoder(self):
+        """
+        Freeze the TAPIS backbone (MViT or SlowFast).
+        Only the memory components will be trainable.
+        """
+        if hasattr(self.backbone, 'freeze_encoder'):
+            return self.backbone.freeze_encoder()
+        
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        print("Backbone frozen. Memory components and classifier are trainable.")
+        
+        print(f"Num parameters trainable: {sum(p.numel() for p in self.parameters() if p.requires_grad)}")
+        print(f"Num parameters frozen: {sum(p.numel() for p in self.parameters() if not p.requires_grad)}")
+        print(f"Total parameters: {sum(p.numel() for p in self.parameters())}")

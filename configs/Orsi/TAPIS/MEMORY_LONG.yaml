@@ -83,17 +83,19 @@ SOLVER:
   OPTIMIZING_METHOD: adam
 MODEL:
   ARCH: mvit
-  MODEL_NAME: MViT
+  MODEL_NAME: TAPISWithMemory
   LOSS_FUNC: soft_cross_entropy
   DROPOUT_RATE: 0.5
+  MEMORY_BANK_SIZE: 500
+  MEMORY_SAVING_RATE: 16
 TASKS:
-  TASKS:  ["steps"]
-  NUM_CLASSES: [72]
-  LOSS_FUNC: ["cross_entropy"]
-  HEAD_ACT:  ["softmax"]
-  LOSS_WEIGHTS:  [1.0]
-  METRICS: ["mAP"]  
-  WEIGHT_LOSS_BY_CLASS: ["/home/gchie/workspace/data/dataset_analisis/tables/01_step_distribution.csv"]
+  TASKS:  ["phases","steps"]
+  NUM_CLASSES: [17, 72]
+  LOSS_FUNC: ["cross_entropy", "cross_entropy"]
+  HEAD_ACT:  ["softmax" , "softmax"]
+  LOSS_WEIGHTS:  [1.0, 1.0]
+  METRICS: ["mAP", "mAP"]  
+  WEIGHT_LOSS_BY_CLASS: [False, "/home/gchie/workspace/data/dataset_analisis/tables/01_step_distribution.csv"]
 DATA_LOADER:
   NUM_WORKERS: 5
   PIN_MEMORY: True

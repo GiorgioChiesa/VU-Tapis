@@ -3,6 +3,7 @@
 
 """Train a video classification model."""
 
+from asyncio import tasks
 import sys
 from pathlib import Path
 
@@ -44,20 +45,30 @@ wanbrun = None
 def wandgb_log(stats):
     global wanbrun
     if wanbrun is not None:
-        if "phases_map" not in stats:
+        tasks_map = [k for k, v in stats.items() if isinstance(v,dict)]
+        if len(tasks_map)==0:
             stats = {f'{stats["mode"]}_{k}': v for k, v in stats.items()}
             wanbrun.log(stats)
             return
         if stats["mode"].lower() in ['test', 'val']:
             cur_epoch = int(stats["cur_epoch"])
-            stats ={f'{stats["mode"]}_{k}': v for k, v in stats["phases_map"].items()}
-            stats["cur_epoch"] = int(cur_epoch)
-            wanbrun.log(stats)
+            stat = {}
+            for tasks in tasks_map:
+                stat = {}
+                for k, v in stats[tasks].items():
+                    stat[f'{stats["mode"]}_{k}'] = v
+                # stats ={f'{stats["mode"]}_{k}': v for k, v in stats["phases_map"].items()}
+                stat["cur_epoch"] = int(cur_epoch)
+                stat[f"{tasks}_cm"] = wandb.Image(os.path.join(stats["output_dir"], f"confusion_matrix_{tasks.split('_')[0]}.png"))
+                wanbrun.log(stat)
+            
         elif stats["mode"].lower() == 'train':
             cur_epoch = int(stats["cur_epoch"])
             stats = {f'{stats["mode"]}_{k}': v for k, v in stats.items()}
             stats["cur_epoch"] = int(cur_epoch)
             wanbrun.log(stats)
+        
+        
 
 
 def log_confusion_matrix_wandb(meter, task, mode, epoch, mean_map, name_wandb, cfg):
@@ -172,8 +183,11 @@ def train_epoch(
     data_size = len(train_loader)
     tasks = cfg.TASKS.TASKS
     loss_funs = cfg.TASKS.LOSS_FUNC
-
-    loss_dict = {task:losses.get_loss_func(loss_funs[t_id])(reduction=cfg.SOLVER.REDUCTION) for t_id,task in enumerate(tasks)}
+    
+    weight = {task: losses.get_weight_from_csv(cfg.TASKS.WEIGHT_LOSS_BY_CLASS[t_id], cfg.TASKS.NUM_CLASSES[t_id]) for t_id, task in enumerate(tasks)}
+    if cfg.NUM_GPUS:
+        weight = {task: weight[task].to("cuda") if weight[task] is not None else None for task in weight}
+    loss_dict = {task:losses.get_loss_func(loss_funs[t_id])( weight=weight[task], reduction=cfg.SOLVER.REDUCTION) for t_id,task in enumerate(tasks)}
     type_dict = {task:losses.get_loss_type(loss_funs[t_id],cfg.MODEL.PRECISION) for t_id,task in enumerate(tasks)}
     loss_weights = cfg.TASKS.LOSS_WEIGHTS
     if cfg.REGIONS.ENABLE and cfg.TASKS.PRESENCE_RECOGNITION:
@@ -341,7 +355,7 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
             preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images)
             # breakpoint()
             if cfg.NUM_GPUS:
-                preds = {task: preds[task].cpu(non_blocking=True) for task in preds}
+                preds = {task: preds[task].to("cpu", non_blocking=True) for task in preds}
                 # Accumula tutti i risultati prima di accedervi
                 torch.cuda.synchronize()  # una sola sync alla fine
                 ori_boxes = ori_boxes.cpu() if cfg.REGIONS.ENABLE else None
@@ -390,17 +404,17 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
     t.close()
     if cfg.NUM_GPUS > 1:
         if du.is_master_proc():
-            task_map, mean_map, out_files, stats = val_meter.log_epoch_stats(cur_epoch)
+            task_map, mean_map, out_files, stats, early_stop = val_meter.log_epoch_stats(cur_epoch)
         else:
-            task_map, mean_map, out_files, stats =  [0, 0, 0, {}]
+            task_map, mean_map, out_files, stats, early_stop =  [0, 0, 0, {}, False]
         torch.distributed.barrier()
     else:
-        task_map, mean_map, out_files, stats = val_meter.log_epoch_stats(cur_epoch)
+        task_map, mean_map, out_files, stats, early_stop = val_meter.log_epoch_stats(cur_epoch)
 
     if cfg.WANDB_ENABLE and cfg.NUM_GPUS <= 1:
         wandgb_log(stats)
 
-    return task_map, mean_map, out_files
+    return task_map, mean_map, out_files, early_stop
 
 
 def train(cfg):
@@ -476,7 +490,7 @@ def train(cfg):
     # Perform final test
     if cfg.TEST.ENABLE:
         logger.info("Evaluating epoch: {}".format(start_epoch))
-        map_task, mean_map, out_files = eval_epoch(val_loader, model, val_meter, start_epoch-1, cfg)
+        map_task, mean_map, out_files, _ = eval_epoch(val_loader, model, val_meter, start_epoch-1, cfg)
         val_meter.reset()
         if not cfg.TRAIN.ENABLE:
             return
@@ -488,8 +502,6 @@ def train(cfg):
     complete_tasks = cfg.TASKS.TASKS
     best_task_map = {task: 0 for task in complete_tasks}
     best_mean_map = 0
-    early_stop_best = -float('inf')
-    early_stop_counter = 0
     epoch_timer = EpochTimer()
     
     for cur_epoch in range(start_epoch, cfg.SOLVER.MAX_EPOCH):
@@ -551,7 +563,7 @@ def train(cfg):
             
         # Evaluate the model on validation set.
         if is_eval_epoch:
-            map_task, mean_map, out_files = eval_epoch(val_loader, model, val_meter, cur_epoch, cfg)
+            map_task, mean_map, out_files, early_stop = eval_epoch(val_loader, model, val_meter, cur_epoch, cfg)
             if (cfg.NUM_GPUS > 1 and du.is_master_proc()) or cfg.NUM_GPUS == 1:
                 main_path = os.path.split(list(out_files.values())[0])[0]
                 fold = main_path.split('/')[-1]
@@ -591,29 +603,24 @@ def train(cfg):
                             cfg,
                             scaler if cfg.TRAIN.MIXED_PRECISION else None,
                         )
-                # Log confusion matrix for best or last epoch
-                is_best = mean_map > old_best_mean_map
-                if cfg.WANDB_ENABLE and cfg.NUM_GPUS <= 1:
-                    name_wandb = "best_epoch" if is_best else "last_epoch"
-                    for task in complete_tasks:
-                        if len(val_meter.all_preds[task]) > 0 and len(val_meter.all_labels[task]) > 0:
-                            log_confusion_matrix_wandb(
-                                val_meter,
-                                task,
-                                "val",
-                                cur_epoch,
-                                mean_map,
-                                name_wandb,
-                                cfg
-                            )
+                # # Log confusion matrix for best or last epoch
+                # is_best = mean_map > old_best_mean_map
+                # if cfg.WANDB_ENABLE and cfg.NUM_GPUS <= 1:
+                #     name_wandb = "best_epoch" if is_best else "last_epoch"
+                #     for task in complete_tasks:
+                #         if len(val_meter.all_preds[task]) > 0 and len(val_meter.all_labels[task]) > 0:
+                #             log_confusion_matrix_wandb(
+                #                 val_meter,
+                #                 task,
+                #                 "val",
+                #                 cur_epoch,
+                #                 mean_map,
+                #                 name_wandb,
+                #                 cfg
+                #             )
                 
                 # Early stopping check
-                if mean_map - early_stop_best >= cfg.SOLVER.EARLY_STOP_ep_th[1]:
-                    early_stop_best = mean_map
-                    early_stop_counter = 0
-                else:
-                    early_stop_counter += 1
-                if early_stop_counter >= cfg.SOLVER.EARLY_STOP_ep_th[0]:
+                if early_stop:
                     logger.info(f"Early stopping triggered after {cur_epoch + 1} epochs: no improvement >= {cfg.SOLVER.EARLY_STOP_ep_th[1]} for {cfg.SOLVER.EARLY_STOP_ep_th[0]} epochs")
                     break
             val_meter.reset()
@@ -629,4 +636,4 @@ def train(cfg):
     
     profiler.stop()
     profiler.print()
-    profiler.output_html(os.path.join(cfg.OUTPUT_DIR, "profiler.html"))
+    profiler.output_html()

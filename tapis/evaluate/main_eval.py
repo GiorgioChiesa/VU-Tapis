@@ -51,19 +51,22 @@ def get_img_ann_dict(coco_anns,task):
     
     return img_ann_dict
 
-def eval_task(task, metric, coco_anns, preds, masks_path):
-    img_ann_dict = get_img_ann_dict(coco_anns,task)
+def eval_task(task, metric, coco_anns, preds, masks_path=None, **kwargs):
+    if kwargs.get("img_ann_dict", None) is None:
+        img_ann_dict = get_img_ann_dict(coco_anns,task)
+    else:
+        img_ann_dict = kwargs.pop("img_ann_dict")
     try:
         metric_funct = METRIC_DICT[metric]
     except KeyError:
         raise NotImplementedError(f'Metric {metric} is not supported')
     
-    main_metric, aux_metrics = metric_funct(task, coco_anns, preds, img_ann_dict=img_ann_dict, mask_path=masks_path)
+    main_metric, aux_metrics = metric_funct(task, coco_anns, preds, img_ann_dict=img_ann_dict, mask_path=masks_path, **kwargs)
     return main_metric, aux_metrics
 
 
 def main_per_task(coco_ann_path, pred_path, task, metric, masks_path=None):
-    # Load coco anns and preds
+    # Load coco anns and preds        
     coco_anns = load_json(coco_ann_path)
     preds = load_json(pred_path) if type(pred_path)==str else pred_path
 
@@ -74,3 +77,13 @@ def main_per_task(coco_ann_path, pred_path, task, metric, masks_path=None):
     final_metrics = {metric: round(task_eval,8)}
     final_metrics.update(aux_metrics)    
     return final_metrics
+
+def main_per_long_tasks(all_labels, all_preds, task, metric, **kwargs):
+    task_eval, aux_metrics = eval_task(task, metric, all_labels, all_preds, **kwargs)
+    aux_metrics = dict(zip(aux_metrics.keys(),map(lambda x: round(x,8), aux_metrics.values())))
+    print('{} task {}: {} {}'.format(task, metric, round(task_eval,8), aux_metrics))
+    
+    final_metrics = {metric: round(task_eval,8)}
+    final_metrics.update(aux_metrics)    
+    return final_metrics
+    

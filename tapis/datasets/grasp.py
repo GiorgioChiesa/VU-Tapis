@@ -153,7 +153,7 @@ class Grasp(SurgicalDataset):
 
         for task in self._frame_tasks:
             assert all(label[task]==clip_label_list[0][task] for label in clip_label_list), f'Inconsistent {task} labels for frame {complete_name}: {[label[task] for label in clip_label_list]}'
-            all_labels[task] = clip_label_list[0][task]
+            all_labels[task] = clip_label_list[0][task] 
 
         extra_data = {}
         if self.cfg.REGIONS.ENABLE:

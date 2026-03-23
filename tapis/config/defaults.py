@@ -912,6 +912,9 @@ _C.TASKS.LOSS_FUNC = ["bce", "cross_entropy", "cross_entropy", "cross_entropy"]
 # Overall loss function weights for each extra head and original head
 _C.TASKS.LOSS_WEIGHTS = [0.3, 0.2, 0.3, 0.2]
 
+# Whether to evaluate each extra head during training false or the path of csv distribution.
+_C.TASKS.WEIGHT_LOSS_BY_CLASS = [False, False, False, False]
+
 # Include presence recognition.
 _C.TASKS.PRESENCE_RECOGNITION = False
 

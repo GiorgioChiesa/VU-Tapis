@@ -16,9 +16,11 @@ from fvcore.common.timer import Timer
 from sklearn.metrics import average_precision_score
 
 import tapis.evaluate.main_eval as grasp_eval
+from tapis.evaluate.classification_eval import save_missmatches
+
 import tapis.utils.logging as logging
 import tapis.utils.misc as misc
-from tapis.evaluate.utils import mask_to_rle
+from tapis.evaluate.utils import mask_to_rle, load_json
 
 logger = logging.get_logger(__name__)
 
@@ -78,7 +80,9 @@ class SurgeryMeter(object):
         self.groundtruth = cfg.ENDOVIS_DATASET.TEST_COCO_ANNS
         self.segmentation = cfg.REGIONS.ENABLE and cfg.REGIONS.LEVEL=='segmentation'
         self.all_labels = {k: [] for k in self.tasks}
-        self.class_names = {task: [] for task in self.tasks}
+        data = load_json(cfg.ENDOVIS_DATASET.TEST_COCO_ANNS)
+        self.class_dict = {task: data[f'{task}_categories'] for task in self.tasks}
+        self.early_stop = [0] + [th.copy() for th in cfg.SOLVER.EARLY_STOP_ep_th] + [cfg.SOLVER.MAX_EPOCH] # [last_metric_value, epoch, threshold]
         
         if self.segmentation and os.path.isdir(cfg.ENDOVIS_DATASET.MASKS_PATH):
             self.mask_path = cfg.ENDOVIS_DATASET.MASKS_PATH
@@ -240,14 +244,27 @@ class SurgeryMeter(object):
         if lr is not None:
             self.lr = lr
 
-    def finalize_metrics(self, epoch, log=True):
+    def finalize_metrics(self, epoch, log=True ):
         """
         Calculate and log the final PSI-AVA metrics.
         """
         out_name = {}
         for task,metric in zip(self.tasks, self.metrics):
             out_name[task] = self.save_json(task, epoch)
-            self.full_map[task] = grasp_eval.main_per_task(self.groundtruth, out_name[task], task, metric, masks_path=self.mask_path)
+            if task in ["phases","steps"]:
+                self.full_map[task] = grasp_eval.main_per_long_tasks(self.all_labels[task], 
+                                                                     self.all_preds[task], 
+                                                                     task, 
+                                                                     metric, 
+                                                                     class_names=self.class_dict[task], 
+                                                                     output_dir=self.output_dir, 
+                                                                     img_ann_dict=self.all_names,
+                                                                     imgs_folder= None,# self.cfg.ENDOVIS_DATASET.FRAME_DIR ,
+                                                                     )
+            
+                
+            else:
+                self.full_map[task] = grasp_eval.main_per_task(self.groundtruth, out_name[task], task, metric, masks_path=self.mask_path)
             if log:
                 stats = {"mode": self.mode, "task": task, "metric": self.full_map[task]}
                 logging.log_json_stats(stats)
@@ -255,7 +272,27 @@ class SurgeryMeter(object):
             stats = {"mode": self.mode, "mean metric": np.mean([v[m] for v,m in zip(list(self.full_map.values()), self.metrics)])}
             logging.log_json_stats(stats)
         
-        return self.full_map, np.mean([v[m] for v,m in zip(list(self.full_map.values()), self.metrics)]), out_name
+        mean_map = np.mean([v[m] for v,m in zip(list(self.full_map.values()), self.metrics)])
+        if mean_map-self.early_stop[0]<self.early_stop[2]:
+            self.early_stop[1] -= 1
+        else:
+            self.early_stop[1] = self.cfg.SOLVER.EARLY_STOP_ep_th[0].copy()
+        self.early_stop[0] = max(mean_map, self.early_stop[0])
+        
+        if self.early_stop[1] <= 0 or epoch >= self.early_stop[3]:
+            logging.log_json_stats({"mode": self.mode, "early_stop": True, "epoch": epoch})
+            for task,metric in zip(self.tasks, self.metrics):
+                if task in ["phases","steps"]:            
+                    save_missmatches(preds=self.all_preds[task], 
+                                    labels=self.all_labels[task], 
+                                    task=task, 
+                                    class_name=self.class_dict[task], 
+                                    output_dir=os.path.join(self.output_dir, task),
+                                    img_ann_dict=self.all_names,
+                                    imgs_folder=self.cfg.ENDOVIS_DATASET.FRAME_DIR)
+        
+        
+        return self.full_map, mean_map, out_name
                     
     def log_epoch_stats(self, cur_epoch):
         """
@@ -264,20 +301,23 @@ class SurgeryMeter(object):
             cur_epoch (int): the number of current epoch.
         """
         if self.mode in ["val", "test"]:
-            metrics_val, mean_map, out_files = self.finalize_metrics(cur_epoch +1)
+            metrics_val, mean_map, out_files = self.finalize_metrics(cur_epoch +1, log=False)
             stats = {
                 "_type": "{}_epoch".format(self.mode),
                 "cur_epoch": "{}".format(cur_epoch + 1),
                 "mode": self.mode,
                 "gpu_mem": "{:.2f}G".format(misc.gpu_mem_usage()),
                 "RAM": "{:.2f}/{:.2f}G".format(*misc.cpu_mem_usage()),
+                "output_dir": self.output_dir,
             }
             for idx, task in enumerate(self.tasks):
                 stats["{}_map".format(task)] = self.full_map[task]
 
             logging.log_json_stats(stats)
 
-            return metrics_val, mean_map, out_files, stats
+            early_stop = self.early_stop[1] <= 0 or cur_epoch >= self.early_stop[3]
+            
+            return metrics_val, mean_map, out_files, stats, early_stop
 
     def save_json(self, task, epoch):
         """
@@ -307,7 +347,8 @@ class SurgeryMeter(object):
             else:
                 save_json_dict[name] = {task_key_name:pred}
 
-        path_prediction = os.path.join(self.output_dir, f'epoch_{epoch}_preds_{task}.json')
+        path_prediction = os.path.join(self.output_dir,"predictions_json", f'epoch_{epoch}_preds_{task}.json')
+        os.makedirs(os.path.dirname(path_prediction), exist_ok=True)
         with open(path_prediction, "w") as outfile:  
             json.dump(save_json_dict, outfile) 
             

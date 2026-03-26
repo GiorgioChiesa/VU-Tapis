@@ -4,7 +4,8 @@ checkpoints
 data
 outputs
 wandb/
-ffmpeg/
+ffmpeg
+LemonFM
 # output dir
 output
 instant_test_output

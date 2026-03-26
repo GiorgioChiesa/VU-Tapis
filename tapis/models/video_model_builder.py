@@ -970,15 +970,77 @@ class MViT(nn.Module):
         return out
     
 # TODO aggiornare con lemon3m model
+from LemonFM.model_loader import build_LemonFM
 @MODEL_REGISTRY.register()  
-class LEMON3M(nn.Module):
+class LEMON(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.backbone = MViT(cfg)
+        weiths_path = "LemonFM/lemonfm.pth" 
+        self.backbone = build_LemonFM(pretrained_weights=weiths_path)
+        
+        self.tasks = deepcopy(cfg.TASKS.TASKS)
+        self.num_classes = deepcopy(cfg.TASKS.NUM_CLASSES)
+        embed_dim = 1536 # For LEMON convnext #  cfg.MVIT.EMBED_DIM
+        self.act_fun = deepcopy(cfg.TASKS.HEAD_ACT)
+
+        for idx, task in enumerate(self.tasks):
+            extra_head = head_helper.ClassificationBasicHead(
+                        embed_dim,
+                        self.num_classes[idx],
+                        dropout_rate=cfg.MODEL.DROPOUT_RATE,
+                        act_func=self.act_fun[idx],
+                    )
+            self.add_module("extra_heads_{}".format(task), extra_head)
+
 
     def forward(self, batch_frames, **kwargs):
-        return self.backbone(batch_frames, **kwargs)
+        # Input must be [B,C=3,H=224,W=224]
+        if isinstance(batch_frames, list) and len(batch_frames) == 1:  
+            batch_frames = batch_frames[0]  # Prendi il primo elemento se è una lista (caso SlowFast)
+        # print(batch_frames.shape)
+        features = self.backbone(batch_frames)  # [B, d_model]
+        # print(features.shape)
+        out={"cls_tokens":features}
+        # TAPIS head classification
+        for task in self.tasks:
+            extra_head = getattr(self, "extra_heads_{}".format(task))
+            out[task] = extra_head(inputs=features, cls_idx=0)
+        return out
+    
+    def freeze_encoder(self):
+        """
+        Freeze the encoder (LEMON backbone).
+        Only the classification heads will be trainable.
+        """
+        # Get the actual model in case it's wrapped by DataParallel
+        model = self.module if hasattr(self, 'module') else self
+        
+        # Freeze backbone
+        for param in model.backbone.parameters():
+            param.requires_grad = False
+
+        print("Total parameters in backbone: {:,}".format(sum(p.numel() for p in model.parameters())))
+        print("Learnable parameters: {:,}".format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
+        
+
+@MODEL_REGISTRY.register()  
+class VideoLEMON(LEMON):
+    def __init__(self, cfg):
+        super().__init__(cfg)
+    def forward(self, batch_frames, **kwargs):
+        # imput size = ([B, C=3, T=16, H=224, W=224])
+        input = batch_frames[0]
+        input = input[:,:,-1,:,:] # get only the last frame of video
+        # input = torch.squeeze(input)
+        return super().forward(input)
+        
+        
+        
+        
+        
+        
+        
 
 from .memory import MemoryTokenizer, LightweightMemoryEncoder, MemoryAugmentedClassifier, MemoryBank
 
@@ -1030,7 +1092,7 @@ class TAPISWithMemory(nn.Module):
         baseline_logits = {task: backbone_out[task] for task in self.tasks}  # {task: [B, num_classes]}
         
         image_names =  kwargs.get('image_names', ["1"]*current_embedding.size(0))  # Lista di nomi o ID per ogni video nel batch
-        # image_names = [im.split("/")[0] for im in image_names]  # Rimuovi estensione se presente
+        image_names = [im.split("/")[0] for im in image_names]  # Rimuovi estensione se presente
         
         gt = kwargs.get('gt', [None]*current_embedding.size(0))  
         

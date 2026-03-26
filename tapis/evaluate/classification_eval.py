@@ -1,7 +1,9 @@
 import itertools
+import pandas as pd
 import numpy as np
 from sklearn.preprocessing import label_binarize
 from sklearn.metrics import precision_recall_curve, balanced_accuracy_score ,average_precision_score, f1_score, roc_auc_score
+import torch
 from tqdm import tqdm
 import wandb
 from sklearn.metrics import confusion_matrix
@@ -11,6 +13,9 @@ import logging
 from collections import Counter
 import json
 import cv2
+import subprocess
+import imageio
+
 
 def eval_classification(task, coco_anns, preds, **kwargs):
     if kwargs.get("class_names", None) is not None:
@@ -117,7 +122,7 @@ def eval_classification(task, coco_anns, preds, **kwargs):
                           labels=bin_labels, 
                           class_name=classes, 
                           path=os.path.join(kwargs.get("output_dir", "./temp"), f"confusion_matrix_{task}.png"),
-                          normalize='true' if task == "steps" else None)
+                          normalize='true' )
     
     # save_missmatches(preds=best_preds, 
     #                  labels=best_labels, 
@@ -136,7 +141,7 @@ def save_missmatches(preds, labels, task, class_name, output_dir="./temp", img_a
         print("Image annotation dictionary not provided, cannot save mismatches with image names.")
         return
     
-    preds = np.array(preds, dtype=np.int32)
+    preds = np.array(preds)
     if len(preds.shape) == 2 and preds.shape[1] > 1:
         preds = np.argmax(preds, axis=1)
     labels = np.array(labels, dtype=np.int32)
@@ -185,13 +190,13 @@ def save_missmatches(preds, labels, task, class_name, output_dir="./temp", img_a
     with open(mismatch_path, 'w') as f:
         json.dump(mismatches, f, indent=4)
     
-    plot_video_missmatches(mismatches_by_video, task, output_dir, max_idx=i)
+    plot_video_missmatches(mismatches_by_video, task, output_dir, maxCounter=Counter([im.split("/")[0] for im in img_ann_dict]))
     if imgs_folder is not None:
         max_save_video = kwargs.get("max_save_video", 0)
-        save_missmatches_videos(mismatches, output_dir, imgs_folder, max_save_video)
+        save_missmatches_videos(mismatches, output_dir, imgs_folder, max_save_video,  **kwargs)
     
     
-def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0):
+def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0, **kwargs):
     """
     Save mismatch frames as videos organized by error type.
     """
@@ -200,12 +205,12 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0
     if max_video <= 0:
         return
     
-    video_saved = 0
+    # video_saved = 0
     
     # Group mismatches by error type (pred_class, true_class)
     errors_by_type = {}
     for mismatch in mismatches:
-        error_key = f"{mismatch['predicted_class']}--{mismatch['true_class']}"
+        error_key = f"{mismatch['true_class']}--{mismatch['predicted_class']}"
         if error_key not in errors_by_type:
             errors_by_type[error_key] = []
         errors_by_type[error_key].append(mismatch)
@@ -214,8 +219,10 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0
     for error_type, error_mismatches in errors_by_type.items():
         error_dir = os.path.join(output_dir, "missmatches", error_type)
         os.makedirs(error_dir, exist_ok=True)
+        video_saved = 0        
         
         # Group mismatches by video
+        
         by_video = {}
         for mismatch in error_mismatches:
             video = mismatch['video']
@@ -257,50 +264,125 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0
                 
                 # Repeat first frame 16 times
                 frame_indices = [idx if idx >= 0 else 0 for idx in frame_indices]  # Handle negative indices:
-                
+                                  
                 # Load frames and create video
-                frames = []
-                for f, frame_idx in enumerate(frame_indices):
-                    #TODO: ricerca del frame è sbagliata
-                    frame_path = os.path.join(imgs_folder, group[f]['image_name'])
-                    try:
-                        frame = cv2.imread(frame_path)
-                        if frame is not None:
-                            frames.append(frame)
-                        else:
-                            frame_path = frame_path.replace("/nas_private/","/").replace("/orsi/","/orsi_tensors/").replace(".jpg", ".pt")
-                    except Exception as e:
-                        logging.warning(f"Could not load frame {frame_path}: {e}")
+                frames = loadpadding_frames(imgs_folder, group, video,
+                                            time_window=kwargs.get("time_window", 16), 
+                                            mode=kwargs.get("mode", "center"), 
+                                            csv_folder=kwargs.get("csv_folder", None))
+                
+                # for f, frame_idx in enumerate(frame_indices):
+                #     #TODO: ricerca del frame è sbagliata
+                #     frame_path = os.path.join(imgs_folder, group[f]['image_name'])
+                #     frames.append(load_frame(frame_path))
+
 
                 # Save video if frames exist
-                if frames and len(frames):
+                if frames and len(frames)>=16:
                     video_name = f"{video}_{start_idx}_{end_idx}.mp4"
                     video_path = os.path.join(error_dir, video_name)
                     
                     h, w = frames[0].shape[:2]
-                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                    out = cv2.VideoWriter(video_path, fourcc, 1.0, (w, h))
+                    # fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    # out = cv2.VideoWriter(video_path, fourcc, 1.0, (w, h))
                     
+                    # for frame in frames:
+                    #     out.write(frame)
+                    # out.release()
+                    
+                    # imageio usa ffmpeg bundled con libx264 incluso
+                    writer = imageio.get_writer(
+                        video_path,
+                        fps=1.0,
+                        codec='libx264',
+                        quality=None,
+                        output_params=['-movflags', 'faststart', '-pix_fmt', 'yuv420p']
+                    )
+
                     for frame in frames:
-                        out.write(frame)
-                    out.release()
+                        # imageio vuole RGB, OpenCV usa BGR
+                        frame_rgb = frame[:, :, ::-1]
+                        writer.append_data(frame_rgb)
+
+                    writer.close()
+                                        
                     video_saved +=1
                     if max_video and video_saved >= max_video:
-                        return
+                        break
+            if max_video and video_saved >= max_video:
+                break
+            
+            
+def loadpadding_frames(imgs_folder, frames, video, time_window=16, mode="center", csv_folder=None):
+    try:
+        csv_path = os.path.join(csv_folder, f"{video}.csv")
+        list_frames = pd.read_csv(csv_path, sep=' ', header=None).iloc[:,3].tolist()
+        frame_idxs = [list_frames.index(frame['image_name']) for frame in frames]
+        
+        if mode == "center":
+            start_idx = frame_idxs[0] - time_window // 2
+            end_idx = frame_idxs[-1] + time_window // 2
+        elif mode == "right":
+            start_idx = frame_idxs[0]
+            end_idx = frame_idxs[-1] + time_window
+        elif mode == "left":
+            start_idx = frame_idxs[0] - time_window
+            end_idx = frame_idxs[-1]
+        
+        frame_idxs = [r if r>0 else 0 for r in range(start_idx, end_idx)]
+        frames_list = [list_frames[i] for i in frame_idxs]
+        frames = [load_frame(os.path.join(imgs_folder, f)) for f in frames_list]
+        return frames
+    
+    except Exception as e:
+        path = os.path.join(imgs_folder, frames[0]['image_name'])
+        list_frames = sorted(os.listdir(os.path.dirname(path)))
+        frame_idxs = [list_frames.index(os.path.basename(frame['image_name'])) for frame in frames]
+
+    
+        if mode == "center":
+            start_idx = frame_idxs[0] - time_window // 2
+            end_idx = frame_idxs[-1] + time_window // 2
+        elif mode == "right":
+            start_idx = frame_idxs[0]
+            end_idx = frame_idxs[-1] + time_window
+        elif mode == "left":
+            start_idx = frame_idxs[0] - time_window
+            end_idx = frame_idxs[-1]
+
+        frame_idxs = [r if r>0 else 0 for r in range(start_idx, end_idx)]
+        frames_list = [list_frames[i] for i in frame_idxs]
+        frames = [load_frame(os.path.join(os.path.dirname(path), f)) for f in frames_list]
+        return frames
+
+
+def load_frame(frame_path):
+    try:
+        frame = cv2.imread(frame_path)
+        if frame is not None:
+            return frame
+        else:
+            frame_path = frame_path.replace("/nas_private/","/").replace("/orsi/","/orsi_tensors/").replace(".jpg", ".pt")
+            torch_frame = torch.load(frame_path)
+            return torch_frame.cpu().numpy().transpose(1,2,0)
+    except Exception as e:
+        logging.warning(f"Could not load frame {frame_path}: {e}")
+
     
 
-
-def plot_video_missmatches(mismatches_by_video:dict, task:str, output_dir:str="./temp", max_idx:int=1, **kwargs):
+def plot_video_missmatches(mismatches_by_video:dict, task:str, output_dir:str="./temp", maxCounter:dict={}, **kwargs):
         # Create bar plot visualization
         # Get all videos and create figure
         videos = sorted(mismatches_by_video.keys())
         fig, ax = plt.subplots(figsize=(16, max(4, len(videos) * 0.8)))
-        
+        start_video_idx = 0
         # Plot each video as a horizontal bar
         for i, video in enumerate(videos):
             mismatch_indices = mismatches_by_video[video]
             # max_idx = max([m['idx'] for m in mismatches if m['video'] == video])
-            
+            mismatch_indices = [m-start_video_idx for m in mismatch_indices]
+            max_idx = maxCounter[video] 
+            start_video_idx += max_idx
             # Create array: 1 for correct, 0 for mismatch
             frame_status = np.ones(max_idx + 1)
             for idx in mismatch_indices:

@@ -291,8 +291,13 @@ class SurgeryMeter(object):
                                     output_dir=os.path.join(self.output_dir, task),
                                     img_ann_dict=self.all_names,
                                     imgs_folder=self.cfg.ENDOVIS_DATASET.FRAME_DIR,
-                                    max_save_video = self.cfg.MAX_SAVE_VIDEO)
-        
+                                    csv_folder=self.cfg.ENDOVIS_DATASET.FRAME_LIST_DIR,
+                                    max_save_video = self.cfg.MAX_SAVE_VIDEO,
+                                    time_window = self.cfg.DATA.NUM_FRAMES,
+                                    mode = self.cfg.DATA.SEQ_MODE,
+                                    )
+            print("All video are saved in {}".format(self.output_dir))
+            print("Open a web server to visualize the results: python -m http.server --directory {}".format(self.output_dir))
         
         return self.full_map, mean_map, out_name
                     

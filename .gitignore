@@ -4,6 +4,7 @@ checkpoints
 data
 outputs
 wandb/
+ffmpeg/
 # output dir
 output
 instant_test_output

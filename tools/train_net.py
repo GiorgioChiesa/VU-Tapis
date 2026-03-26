@@ -214,7 +214,7 @@ def train_epoch(
                 
                 if cfg.NUM_GPUS>1:
                     image_names = image_names.cuda(non_blocking=True)
-            image_names = [im.split("/")[0] for im in image_names]  # Rimuovi estensione se presente
+
             # Update the learning rate.
             lr = optim.get_epoch_lr(cur_epoch + float(cur_iter) / data_size, cfg)
             optim.set_lr(optimizer, lr)
@@ -291,7 +291,7 @@ def train_epoch(
             train_meter.iter_toc()  # measure allreduce for this meter
             stats = train_meter.log_iter_stats(cur_epoch, cur_iter)
             train_meter.iter_tic()
-            t.set_postfix({"dt_data":stats["dt_data"], "dt_net": stats["dt_net"], "loss": stats["overall_loss"]})
+            # t.set_postfix({"dt_data":stats["dt_data"], "dt_net": stats["dt_net"], "loss": stats["overall_loss"]})
 
             if cfg.SOLVER.MAX_ITER and cur_iter+1 >= cfg.SOLVER.MAX_ITER:
                 break
@@ -349,7 +349,6 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
                 if cfg.NUM_GPUS>1:
                     image_names = image_names.cuda(non_blocking=True)
                 
-            image_names = [im.split("/")[0] for im in image_names]  # Rimuovi estensione se presente
             # cur_video = list(set([path.split('/')[0] for path in image_names]))
             # if len(cur_video) > 1:
             #     continue
@@ -413,7 +412,7 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
             val_meter.update_stats(preds, image_names, ori_boxes, labels=labels)
             stats = val_meter.log_iter_stats(cur_epoch, cur_iter)
             val_meter.iter_tic()
-            t.set_postfix(stats.items())
+            # t.set_postfix(stats.items())
             
             # if cfg.SOLVER.MAX_ITER and cur_iter+1 >= cfg.SOLVER.MAX_ITER:
             #     break
@@ -642,19 +641,21 @@ def train(cfg):
                     logger.info(f"Early stopping triggered after {cur_epoch + 1} epochs: no improvement >= {cfg.SOLVER.EARLY_STOP_ep_th[1]} for {cfg.SOLVER.EARLY_STOP_ep_th[0]} epochs")
                     break
             val_meter.reset()
-    cu.save_checkpoint(
-            cfg.OUTPUT_DIR,
-            model,
-            optimizer,
-            cur_epoch,
-            cfg,
-            scaler if cfg.TRAIN.MIXED_PRECISION else None,
-            )
+    if "cur_epoch" in locals():
+        cu.save_checkpoint(
+                cfg.OUTPUT_DIR,
+                model,
+                optimizer,
+                cur_epoch,
+                cfg,
+                scaler if cfg.TRAIN.MIXED_PRECISION else None,
+                )
     
     
     profiler.stop()
     profiler.print()
-    profiler.output_html()
+    with open(f'{cfg.OUTPUT_DIR}/profiler.html', 'wb+') as f:
+        f.write(profiler.output_html().encode('utf-8'))
 
 
 

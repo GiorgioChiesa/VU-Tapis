@@ -397,13 +397,22 @@ def load_checkpoint(
             # Load the optimizer state (commonly not done when fine-tuning)
         if "epoch" in checkpoint.keys() and not epoch_reset:
             epoch = checkpoint["epoch"]
-            if optimizer and "optimizer_state" in checkpoint.keys():
-                optimizer.load_state_dict(checkpoint["optimizer_state"])
-            if scaler and "scaler_state" in checkpoint.keys():
-                scaler.load_state_dict(checkpoint["scaler_state"])
-            if scheduler and "scheduler_state" in checkpoint.keys():
-                scheduler.load_state_dict(checkpoint["scheduler_state"])
-                
+            try:
+                if optimizer and "optimizer_state" in checkpoint.keys():
+                    optimizer.load_state_dict(checkpoint["optimizer_state"])
+            except Exception as e:
+                logger.error("Error occurred while loading optimizer state: {}".format(e))
+            try:
+                if scaler and "scaler_state" in checkpoint.keys():
+                    scaler.load_state_dict(checkpoint["scaler_state"])
+            except Exception as e:
+                logger.error("Error occurred while loading scaler state: {}".format(e))
+            try:
+                if scheduler and "scheduler_state" in checkpoint.keys():
+                    scheduler.load_state_dict(checkpoint["scheduler_state"])
+            except Exception as e:
+                logger.error("Error occurred while loading scheduler state: {}".format(e))
+
         else:
             epoch = -1
     return epoch

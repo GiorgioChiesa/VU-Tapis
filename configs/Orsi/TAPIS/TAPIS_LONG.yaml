@@ -6,7 +6,7 @@ TRAIN:
   EVAL_PERIOD: 1
   CHECKPOINT_PERIOD: 1
   AUTO_RESUME: True
-  CHECKPOINT_FILE_PATH: data/pretrained_models/train/LONG.pyth
+  CHECKPOINT_FILE_PATH:  checkpoints/Tapis-ph_ev-best.pyth # data/pretrained_models/train/LONG.pyth
   CHECKPOINT_EPOCH_RESET: True
   FREEZE_ENCODER: False
   MIXED_PRECISION: True   # aggiungere questa riga
@@ -17,7 +17,7 @@ TEST:
 DATA:
   NUM_FRAMES: 16
   SAMPLING_RATE: 1
-  SEQ_MODE: before # or "center" or "after"
+  SEQ_MODE: center # or "before", "center" or "after"
   TRAIN_JITTER_SCALES: [256, 320]
   TRAIN_CROP_SIZE: 224
   TRAIN_CROP_SIZE_LARGE: 224
@@ -102,7 +102,7 @@ FEATURES:
 RNG_SEED: 0
 LOG_PERIOD: 50000
 OUTPUT_DIR: .
-MAX_SAVE_VIDEO: 30
+MAX_SAVE_VIDEO: 5
 ENDOVIS_DATASET:
   TRAIN_GT_BOX_JSON: [all_merged.json]
   TEST_GT_BOX_JSON: [all_merged.json]

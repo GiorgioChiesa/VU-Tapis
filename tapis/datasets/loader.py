@@ -43,7 +43,7 @@ def detection_collate(batch):
         elif key == "images":
             collated_extra_data[key] = torch.nested.nested_tensor(data).float()
         else:
-            collated_extra_data[key] = default_collate(data).float()
+            collated_extra_data[key] = default_collate(data)
     
     collated_labels = {}
     for key in all_labels[0]:
@@ -55,8 +55,10 @@ def detection_collate(batch):
         if isinstance(data[0],list):
             data = list(itertools.chain(*data))
         else:
+            collated_labels[key] = default_collate(data).float()
+            continue
             #TODO: These are just security checks, REMOVE when all done
-            assert isinstance(data[0],int) or isinstance(data[0],np.ndarray), f'Type {type(data[0])} not supported'
+            # assert isinstance(data[0],int) or isinstance(data[0],np.ndarray), f'Type {type(data[0])} not supported'
             
         collated_labels[key] = torch.tensor(data).float()
 

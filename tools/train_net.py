@@ -183,8 +183,27 @@ def train_epoch(
     weight = {task: losses.get_weight_from_csv(cfg.TASKS.WEIGHT_LOSS_BY_CLASS[t_id], cfg.TASKS.NUM_CLASSES[t_id]) for t_id, task in enumerate(tasks)}
     if cfg.NUM_GPUS:
         weight = {task: weight[task].to("cuda") if weight[task] is not None else None for task in weight}
-    loss_dict = {task:losses.get_loss_func(loss_funs[t_id])( weight=weight[task], reduction=cfg.SOLVER.REDUCTION) for t_id,task in enumerate(tasks)}
-    type_dict = {task:losses.get_loss_type(loss_funs[t_id],cfg.MODEL.PRECISION) for t_id,task in enumerate(tasks)}
+    
+    # Handle focal loss parameters
+    loss_kwargs = {}
+    for t_id, task in enumerate(tasks):
+        if loss_funs[t_id] == "focal_loss":
+            kwargs = {}
+            if hasattr(cfg.TASKS, 'FOCAL_GAMMA'):
+                kwargs['gamma'] = cfg.TASKS.FOCAL_GAMMA
+            if hasattr(cfg.TASKS, 'FOCAL_ALPHA_MODE'):
+                if cfg.TASKS.FOCAL_ALPHA_MODE == "auto" and weight[task] is not None:
+                    # Use inverse class frequency as alpha
+                    kwargs['alpha'] = weight[task].cpu().numpy()
+                elif cfg.TASKS.FOCAL_ALPHA_MODE == "manual":
+                    # Could add manual alpha specification
+                    pass
+            loss_kwargs[task] = kwargs
+        else:
+            loss_kwargs[task] = {}
+    
+    loss_dict = {task: losses.get_loss_func(loss_funs[t_id])(weight=weight[task], reduction=cfg.SOLVER.REDUCTION, **loss_kwargs[task]) for t_id, task in enumerate(tasks)}
+    type_dict = {task: losses.get_loss_type(loss_funs[t_id], cfg.MODEL.PRECISION) for t_id, task in enumerate(tasks)}
     loss_weights = cfg.TASKS.LOSS_WEIGHTS
     if cfg.REGIONS.ENABLE and cfg.TASKS.PRESENCE_RECOGNITION:
         pres_loss_dict = {f'{task}_presence':losses.get_loss_func('bce')(reduction=cfg.SOLVER.REDUCTION) for task in cfg.TASKS.PRESENCE_TASKS}
@@ -202,18 +221,18 @@ def train_epoch(
                 if cfg.MODEL.PRECISION == 64:
                     inputs[0] = inputs[0].double()
 
-                for key, val in data.items():
-                    data[key] = val.cuda(non_blocking=True)
-                    if cfg.MODEL.PRECISION == 64:
-                        data[key]  = data[key].double()
+                # for key, val in data.items():
+                #     data[key] = val.cuda(non_blocking=True)
+                #     if cfg.MODEL.PRECISION == 64:
+                #         data[key]  = data[key].double()
 
                 for key, val in labels.items():
                     labels[key] = val.cuda(non_blocking=True)
                     if cfg.MODEL.PRECISION == 64:
                         labels[key]  = labels[key].double()
                 
-                if cfg.NUM_GPUS>1:
-                    image_names = image_names.cuda(non_blocking=True)
+                # if cfg.NUM_GPUS>1:
+                #     image_names = image_names.cuda(non_blocking=True)
 
             # Update the learning rate.
             lr = optim.get_epoch_lr(cur_epoch + float(cur_iter) / data_size, cfg)
@@ -229,27 +248,36 @@ def train_epoch(
                 # preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images)
                 if hasattr(model, 'reset_memory_bank'):
                     model.reset_memory_bank() 
-                for i in tqdm(range(inputs[0].shape[2] - cfg.DATA.NUM_FRAMES+1), desc="Sliding Window", leave=False):
-                    rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
-                    boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
-                    boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
-                    images = data["images"] if cfg.FEATURES.USE_RPN else None
-                    preds = model([inputs[0][:, :, i:i+cfg.DATA.NUM_FRAMES, ... ]], bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images, image_names=image_names)
-                
-                if isinstance(preds, tuple):
-                    preds = preds[0] # 0 = Loss with memory, 1 to don't use memory
-                
-                # Explicitly declare reduction to mean and compute the loss for each task.
-                loss = []
-                for task in loss_dict:
-                    loss_fun = loss_dict[task]
-                    target_type = type_dict[task]
-                    loss.append(loss_fun(preds[task], labels[task].to(target_type))) 
 
-            if len(loss_dict) >1:
-                final_loss = losses.compute_weighted_loss(loss, loss_weights)
-            else:
-                final_loss = loss[0]
+                window_losses = []
+                n_windows = max(1, inputs[0].shape[2] - cfg.DATA.NUM_FRAMES + 1)
+
+                for i in range(n_windows):
+                    # rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
+                    # boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
+                    # boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
+                    # images = data["images"] if cfg.FEATURES.USE_RPN else None
+                    preds = model([inputs[0][:, :, i:i+cfg.DATA.NUM_FRAMES, ... ]] )
+
+                    if isinstance(preds, tuple):
+                        preds = preds[0]  # 0 = Loss with memory, 1 to don't use memory
+
+                    # Explicitly declare reduction to mean and compute the loss for each task for this window.
+                    window_loss_items = []
+                    for task in loss_dict:
+                        loss_fun = loss_dict[task]
+                        target_type = type_dict[task]
+                        window_loss_items.append(loss_fun(preds[task], labels[task].to(target_type)))
+
+                    if len(window_loss_items) > 1:
+                        window_loss = losses.compute_weighted_loss(window_loss_items, loss_weights)
+                    else:
+                        window_loss = window_loss_items[0]
+
+                    window_losses.append(window_loss)
+
+                final_loss = torch.stack(window_losses).mean()
+
                 
             # check Nan Loss.
             if cur_iter % 50 == 0:
@@ -287,7 +315,7 @@ def train_epoch(
             final_loss = final_loss.item()
 
             # Update and log stats.
-            train_meter.update_stats(None, None, None, final_loss, loss, lr)
+            train_meter.update_stats(None, None, None, final_loss=final_loss,losses=[window_loss_items[-1]], lr=lr)
             train_meter.iter_toc()  # measure allreduce for this meter
             stats = train_meter.log_iter_stats(cur_epoch, cur_iter)
             train_meter.iter_tic()
@@ -327,7 +355,7 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
         if cfg.TASKS.PRESENCE_RECOGNITION and cfg.TASKS.EVAL_PRESENCE:
             pres_tasks = [f'{task}_presence' for task in cfg.TASKS.PRESENCE_TASKS]
             complete_tasks += pres_tasks
-    # last_video = ""
+    last_video = ""
     with tqdm(total=len(val_loader), desc=f"Eval Epoch {cur_epoch+1}/{cfg.SOLVER.MAX_EPOCH}", unit="it") as t:
         for cur_iter, (inputs, labels, data, image_names) in enumerate(val_loader):
             t.update(1)
@@ -336,38 +364,46 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
                 if cfg.MODEL.PRECISION == 64:
                     inputs[0] = inputs[0].double()
 
-                for key, val in data.items():
-                    data[key] = val.cuda(non_blocking=True)
-                    if cfg.MODEL.PRECISION == 64:
-                        data[key]  = data[key].double()
+                # for key, val in data.items():
+                #     data[key] = val.cuda(non_blocking=True)
+                #     if cfg.MODEL.PRECISION == 64:
+                #         data[key]  = data[key].double()
 
                 for key, val in labels.items():
                     labels[key] = val.cuda(non_blocking=True)
                     if cfg.MODEL.PRECISION == 64:
                         labels[key]  = labels[key].double()
                 
-                if cfg.NUM_GPUS>1:
-                    image_names = image_names.cuda(non_blocking=True)
+                # if cfg.NUM_GPUS>1:
+                #     image_names = image_names.cuda(non_blocking=True)
                 
-            # cur_video = list(set([path.split('/')[0] for path in image_names]))
-            # if len(cur_video) > 1:
-            #     continue
-            # if cur_video[0] != last_video and hasattr(model, 'reset_memory_bank'):
-            #     model.reset_memory_bank()
-            #     last_video = cur_video[0]
-                
+            if hasattr(model, 'reset_memory_bank'):
+                current_video = None
+
+                try:
+                    if isinstance(image_names, (list, tuple)) and len(image_names) > 0:
+                        current_video = str(image_names[0]).split('/')[0]
+                    elif isinstance(image_names, torch.Tensor) and image_names.numel() > 0:
+                        current_video = str(image_names[0]).split('/')[0]
+                except Exception:
+                    current_video = None
+
+                if current_video is not None and current_video != last_video:
+                    model.reset_memory_bank()
+                    last_video = current_video
+
             val_meter.data_toc()
 
-            rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
-            boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
-            ori_boxes = data["ori_boxes"] if cfg.REGIONS.ENABLE else None
-            boxes_idxs = data["ori_boxes_idxs"] if cfg.REGIONS.ENABLE else None
-            boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
-            images = data["images"] if cfg.FEATURES.USE_RPN else None
+            # rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
+            # boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
+            # ori_boxes = data["ori_boxes"] if cfg.REGIONS.ENABLE else None
+            # boxes_idxs = data["ori_boxes_idxs"] if cfg.REGIONS.ENABLE else None
+            # boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
+            # images = data["images"] if cfg.FEATURES.USE_RPN else None
 
-            assert (not (cfg.REGIONS.ENABLE and cfg.FEATURES.ENABLE)) or len(rpn_ftrs)==len(image_names)==len(boxes), f'Inconsistent lenghts {len(rpn_ftrs)} & {len(image_names)} & {len(boxes)}'
+            # assert (not (cfg.REGIONS.ENABLE and cfg.FEATURES.ENABLE)) or len(rpn_ftrs)==len(image_names)==len(boxes), f'Inconsistent lenghts {len(rpn_ftrs)} & {len(image_names)} & {len(boxes)}'
 
-            preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images, image_names=image_names)
+            preds = model(inputs)
             if isinstance(preds, tuple):
                 preds = preds[0] # 0 = Loss with memory, 1 to don't use memory
             # breakpoint()
@@ -375,9 +411,6 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
                 preds = {task: preds[task].to("cpu", non_blocking=True) for task in complete_tasks}
                 # Accumula tutti i risultati prima di accedervi
                 torch.cuda.synchronize()  # una sola sync alla fine
-                ori_boxes = ori_boxes.cpu() if cfg.REGIONS.ENABLE else None
-                boxes_idxs = boxes_idxs.cpu() if cfg.REGIONS.ENABLE else None
-                boxes_mask = boxes_mask.cpu() if cfg.REGIONS.ENABLE else None
 
                 if cfg.NUM_GPUS>1:
                     image_names = image_names.cpu()
@@ -385,31 +418,17 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
 
                     preds = {task: torch.cat(du.all_gather_unaligned(preds[task]), dim=0) for task in preds}
 
-                    if cfg.REGIONS.ENABLE:
-                        ori_boxes = torch.cat(du.all_gather_unaligned(ori_boxes), dim=0)
-                        boxes_mask = torch.cat(du.all_gather_unaligned(boxes_mask), dim=0)
-                        idxs_gather = du.all_gather_unaligned(boxes_idxs)
-                        for i in range(len(idxs_gather)):
-                            idxs_gather[i]+= torch.tensor((cfg.TEST.BATCH_SIZE/cfg.NUM_GPUS)*i).long()
 
-                        boxes_idxs = torch.cat(idxs_gather, dim=0)
 
             val_meter.iter_toc()
 
-            if cfg.REGIONS.ENABLE:
-                for task in region_tasks:
-                    preds[task] = [preds[task][boxes_idxs==idx].tolist() for idx in range(len(boxes_mask))]
-                if 'masks' in preds:
-                    ori_boxes = [preds['boxes'][boxes_mask][boxes_idxs==idx].numpy().tolist() for idx in range(len(boxes_mask))]
-                    preds['masks'] = [preds['masks'][boxes_mask][boxes_idxs==idx].numpy() for idx in range(len(boxes_mask))]
-                else:
-                    ori_boxes = [ori_boxes[boxes_idxs==idx].tolist() for idx in range(len(boxes_mask))]
+
             for task in complete_tasks:
                 if task not in region_tasks:
                     preds[task] = preds[task].tolist()
 
             # Update and log stats.
-            val_meter.update_stats(preds, image_names, ori_boxes, labels=labels)
+            val_meter.update_stats(preds, image_names, None, labels=labels)
             stats = val_meter.log_iter_stats(cur_epoch, cur_iter)
             val_meter.iter_tic()
             # t.set_postfix(stats.items())

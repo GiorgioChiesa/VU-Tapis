@@ -124,6 +124,9 @@ _C.AUG.RE_COUNT = 1
 # Do not random erase first (clean) augmentation split.
 _C.AUG.RE_SPLIT = False
 
+_C.AUG.TEMPORAL_JITTER = 0.0
+_C.AUG.SPATIAL_AUG = False
+
 # ---------------------------------------------------------------------------- #
 # Multigrid training options
 # See https://arxiv.org/abs/1912.00998 for details about multigrid training.
@@ -644,7 +647,7 @@ _C.DATA.DECODING_BACKEND = "pyav"
 _C.DATA.INV_UNIFORM_SAMPLE = False
 
 # If True, perform random horizontal flip on the video frames during training.
-_C.DATA.RANDOM_FLIP = True
+_C.DATA.RANDOM_FLIP = False
 
 # If True, calculdate the map as metric.
 _C.DATA.MULTI_LABEL = False
@@ -838,6 +841,13 @@ _C.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON = ["train_coco_anns.json"]
 
 _C.ENDOVIS_DATASET.TEST_GT_BOX_JSON = ["val_coco_anns.json"]
 
+# Orsi-specific dataset options
+_C.ENDOVIS_DATASET.ORSI_ROOT_DIR = "/home/gchie/workspace/data/orsi_tensors"
+_C.ENDOVIS_DATASET.ORSI_LABEL_DIR = "/home/gchie/workspace/data/orsi_tensors"
+_C.ENDOVIS_DATASET.ORSI_FRAME_FOLDER = "Video_1fps"
+_C.ENDOVIS_DATASET.ORSI_LABEL_FOLDER = "Label"
+_C.ENDOVIS_DATASET.EXCLUDE_EVENT_NAMES = ["Idle", "Out_of_body", "Test_image_start"]
+
 # Filenames of box list files for train.
 _C.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON = ["train_coco_preds.json"]
 
@@ -934,6 +944,9 @@ _C.TASKS.MULTIPLE_CLS = False
 
 # Use videofeature extractor or not
 _C.TASKS.USE_VIDEO = True
+
+_C.TASKS.FOCAL_GAMMA = 2.0
+_C.TASKS.FOCAL_ALPHA_MODE= "auto" # auto, manual, or None
 
 # ---------------------------------------------------------------------------- #
 # FEATURES

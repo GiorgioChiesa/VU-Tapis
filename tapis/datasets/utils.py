@@ -20,9 +20,23 @@ from torch.utils.data.distributed import DistributedSampler
 import concurrent.futures
 
 logger = logging.getLogger(__name__)
+def remove_ripetition(path):
+    """
+    Remove ripetition in the path, e.g. /orsi/orsi/orsi/ → /orsi/
+    """
+    parts = path.split('/')
+    seen = set()
+    new_parts = []
+    for part in parts:
+        if part not in seen:
+            new_parts.append(part)
+            seen.add(part)
+    return '/'.join(new_parts)
+
 
 def _resolve_paths(image_path: str) -> dict[str, str]:
     """Resolve all candidate paths from the original image path."""
+    image_path = remove_ripetition(image_path)
     normalized = image_path.replace("/nas_private/", "/")
     tensor = normalized.replace("/orsi/", "/orsi_tensors/").replace(".jpg", ".pt")
     return {
@@ -148,7 +162,7 @@ def retry_load_images(image_paths, retry=2, backend="pytorch"):
             raise Exception("Failed to load images {}".format(image_paths))
 
 
-def get_sequence(center_idx, length, sample_rate, num_frames, mode="center"):
+def get_sequence(center_idx, length, sample_rate, num_frames, mode="center", temporal_jitter=0.0):
     """
     Sample frames among the corresponding clip.
 
@@ -159,15 +173,23 @@ def get_sequence(center_idx, length, sample_rate, num_frames, mode="center"):
         num_frames (int): number of expected sampled frames
         mode (str): "center", "before", or "after". If "center", sample frames
             centered around the center_idx. If "before", sample frames before
+        temporal_jitter (float): amount of temporal jitter to apply (0.0 to 1.0)
     Returns:
         seq (list): list of indexes of sampled frames in this clip.
     """
+    # Apply temporal jitter to sample_rate
+    if temporal_jitter > 0:
+        jitter_factor = 1.0 + random.uniform(-temporal_jitter, temporal_jitter)
+        effective_sample_rate = max(1, int(sample_rate * jitter_factor))
+    else:
+        effective_sample_rate = sample_rate
+    
     if mode == "center":
-        seq = list(range(center_idx - length//2, center_idx + length//2, sample_rate))
+        seq = list(range(center_idx - length//2, center_idx + length//2, effective_sample_rate))
     elif mode == "before":
-        seq = list(range(center_idx - length + sample_rate, center_idx + sample_rate, sample_rate))
+        seq = list(range(center_idx - length + effective_sample_rate, center_idx + effective_sample_rate, effective_sample_rate))
     elif mode == "after":
-        seq = list(range(center_idx, center_idx + length, sample_rate))
+        seq = list(range(center_idx, center_idx + length, effective_sample_rate))
     else:
         raise ValueError(f"Invalid sequence mode: {mode}")
 

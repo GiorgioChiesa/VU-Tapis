@@ -15,8 +15,8 @@ TEST:
   DATASET: orsi
   BATCH_SIZE: 60 #24
 DATA:
-  NUM_FRAMES: 16
-  SAMPLING_RATE: 1
+  NUM_FRAMES: 32
+  SAMPLING_RATE: 2
   SEQ_MODE: center # or "before", "center" or "after"
   TRAIN_JITTER_SCALES: [256, 320]
   TRAIN_CROP_SIZE: 224
@@ -24,7 +24,7 @@ DATA:
   TEST_CROP_SIZE: 224
   TEST_CROP_SIZE_LARGE: 224
   INPUT_CHANNEL_NUM: [3]
-  JUST_CENTER: True
+  JUST_CENTER: False
 ENDOVIS_DATASET:
   DETECTION_SCORE_THRESH: 0.75
   TRAIN_USE_COLOR_AUGMENTATION: True
@@ -57,8 +57,8 @@ REGIONS:
   ALIGNED: True
   ROI_XFORM_RESOLUTION: 3
 AUG:
-  ENABLE: False
-  COLOR_JITTER: 0.4
+  ENABLE: True
+  COLOR_JITTER: 0.5
   AA_TYPE: rand-m7-n4-mstd0.5-inc1
   INTERPOLATION: bicubic
   NUM_SAMPLE: 1
@@ -67,12 +67,12 @@ AUG:
   RE_SPLIT: False
 SOLVER:
   BASE_LR_SCALE_NUM_SHARDS: True
-  BASE_LR: 1.25e-5 # 0.0125
+  BASE_LR: 5e-5 # 0.0125
   CLIP_GRAD_L2NORM: 1.0
   LR_POLICY: cosine
   COSINE_AFTER_WARMUP: True
   COSINE_END_LR: 1e-6 #1e-4
-  MAX_EPOCH: 18
+  MAX_EPOCH: 30
   MAX_ITER: 10000
   EARLY_STOP_ep_th: [5, 0.0] # epoch and threshold for early stopping, if the metric does not improve for this many epochs by at least this threshold, stop training.
   WARMUP_EPOCHS: 5.0
@@ -85,7 +85,7 @@ MODEL:
   ARCH: mvit
   MODEL_NAME: MViT
   LOSS_FUNC: soft_cross_entropy
-  DROPOUT_RATE: 0.5
+  DROPOUT_RATE: 0.2
 TASKS:
   TASKS:  ["phases","steps"]
   NUM_CLASSES: [17, 72]
@@ -95,7 +95,7 @@ TASKS:
   METRICS: ["mAP", "mAP"]  
   WEIGHT_LOSS_BY_CLASS: [False, "/home/gchie/workspace/data/dataset_analisis/tables/01_step_distribution.csv"]
 DATA_LOADER:
-  NUM_WORKERS: 10
+  NUM_WORKERS: 5
   PIN_MEMORY: True
 FEATURES:
   ENABLE: False
@@ -104,5 +104,6 @@ LOG_PERIOD: 50000
 OUTPUT_DIR: .
 MAX_SAVE_VIDEO: 5
 ENDOVIS_DATASET:
+  IMG_PROC_BACKEND: "pytorch"
   TRAIN_GT_BOX_JSON: [all_merged.json]
   TEST_GT_BOX_JSON: [all_merged.json]

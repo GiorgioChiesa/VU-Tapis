@@ -1,8 +1,8 @@
 # Experiment setup
-TRAIN_FOLDS="['RARP01.csv','RARP07.csv','RARP18.csv','RARP23.csv','RARP29.csv','RARP34.csv','RARP40.csv','RARP46.csv','RARP59.csv','RARP02.csv','RARP08.csv','RARP13.csv','RARP19.csv','RARP25.csv','RARP30.csv','RARP35.csv','RARP41.csv','RARP47.csv','RARP61.csv','RARP03.csv','RARP09.csv','RARP15.csv','RARP20.csv','RARP26.csv','RARP31.csv','RARP43.csv','RARP48.csv','RARP62.csv','RARP04.csv','RARP10.csv','RARP16.csv','RARP21.csv','RARP27.csv','RARP32.csv','RARP37.csv','RARP44.csv','RARP49.csv','RARP64.csv']"
-TEST_FOLDS="['RARP06.csv','RARP11.csv','RARP17.csv','RARP22.csv','RARP28.csv','RARP33.csv','RARP38.csv','RARP45.csv','RARP65.csv']"
-GT_TRAIN_FOLDS="['RARP01_coco.json','RARP07_coco.json','RARP18_coco.json','RARP23_coco.json','RARP29_coco.json','RARP34_coco.json','RARP40_coco.json','RARP46_coco.json','RARP59_coco.json','RARP02_coco.json','RARP08_coco.json','RARP13_coco.json','RARP19_coco.json','RARP25_coco.json','RARP30_coco.json','RARP35_coco.json','RARP41_coco.json','RARP47_coco.json','RARP61_coco.json','RARP03_coco.json','RARP09_coco.json','RARP15_coco.json','RARP20_coco.json','RARP26_coco.json','RARP31_coco.json','RARP43_coco.json','RARP48_coco.json','RARP62_coco.json','RARP04_coco.json','RARP10_coco.json','RARP16_coco.json','RARP21_coco.json','RARP27_coco.json','RARP32_coco.json','RARP37_coco.json','RARP44_coco.json','RARP49_coco.json','RARP64_coco.json']"
-GT_TEST_FOLDS="['RARP06_coco.json','RARP11_coco.json','RARP17_coco.json','RARP22_coco.json','RARP28_coco.json','RARP33_coco.json','RARP38_coco.json','RARP45_coco.json','RARP65_coco.json']"
+# TRAIN_FOLDS="['RARP01.csv','RARP07.csv','RARP18.csv','RARP23.csv','RARP29.csv','RARP34.csv','RARP40.csv','RARP46.csv','RARP59.csv','RARP02.csv','RARP08.csv','RARP13.csv','RARP19.csv','RARP25.csv','RARP30.csv','RARP35.csv','RARP41.csv','RARP47.csv','RARP61.csv','RARP03.csv','RARP09.csv','RARP15.csv','RARP20.csv','RARP26.csv','RARP31.csv','RARP43.csv','RARP48.csv','RARP62.csv','RARP04.csv','RARP10.csv','RARP16.csv','RARP21.csv','RARP27.csv','RARP32.csv','RARP37.csv','RARP44.csv','RARP49.csv','RARP64.csv']"
+# TEST_FOLDS="['RARP06.csv','RARP11.csv','RARP17.csv','RARP22.csv','RARP28.csv','RARP33.csv','RARP38.csv','RARP45.csv','RARP65.csv']"
+# GT_TRAIN_FOLDS="['RARP01_coco.json','RARP07_coco.json','RARP18_coco.json','RARP23_coco.json','RARP29_coco.json','RARP34_coco.json','RARP40_coco.json','RARP46_coco.json','RARP59_coco.json','RARP02_coco.json','RARP08_coco.json','RARP13_coco.json','RARP19_coco.json','RARP25_coco.json','RARP30_coco.json','RARP35_coco.json','RARP41_coco.json','RARP47_coco.json','RARP61_coco.json','RARP03_coco.json','RARP09_coco.json','RARP15_coco.json','RARP20_coco.json','RARP26_coco.json','RARP31_coco.json','RARP43_coco.json','RARP48_coco.json','RARP62_coco.json','RARP04_coco.json','RARP10_coco.json','RARP16_coco.json','RARP21_coco.json','RARP27_coco.json','RARP32_coco.json','RARP37_coco.json','RARP44_coco.json','RARP49_coco.json','RARP64_coco.json']"
+# GT_TEST_FOLDS="['RARP06_coco.json','RARP11_coco.json','RARP17_coco.json','RARP22_coco.json','RARP28_coco.json','RARP33_coco.json','RARP38_coco.json','RARP45_coco.json','RARP65_coco.json']"
 EXP_PREFIX=$NAME  #costumize
 TASK="LONG"
 ARCH="TAPIS"
@@ -56,7 +56,7 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="Orsi-Lemon-all"
+NAME="Orsi-Lemon"
 GPUIDS="1"
 
 DATASET="orsi"
@@ -91,7 +91,7 @@ GPUIDS "[$GPUIDS]" \
 TRAIN.ACCUM_STEPS 5 \
 TRAIN.BATCH_SIZE 32 \
 TEST.BATCH_SIZE 50 \
-SOLVER.MAX_ITER 5000 \
+SOLVER.MAX_ITER 10000 \
 SOLVER.MAX_EPOCH 30 \
 TRAIN.FREEZE_ENCODER False \
 MODEL.MODEL_NAME VideoLEMON \

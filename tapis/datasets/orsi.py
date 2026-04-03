@@ -4,13 +4,13 @@
 import itertools
 import os
 import logging
+import sys
 import numpy as np
 
 from copy import deepcopy
-
+import pandas as pd
 from tapis.datasets import cv2_transform
 import torch
-from .surgical_dataset import SurgicalDataset
 from . import utils as utils
 from .build import DATASET_REGISTRY
 
@@ -18,18 +18,360 @@ logger = logging.getLogger(__name__)
 
 
 @DATASET_REGISTRY.register()
-class Orsi(SurgicalDataset):
+class Orsi(torch.utils.data.Dataset):
     """
-    Orsi dataloader.
+    Orsi dataloader specific for `data/orsi_tensors/` structure.
+
+    - patient folder: RARPxx
+    - frames: RARPxx/Video_1fps/*.pt (1 fps)
+    - labels: RARPxx/Label/RARPxx_all_label.csv
+    - CSV columns: patient_id, patient_name, frame_id, frame_path, second,
+      event_id, event_name, phase_id, phase_name
+    - multiple patients are merged in the same dataset
+    - filtering by event names through cfg.ENDOVIS_DATASET.EXCLUDE_EVENT_NAMES
+    - for a clip, label is nearest non-Idle label relative to central frame.
+    - Idle is used only if no non-idle label is available.
+    - event labels last 3 seconds (3 frames at 1 fps), with only first frame stored.
     """
 
     def __init__(self, cfg, split, load=True):
         self.dataset_name = "Orsi"
         self.zero_fill = 9
         self.image_type = "jpg"
-        self.fps_videos = {'CASE021','CASE041','CASE047','CASE050','CASE051','CASE053'}
-        super().__init__(cfg,split,load)
-    
+        self.cfg = cfg
+        self._split = split
+        self._sample_rate = cfg.DATA.SAMPLING_RATE
+        self._video_length = max(cfg.DATA.NUM_FRAMES, cfg.MODEL.MEMORY_BANK_SIZE) if split == "train" else cfg.DATA.NUM_FRAMES
+        self._seq_mode = cfg.DATA.SEQ_MODE
+        self._seq_len = self._video_length * self._sample_rate
+        self._num_classes = {key: n_class for key, n_class in zip(cfg.TASKS.TASKS, cfg.TASKS.NUM_CLASSES)}
+        self._region_tasks = {task for task in cfg.TASKS.TASKS if task in cfg.ENDOVIS_DATASET.REGION_TASKS}
+        self._frame_tasks = {task for task in cfg.TASKS.TASKS if task not in cfg.ENDOVIS_DATASET.REGION_TASKS}
+
+        # Augmentation params.
+        self._data_mean = cfg.DATA.MEAN
+        self._data_std = cfg.DATA.STD
+        self._use_bgr = cfg.ENDOVIS_DATASET.BGR
+        self.random_horizontal_flip = cfg.DATA.RANDOM_FLIP
+        if self._split == "train":
+            self._crop_size = (cfg.DATA.TRAIN_CROP_SIZE, cfg.DATA.TRAIN_CROP_SIZE_LARGE)
+            self._jitter_min_scale = cfg.DATA.TRAIN_JITTER_SCALES[0]
+            self._jitter_max_scale = cfg.DATA.TRAIN_JITTER_SCALES[1]
+            self._use_color_augmentation = cfg.ENDOVIS_DATASET.TRAIN_USE_COLOR_AUGMENTATION
+            self._pca_jitter_only = cfg.ENDOVIS_DATASET.TRAIN_PCA_JITTER_ONLY
+            self._pca_eigval = cfg.DATA.TRAIN_PCA_EIGVAL
+            self._pca_eigvec = cfg.DATA.TRAIN_PCA_EIGVEC
+        else:
+            self._crop_size = (cfg.DATA.TEST_CROP_SIZE, cfg.DATA.TEST_CROP_SIZE_LARGE)
+            self._test_force_flip = cfg.ENDOVIS_DATASET.TEST_FORCE_FLIP
+            self.aspect_ratio_th = cfg.ENDOVIS_DATASET.ASPECT_RATION_TH
+
+        #paths
+        self.video_root = getattr(cfg.ENDOVIS_DATASET, "ORSI_ROOT_DIR", cfg.ENDOVIS_DATASET.FRAME_DIR)
+        self.label_dir = getattr(cfg.ENDOVIS_DATASET, "ORSI_LABEL_DIR", cfg.ENDOVIS_DATASET.ANNOTATION_DIR)
+        self.frame_folder = getattr(cfg.ENDOVIS_DATASET, "ORSI_FRAME_FOLDER", "Video_1fps")
+        self.frame_folder_alternatives = [self.frame_folder, "IMAGES"]
+        self.label_folder = getattr(cfg.ENDOVIS_DATASET, "ORSI_LABEL_FOLDER", "Label")
+        self.exclude_event_names = {name.strip().lower() for name in getattr(cfg.ENDOVIS_DATASET, "EXCLUDE_EVENT_NAMES", [])}
+        self.image_type = getattr(cfg.ENDOVIS_DATASET, "ORSI_IMAGE_TYPE", "pt")
+
+        # Store loaded data
+        self.patient_frame_ids = {}
+        self.patient_frame_paths = {}
+        self.frame_info = {}
+        self.dfs = []
+        self.filtered_dfs = None
+        self.clips = []
+        
+        if self.video_root not in sys.path:
+            sys.path.insert(0, self.video_root)
+        try:
+            from events_lists import mapping_events_name_to_id, mapping_phases_name_to_id
+            self.event_name2idx = mapping_events_name_to_id
+            self.phase_name2idx = mapping_phases_name_to_id
+        except ImportError as e:
+            print(f"Error importing events_lists: {e}")
+            self.event_name2idx = {}
+            self.phase_name2idx = {}
+        if load:
+            self._load_data()
+
+    def _list_patient_ids(self):
+        if self._split == "train":
+            list_files = self.cfg.ENDOVIS_DATASET.TRAIN_LISTS
+        elif self._split == "val":
+            list_files = self.cfg.ENDOVIS_DATASET.TEST_LISTS
+        elif self._split == "test":
+            list_files = self.cfg.ENDOVIS_DATASET.TEST_LISTS
+        else:
+            raise ValueError(f"Unsupported split {self._split} for Orsi dataset")
+
+        if isinstance(list_files, str):
+            list_files = [list_files]
+
+        patients = []
+        for f in list_files:
+            base = os.path.basename(f)
+            if base.endswith(".csv"):
+                patient = base[:-4]
+                if patient.endswith("_all_label"):
+                    patient = patient[: -len("_all_label")]
+                patients.append(patient)
+            else:
+                patients.append(base)
+        return patients
+
+    def _locate_label_file(self, patient):
+        candidates = []
+        if self.label_dir:
+            candidates += [
+                os.path.join(self.video_root, patient, self.label_folder, f"{patient}_all_labels.csv"),
+            ]
+        if self.video_root:
+            candidates += [
+                os.path.join(self.video_root, patient, self.label_folder, f"{patient}_all_labels.csv"),
+            ]
+
+        for path in candidates:
+            if path and os.path.exists(path):
+                return path
+        raise FileNotFoundError(
+            f"Unable to locate label CSV for patient '{patient}'. Searched: {candidates}"
+        )
+
+    def _load_data(self):
+        # 1) Read labels and expand events over 3 frames
+
+        dfs = []
+        for patient in self._list_patient_ids():
+            label_path = self._locate_label_file(patient)
+            frame_info = {}
+
+            df = pd.read_csv(label_path)
+            dfs.append(df)
+            
+        self.dfs = pd.concat(dfs, ignore_index=True) 
+        if self.exclude_event_names:
+            self.filtered_dfs = self.dfs[~self.dfs["event_name"].str.strip().str.lower().isin(self.exclude_event_names)].reset_index(drop=True)
+        
+        return   
+
+    def _select_center_label(self, patient, frame_ids, seq):
+        n = len(frame_ids)
+        if n == 0:
+            return None
+
+        center_idx = seq[len(seq) // 2]
+
+        # Find nearest non-Idle event/phase label.
+        best_event = None
+        best_phase = None
+
+        for delta in range(0, max(center_idx, n - center_idx - 1) + 1):
+            checks = []
+            if center_idx - delta >= 0:
+                checks.append(center_idx - delta)
+            if delta > 0 and center_idx + delta < n:
+                checks.append(center_idx + delta)
+
+            for p in checks:
+                info = self.frame_info[patient][frame_ids[p]]
+                if best_event is None and info.get("event_name", "Idle").strip().lower() != "idle":
+                    best_event = info
+                if best_phase is None and info.get("phase_name", "Idle").strip().lower() != "idle":
+                    best_phase = info
+                if best_event is not None and best_phase is not None:
+                    break
+            if best_event is not None and best_phase is not None:
+                break
+
+        if best_event is None:
+            best_event = self.frame_info[patient][frame_ids[center_idx]]
+        if best_phase is None:
+            best_phase = self.frame_info[patient][frame_ids[center_idx]]
+
+        return {
+            "event_id": best_event.get("event_id", -1),
+            "event_name": best_event.get("event_name", "Idle"),
+            "phase_id": best_phase.get("phase_id", -1),
+            "phase_name": best_phase.get("phase_name", "Idle"),
+        }
+
+    def _label_to_numeric(self, label_id, label_name, name2idx, num_classes):
+        if label_id is not None and isinstance(label_id, (int, float)) and label_id > 0:
+            out = int(label_id) - 1
+            if 0 <= out < num_classes:
+                return out
+        s = str(label_name).strip().lower()
+        if s == "idle" or s == "" or s == "nan":
+            return 0
+        if s in name2idx:
+            out = name2idx[s]
+            if out < num_classes:
+                return out
+        return 0
+
+    def __len__(self):
+        return len(self.filtered_dfs) if self.filtered_dfs is not None else len(self.dfs)
+
+    def _images_and_boxes_preprocessing_cv2(self, imgs, boxes=None, image=None):
+        height, width, _ = imgs[0].shape
+        if boxes is None:
+            boxes = np.zeros((1, 4))
+        boxes = cv2_transform.clip_boxes_to_image(boxes, height, width)
+
+        boxes = [boxes.astype('float')]
+
+        if self._split == "train" and not self.cfg.DATA.JUST_CENTER:
+            imgs, boxes = cv2_transform.random_short_side_scale_jitter_list(
+                imgs,
+                min_size=self._jitter_min_scale,
+                max_size=self._jitter_max_scale,
+                boxes=boxes,
+            )
+            imgs, boxes, image = cv2_transform.random_crop_list(
+                imgs, self._crop_size, order="HWC", boxes=boxes, image=image
+            )
+
+            if self.random_horizontal_flip:
+                if image is not None:
+                    imgs.append(image)
+
+                imgs, boxes = cv2_transform.horizontal_flip_list(
+                    0.5, imgs, order="HWC", boxes=boxes
+                )
+
+                if image is not None:
+                    image = imgs.pop()
+
+        elif self._split == "val" or self.cfg.DATA.JUST_CENTER:
+            imgs = [cv2_transform.scale(self._crop_size[0], img) for img in imgs]
+            boxes = [
+                cv2_transform.scale_boxes(
+                    self._crop_size[0], boxes[0], height, width
+                )
+            ]
+            imgs, boxes, _ = cv2_transform.spatial_shift_crop_list(
+                self._crop_size, imgs, 1, boxes=boxes, image=None
+            )
+
+            ori_aspect_ratio = (width / height)
+            crop_aspect_ratio = (self.cfg.DATA.TEST_CROP_SIZE_LARGE / self.cfg.DATA.TEST_CROP_SIZE)
+            assert (
+                image is None
+                or ori_aspect_ratio - crop_aspect_ratio < self.aspect_ratio_th
+            ), f"Test aspect ratio difference is too large for inference with RPN"
+
+            if not self.cfg.DATA.JUST_CENTER and self._test_force_flip:
+                if image is not None:
+                    imgs.append(image)
+
+                imgs, boxes = cv2_transform.horizontal_flip_list(
+                    1, imgs, order="HWC", boxes=boxes
+                )
+
+                if image is not None:
+                    image = imgs.pop()
+        else:
+            raise NotImplementedError(
+                "Unsupported split mode {}".format(self._split)
+            )
+
+        imgs = [cv2_transform.HWC2CHW(img) for img in imgs]
+        imgs = [img / 255.0 for img in imgs]
+
+        if self._split == "train" and self._use_color_augmentation:
+            if not self._pca_jitter_only:
+                imgs = cv2_transform.color_jitter_list(
+                    imgs,
+                    img_brightness=0.4,
+                    img_contrast=0.4,
+                    img_saturation=0.4,
+                )
+
+            imgs = cv2_transform.lighting_list(
+                imgs,
+                alphastd=0.1,
+                eigval=np.array(self._pca_eigval).astype(np.float32),
+                eigvec=np.array(self._pca_eigvec).astype(np.float32),
+            )
+
+        imgs = [
+            cv2_transform.color_normalization(
+                img,
+                np.array(self._data_mean, dtype=np.float32),
+                np.array(self._data_std, dtype=np.float32),
+            )
+            for img in imgs
+        ]
+
+        imgs = np.concatenate([np.expand_dims(img, axis=1) for img in imgs], axis=1)
+
+        if not self._use_bgr:
+            imgs = imgs[::-1, ...]
+
+        imgs = np.ascontiguousarray(imgs)
+        imgs = torch.from_numpy(imgs)
+        boxes = cv2_transform.clip_boxes_to_image(
+            boxes[0], imgs[0].shape[1], imgs[0].shape[2]
+        )
+        if image is not None:
+            image = cv2_transform.BGR2RGB(image)
+            image = cv2_transform.HWC2CHW(image)
+            image = torch.tensor(image)
+        return imgs, boxes, image
+
+    def __getitem__(self, idx):
+        clip = self.filtered_dfs.iloc[idx] if self.filtered_dfs is not None else self.dfs.iloc[idx]
+
+        df = self.dfs[self.dfs["patient_id"] == clip["patient_id"]]
+        
+        seq = utils.get_sequence(
+            clip["frame_id"],
+            self._seq_len,
+            self._sample_rate,
+            num_frames=len(df),
+            mode=self._seq_mode,
+        )
+        
+        # Load all clip frames
+        image_paths = df.iloc[seq]["frame_path"].to_list()
+        
+        imgs = utils.retry_load_images([os.path.join(self.video_root, path) for path in image_paths],
+                                       backend=self.cfg.ENDOVIS_DATASET.IMG_PROC_BACKEND)
+        if isinstance(imgs, list):
+            imgs = torch.as_tensor(np.stack(imgs))
+
+        # if self._crop_size[0] not in imgs.shape:
+        #     # Convert loaded tensor into list of arrays for cv2_transform compatibility
+        #     if isinstance(imgs, torch.Tensor):
+        #         imgs = [img.numpy() if isinstance(img, torch.Tensor) else img for img in imgs]
+        #     imgs, _, _ = self._images_and_boxes_preprocessing_cv2(imgs, boxes=None, image=None)
+        # else:
+        imgs = imgs.permute(3, 0, 1, 2)  # convert to CTHW
+        # imgs = utils.pack_pathway_output(self.cfg, imgs)
+
+        # convert label to numeric if needed
+        all_labels = {}
+        extra_data = {}
+
+        for task in self._frame_tasks:
+            if task == "steps":
+                all_labels[task] = clip.get(f"event_id", -1)
+                extra_data[f"{task}_name"] = clip.get(f"event_name", "unknown")
+            elif task == "phases":
+                all_labels[task] = clip.get(f"phase_id", -1)
+                extra_data[f"{task}_name"] = clip.get(f"phase_name", "unknown")
+            else:
+                all_labels[task] = clip.get(f"{task}_id", -1)
+                extra_data[f"{task}_name"] = clip.get(f"{task}_name", "unknown")
+
+        frame_identifier = f"{clip['patient_name']}/{self.frame_folder}/{clip['frame_id']:0{self.zero_fill}d}.{self.image_type}"
+
+        return [imgs], all_labels, extra_data, frame_identifier
+
+
+
     def keyframe_mapping(self, video_idx, sec_idx, sec):
         return round(sec/60)
         try:
@@ -55,189 +397,3 @@ class Orsi(SurgicalDataset):
     def frame_name_joining(self, video_name, sec):
         return f"{video_name}/IMAGES/{sec:0{self.zero_fill}d}.{self.image_type}"
         
-    def __getitem__(self, idx):
-        """
-        Generate corresponding clips, boxes, labels and metadata for given idx.
-
-        Args:
-            idx (int): the video index provided by the pytorch sampler.
-        Returns:
-            frames (tensor): the frames of sampled from the video. The dimension
-                is `channel` x `num frames` x `height` x `width`.
-            label (ndarray): the label for correspond boxes for the current video.
-            idx (int): the video index provided by the pytorch sampler.
-            extra_data (dict): a dict containing extra data fields, like "boxes",
-                "ori_boxes" and "metadata".
-        """
-        # Get the path of the middle frame 
-        video_idx, sec_idx, sec, _ = self._keyframe_indices[idx]
-        video_name = self._video_idx_to_name[video_idx]
-        complete_name = self.frame_name_joining(video_name, sec)
-
-        #TODO: These are just security checks, REMOVE when all done
-        # folder_to_images = self._image_paths[video_idx][sec_idx]
-        path_complete_name = self._image_paths[video_idx][sec_idx]
-        found_idx = self._image_paths[video_idx].index(path_complete_name)
-        assert path_complete_name == self._image_paths[video_idx][sec_idx], f'Different paths {path_complete_name} & {self._image_paths[video_idx][sec_idx]} & {sec_idx} & {sec}'
-        # assert found_idx == sec_idx, f'Different indexes {found_idx} & {sec_idx}'
-        # assert int(self._image_paths[video_idx][sec_idx].split('/')[-1].replace('.'+self.image_type,''))==sec, f'Different {self._image_paths[video_idx][sec_idx].split("/")[-1].replace("."+self.image_type,"")} {sec}'
-
-        # Get the frame idxs for current clip.
-        if self._video_length> 1:
-            seq = utils.get_sequence(
-                sec_idx,
-                self._seq_len,
-                self._sample_rate,
-                num_frames=len(self._image_paths[video_idx]),
-                mode = self._seq_mode
-            )
-        else:
-            seq = [sec_idx]
-
-        assert sec_idx in seq, f'Center index {sec_idx} not in sequence {seq}'
-        clip_label_list = deepcopy(self._keyframe_boxes_and_labels[video_idx][sec_idx])
-        assert len(clip_label_list) > 0
-
-        # Get boxes and labels for current clip.
-        boxes = []
-
-        # Add labels depending on the task
-        all_labels = {task:[] for task in self._region_tasks}
-        
-        if self.cfg.FEATURES.ENABLE:
-            rpn_features = []
-            box_features = self.feature_boxes[complete_name] 
-
-        if self.cfg.REGIONS.ENABLE:
-            if self.cfg.TASKS.PRESENCE_RECOGNITION:
-                all_labels_presence = {f'{task}_presence':np.zeros(self._num_classes[task]) for task in self._region_tasks}
-                all_labels.update(all_labels_presence)
-            for box_labels in clip_label_list:
-                if box_labels['bbox'] != [0,0,0,0]:
-                    boxes.append(box_labels['bbox'])
-                    if self.cfg.FEATURES.ENABLE:
-                        rpn_box_key = tuple(box_labels['bbox'])
-                        try:
-                            features = np.array(box_features[rpn_box_key])
-                            rpn_features.append(features)
-                        except KeyError:
-                            if self.cfg.ENDOVIS_DATASET.INCLUDE_GT and box_labels['is_gt']:
-                                rpn_box_key = utils.get_best_features(box_labels["bbox"],box_features)
-                                features = np.array(box_features[rpn_box_key])
-                                rpn_features.append(features)
-                            else:
-                                raise ValueError(f"Predicted box {box_labels['bbox']} missing in features of {complete_name} {box_features.keys()}")
-
-                    for task in self._region_tasks:
-                        if isinstance(box_labels[task],list):
-                            binary_task_label = np.zeros(self._num_classes[task],dtype='uint8')
-                            box_task_labels = np.array(box_labels[task])-1
-                            binary_task_label[box_task_labels] = 1
-                            all_labels[task].append(binary_task_label)
-                            if self.cfg.TASKS.PRESENCE_RECOGNITION:
-                                all_labels[f'{task}_presence'][box_task_labels] = 1
-                        elif isinstance(box_labels[task],int):
-                            all_labels[task].append(box_labels[task]-1)
-                            if self.cfg.TASKS.PRESENCE_RECOGNITION:
-                                all_labels[f'{task}_presence'][box_labels[task]-1] = 1
-                        else:
-                            raise ValueError(f'Do not support annotation {box_labels[task]} of type {type(box_labels[task])} in frame {complete_name}')
-        else:
-            for task in self._region_tasks:
-                binary_task_label = np.zeros(self._num_classes[task]+1, dtype='uint8')
-                label_list = [label[task] for label in clip_label_list]
-                assert all(type(label_list[0])==type(lab_item) for lab_item in label_list), f'Inconsistent label type {label_list} in frame {complete_name}'
-                if isinstance(label_list[0], list):
-                    label_list = list(set(itertools.chain(*label_list)))
-                elif isinstance(label_list[0], int):
-                    label_list = list(set(label_list))
-                else:
-                    raise ValueError(f'Do not support annotation {label_list[0]} of type {type(label_list[0])} in frame {complete_name}')
-                binary_task_label[label_list] = 1
-                all_labels[task] = binary_task_label[1:]
-
-        for task in self._frame_tasks:
-            assert all(label[task]==clip_label_list[0][task] for label in clip_label_list), f'Inconsistent {task} labels for frame {complete_name}: {[label[task] for label in clip_label_list]}'
-            all_labels[task] = clip_label_list[0][task] 
-
-        extra_data = {}
-        if self.cfg.REGIONS.ENABLE:
-            max_boxes = self.cfg.DATA.MAX_BBOXES * 2 if self.cfg.ENDOVIS_DATASET.INCLUDE_GT else self.cfg.DATA.MAX_BBOXES
-            if  len(boxes):
-                ori_boxes = deepcopy(boxes)
-                boxes = np.array(boxes)
-                if self.cfg.FEATURES.ENABLE:
-                    rpn_features = np.array(rpn_features)
-            else:
-                ori_boxes = []
-                boxes = np.zeros((max_boxes, 4))
-        else:
-            boxes = np.zeros((1, 4))
-                
-        # Load images of current clip.
-        image_paths = [self._image_paths[video_idx][frame] for frame in seq]
-        image = None
-        preprocessed = [utils.load_single_image_preprocessed(p) for p in image_paths]
-        if all(t is not None for t in preprocessed):
-            # ✅ Tutto pre-processato: stack diretto, skip preprocessing
-            imgs = torch.stack(preprocessed,dim=1)  # [3, T, 224, 224]
-            boxes = cv2_transform.clip_boxes_to_image(boxes, 224, 224)
-        else:
-            # Fallback: caricamento e preprocessing normale
-            imgs = utils.retry_load_images(image_paths, backend=self.cfg.ENDOVIS_DATASET.IMG_PROC_BACKEND)
-            if self.cfg.FEATURES.USE_RPN:
-                image = imgs[len(imgs)//2]
-
-            imgs, boxes, image = self._images_and_boxes_preprocessing_cv2(imgs, boxes=boxes, image=image)
-
-        if self.cfg.FEATURES.USE_RPN:
-            image = imgs[len(imgs)//2]
-
-        
-        # Preprocess images and boxes
-        # imgs, boxes, image = self._images_and_boxes_preprocessing_cv2(
-        #     imgs, boxes=boxes, image=image
-        # )
-        
-        # Padding and masking for a consistent dimensions in batch
-        if self.cfg.REGIONS.ENABLE and len(ori_boxes):
-            max_boxes = self.cfg.DATA.MAX_BBOXES * 2 if self.cfg.ENDOVIS_DATASET.INCLUDE_GT else self.cfg.DATA.MAX_BBOXES
-
-            assert len(boxes)==len(ori_boxes)==len(rpn_features), f'Inconsistent lengths {len(boxes)} {len(ori_boxes)} {len(rpn_features)}'
-            assert len(boxes)<= max_boxes and len(ori_boxes)<=max_boxes and len(rpn_features)<=max_boxes, f'More boxes than max box num {len(boxes)} {len(ori_boxes)} {len(rpn_features)}'
-
-            bbox_mask = np.zeros(max_boxes,dtype=bool)
-            bbox_mask[:len(boxes)] = True
-            extra_data["boxes_mask"] = bbox_mask
-
-            if len(boxes)<max_boxes:
-                c_boxes = np.concatenate((boxes,np.zeros((max_boxes-len(boxes),4))),axis=0)
-                boxes = c_boxes
-            extra_data["ori_boxes"] = ori_boxes
-            extra_data["boxes"] = boxes
-
-            if self.cfg.FEATURES.ENABLE:
-                if len(rpn_features)<max_boxes:
-                    c_rpn_features = np.concatenate((rpn_features,np.zeros((max_boxes-len(rpn_features), self.cfg.FEATURES.DIM_FEATURES))),axis=0)
-                    rpn_features = c_rpn_features
-                extra_data["rpn_features"] = rpn_features
-        elif self.cfg.REGIONS.ENABLE:
-            bbox_mask = np.zeros(max_boxes,dtype=bool)
-            extra_data["boxes_mask"] = bbox_mask
-            extra_data["ori_boxes"] = ori_boxes
-            extra_data["boxes"] = boxes
-
-            if self.cfg.FEATURES.ENABLE:
-                extra_data["rpn_features"] = np.zeros((max_boxes, self.cfg.FEATURES.DIM_FEATURES))
-        
-        imgs = utils.pack_pathway_output(self.cfg, imgs)
-
-        if image is not None:
-            extra_data['images'] = image
-
-        if self.cfg.NUM_GPUS>1:
-            frame_identifier = self.frame_name_spliting(video_name, sec)
-        else:
-            frame_identifier = complete_name
-        
-        return imgs, all_labels, extra_data, frame_identifier

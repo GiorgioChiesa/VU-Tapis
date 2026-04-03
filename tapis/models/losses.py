@@ -11,17 +11,52 @@ import pandas as pd
 import numpy as np
 
 
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for addressing class imbalance.
+    """
+    def __init__(self, weight=None, alpha=None, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.weight = weight
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+        
+    def forward(self, inputs, targets):
+        if self.weight is not None:
+            ce_loss = F.cross_entropy(inputs, targets, weight=self.weight, reduction='none')
+        else:
+            ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+        if self.alpha is not None:
+            if isinstance(self.alpha, (list, np.ndarray)):
+                alpha_t = torch.tensor(self.alpha, device=inputs.device)[targets]
+            elif isinstance(self.alpha, torch.Tensor):
+                alpha_t = self.alpha[targets]
+            else:
+                alpha_t = self.alpha
+            focal_loss = alpha_t * focal_loss
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+
 _LOSSES = {
     "cross_entropy": nn.CrossEntropyLoss,
     "bce": nn.BCELoss,
     "bce_logit": nn.BCEWithLogitsLoss,
-    
+    "focal_loss": FocalLoss,
 }
 
 _TYPES = {
     "cross_entropy": torch.long,
     "bce": torch.float,
     "bce_logit": torch.float,
+    "focal_loss": torch.long,
 }
 
 

@@ -56,7 +56,7 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="Orsi-ev-all-weight-totdataset"
+NAME="Orsi-steps_optimized"
 GPUIDS="1"
 
 DATASET="orsi"
@@ -91,7 +91,7 @@ GPUIDS "[$GPUIDS]" \
 TRAIN.ACCUM_STEPS 10 \
 TRAIN.BATCH_SIZE 16 \
 TEST.BATCH_SIZE 60 \
-SOLVER.MAX_ITER 9999000 \
+SOLVER.MAX_ITER 7000 \
 TRAIN.FREEZE_ENCODER False \
 OUTPUT_DIR $OUTPUT_DIR \
 ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/nas_private/data/orsi \

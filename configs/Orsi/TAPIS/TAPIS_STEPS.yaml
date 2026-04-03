@@ -17,7 +17,7 @@ TEST:
 DATA:
   NUM_FRAMES: 16
   SAMPLING_RATE: 1
-  SEQ_MODE: before # or "center" or "after"
+  SEQ_MODE: center # or "center" or "after"
   TRAIN_JITTER_SCALES: [256, 320]
   TRAIN_CROP_SIZE: 224
   TRAIN_CROP_SIZE_LARGE: 224
@@ -57,7 +57,7 @@ REGIONS:
   ALIGNED: True
   ROI_XFORM_RESOLUTION: 3
 AUG:
-  ENABLE: False
+  ENABLE: True
   COLOR_JITTER: 0.4
   AA_TYPE: rand-m7-n4-mstd0.5-inc1
   INTERPOLATION: bicubic
@@ -65,9 +65,11 @@ AUG:
   RE_MODE: pixel
   RE_COUNT: 1
   RE_SPLIT: False
+  TEMPORAL_JITTER: 0.1  # ±10% frame rate variation
+  SPATIAL_AUG: True     # Random crops, flips
 SOLVER:
   BASE_LR_SCALE_NUM_SHARDS: True
-  BASE_LR: 1.25e-5 # 0.0125
+  BASE_LR: 5e-5 # 0.0125
   CLIP_GRAD_L2NORM: 1.0
   LR_POLICY: cosine
   COSINE_AFTER_WARMUP: True
@@ -89,11 +91,13 @@ MODEL:
 TASKS:
   TASKS:  ["steps"]
   NUM_CLASSES: [72]
-  LOSS_FUNC: ["cross_entropy"]
+  LOSS_FUNC: ["focal_loss"]
   HEAD_ACT:  ["softmax"]
   LOSS_WEIGHTS:  [1.0]
   METRICS: ["mAP"]  
   WEIGHT_LOSS_BY_CLASS: ["/home/gchie/workspace/data/dataset_analisis/tables/01_step_distribution.csv"]
+  FOCAL_GAMMA: 2.0
+  FOCAL_ALPHA_MODE: "auto"  # auto, manual, or None
 DATA_LOADER:
   NUM_WORKERS: 5
   PIN_MEMORY: True

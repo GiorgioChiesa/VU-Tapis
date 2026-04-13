@@ -197,7 +197,7 @@ class SurgeryMeter(object):
         if self.generate_masks:
             self.all_masks = []
 
-    def update_stats(self, preds, names, boxes, final_loss=None, losses=None, lr=None, labels=None):
+    def update_stats(self, preds, names=None, boxes=None, final_loss=None, losses=None, lr=None, labels=None):
         """
         Update the current stats.
         Args:
@@ -210,10 +210,13 @@ class SurgeryMeter(object):
             lr (float): learning rate.
             labels (dict): labels per task (optional, for confusion matrix logging).
         """
-        if self.eval_train or self.mode in ["val", "test"]:
-
+        if self.eval_train or self.mode in ["val", "test"] or (labels is not None and preds is not None):
+            
             for task in self.tasks:
-                self.all_preds[task].extend(preds[task])
+                if isinstance(preds[task], torch.Tensor):
+                    self.all_preds[task].extend(preds[task].detach().cpu().numpy().tolist())
+                else:
+                    self.all_preds[task].extend(preds[task])
                 if labels is not None and task in labels:
                     if isinstance(labels[task], torch.Tensor):
                         self.all_labels[task].extend(labels[task].cpu().numpy().tolist())
@@ -245,7 +248,7 @@ class SurgeryMeter(object):
         if lr is not None:
             self.lr = lr
 
-    def finalize_metrics(self, epoch, log=True ):
+    def finalize_metrics(self, epoch, log=True , **kwargs):
         """
         Calculate and log the final PSI-AVA metrics.
         """
@@ -261,6 +264,7 @@ class SurgeryMeter(object):
                                                                      output_dir=self.output_dir, 
                                                                      img_ann_dict=self.all_names,
                                                                      imgs_folder= None,# self.cfg.ENDOVIS_DATASET.FRAME_DIR ,
+                                                                     **kwargs,
                                                                      )
             
                 
@@ -280,7 +284,7 @@ class SurgeryMeter(object):
             self.early_stop[1] = deepcopy(self.cfg.SOLVER.EARLY_STOP_ep_th[0])
         self.early_stop[0] = max(mean_map, self.early_stop[0])
         
-        if self.early_stop[1] <= 0 or epoch >= self.early_stop[3]:
+        if (self.early_stop[1] <= 0 or epoch >= self.early_stop[3]) and self.mode != "train":
             logging.log_json_stats({"mode": self.mode, "early_stop": True, "epoch": epoch})
             for task,metric in zip(self.tasks, self.metrics):
                 if task in ["phases","steps"]:            
@@ -308,7 +312,7 @@ class SurgeryMeter(object):
             cur_epoch (int): the number of current epoch.
         """
         if self.mode in ["val", "test"]:
-            metrics_val, mean_map, out_files = self.finalize_metrics(cur_epoch +1, log=False)
+            metrics_val, mean_map, out_files = self.finalize_metrics(cur_epoch +1, log=False, mode=self.mode)
             stats = {
                 "_type": "{}_epoch".format(self.mode),
                 "cur_epoch": "{}".format(cur_epoch + 1),
@@ -320,11 +324,28 @@ class SurgeryMeter(object):
             for idx, task in enumerate(self.tasks):
                 stats["{}_map".format(task)] = self.full_map[task]
 
-            logging.log_json_stats(stats)
+            # logging.log_json_stats(stats)
 
             early_stop = self.early_stop[1] <= 0 or cur_epoch >= self.early_stop[3]
             
             return metrics_val, mean_map, out_files, stats, early_stop
+        # TODO: log train epoch stats
+        if self.mode == "train":
+            metrics_train, mean_map, out_files = self.finalize_metrics(-1, log=False, mode=self.mode)
+            stats = {
+                "_type": "last_epoch" ,
+                "cur_epoch": "{}".format(cur_epoch + 1),
+                "mode": self.mode,
+                "gpu_mem": "{:.2f}G".format(misc.gpu_mem_usage()),
+                "RAM": "{:.2f}/{:.2f}G".format(*misc.cpu_mem_usage()),
+                "output_dir": self.output_dir,
+                
+            }
+            for idx, task in enumerate(self.tasks):
+                stats["{}_map".format(task)] = self.full_map[task]
+            return metrics_train, mean_map, out_files, stats, False
+
+            
 
     def save_json(self, task, epoch):
         """
@@ -335,6 +356,7 @@ class SurgeryMeter(object):
         save_json_dict = {}
 
         preds, boxes, names = self.all_preds, self.all_boxes, self.all_names
+
 
         if self.regions:
             assert len(preds[task])==len(names)==len(boxes), f'Inconsistent lengths {len(preds[task])} {len(names)} {len(boxes)}'

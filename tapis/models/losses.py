@@ -110,5 +110,5 @@ def get_weight_from_csv(path, num_classes=None):
         return None
     counts = df['total_count'].values
     inverted = [1.0 / val if val != 0 else 0.0 for val in counts]
-    inverted[:3] = [val * 0.01 for val in inverted[:3]]  # set the first three classes to 0 weight
-    return torch.tensor(inverted / np.sum(inverted), dtype=torch.float32)
+    # inverted[:3] = [val * 0.01 for val in inverted[:3]]  # set the first three classes to 0 weight
+    return torch.tensor(inverted, dtype=torch.float32)

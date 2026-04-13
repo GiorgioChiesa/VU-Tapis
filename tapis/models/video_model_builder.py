@@ -1031,9 +1031,16 @@ class VideoLEMON(LEMON):
     def forward(self, batch_frames, **kwargs):
         # imput size = ([B, C=3, T=16, H=224, W=224])
         input = batch_frames[0]
-        input = input[:,:,-1,:,:] # get only the last frame of video
-        # input = torch.squeeze(input)
-        return super().forward(input)
+        if self.cfg.DATA.SEQ_MODE == "center":
+            return super().forward(input[:,:,input.shape[2]//2:input.shape[2]//2+1,:,:].squeeze(2)) # get only the central frame of video
+        if self.cfg.DATA.SEQ_MODE == "before":
+            return super().forward(input[:,:,-1,:,:].squeeze(2)) # get only the central frame of video
+        if self.cfg.DATA.SEQ_MODE == "after":
+            return super().forward(input[:,:,0,:,:].squeeze(2)) # get only the central frame of video
+
+        # input = input[:,:,-1,:,:] # get only the last frame of video
+        # # input = torch.squeeze(input)
+        # return super().forward(input)
         
         
         

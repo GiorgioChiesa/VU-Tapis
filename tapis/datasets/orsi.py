@@ -11,6 +11,7 @@ from copy import deepcopy
 import pandas as pd
 from tapis.datasets import cv2_transform
 import torch
+
 from . import utils as utils
 from .build import DATASET_REGISTRY
 
@@ -79,7 +80,7 @@ class Orsi(torch.utils.data.Dataset):
         self.patient_frame_ids = {}
         self.patient_frame_paths = {}
         self.frame_info = {}
-        self.dfs = []
+        self.dfs = pd.DataFrame()
         self.filtered_dfs = None
         self.clips = []
         
@@ -89,12 +90,60 @@ class Orsi(torch.utils.data.Dataset):
             from events_lists import mapping_events_name_to_id, mapping_phases_name_to_id
             self.event_name2idx = mapping_events_name_to_id
             self.phase_name2idx = mapping_phases_name_to_id
+            self.event_idx2name = {v: k for k, v in mapping_events_name_to_id.items()}
+            self.phase_idx2name = {v: k for k, v in mapping_phases_name_to_id.items()}
         except ImportError as e:
             print(f"Error importing events_lists: {e}")
             self.event_name2idx = {}
             self.phase_name2idx = {}
         if load:
             self._load_data()
+            if any(self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS):
+                self.generate_weight_vector()
+    
+    def generate_weight_vector(self):
+        map_task={"steps": "event", "phases": "phase"}
+        for task, weight_loss_by_class in zip(self.cfg.TASKS.TASKS, self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS):
+            if not weight_loss_by_class:
+                continue
+            if isinstance(weight_loss_by_class, str) and (os.path.isfile(weight_loss_by_class) or os.path.isfile(os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class))):
+                weight_loss_by_class = os.path.abspath(os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class))
+                
+                if "csv" in weight_loss_by_class:
+                    clip = pd.read_csv(weight_loss_by_class)
+                elif "json" in weight_loss_by_class:
+                    clip = pd.read_json(weight_loss_by_class)
+                elif "xlsx" in weight_loss_by_class:
+                    clip = pd.read_excel(weight_loss_by_class)
+                else:
+                    print(f"Unsupported file format for weight_loss_by_class: {weight_loss_by_class}. Supported formats are .csv, .json, and .xlsx")
+                
+                if "total_count" in list(clip.columns):
+                    continue
+                else:
+                    print(f"Column 'total_count' not found in {weight_loss_by_class}. Please make sure the file has a column named 'total_count' with the count of samples for each class.")
+                    print(f"Generating weight vector from dataset distribution instead.")
+                
+            clip = self.filtered_dfs.copy() if self.filtered_dfs is not None else self.dfs.copy()
+
+            his =[]
+            for id in range(self.cfg.TASKS.NUM_CLASSES[self.cfg.TASKS.TASKS.index(task)]):
+                his.append({
+                    "id": id,
+                    "name": self.event_idx2name.get(id, "unknown") if task == "steps" else self.phase_idx2name.get(id, "unknown"),
+                    "total_count": len(clip[clip[f"{map_task[task]}_id"] == id ]),
+
+                })
+            
+            df = pd.DataFrame(his)
+            assert df["total_count"].sum() == len(clip), f"Total count in distribution ({df['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
+            if isinstance(weight_loss_by_class, str) and os.path.isabs(weight_loss_by_class):
+                df.to_csv(weight_loss_by_class, index=False)
+            else:
+                csv_path = os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class)
+                print(f"Weight loss by class for task {task}:\n{df}")
+                os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+                df.to_csv(csv_path, index=False)
 
     def _list_patient_ids(self):
         if self._split == "train":
@@ -151,9 +200,10 @@ class Orsi(torch.utils.data.Dataset):
             dfs.append(df)
             
         self.dfs = pd.concat(dfs, ignore_index=True) 
-        if self.exclude_event_names:
+        if self.exclude_event_names: #TODO: pensare se filtrare solo nel train !!!
             self.filtered_dfs = self.dfs[~self.dfs["event_name"].str.strip().str.lower().isin(self.exclude_event_names)].reset_index(drop=True)
-        
+        saving = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
+        saving.to_csv(os.path.join(self.cfg.OUTPUT_DIR, f"{self._split}_data.csv"), index=False)
         return   
 
     def _select_center_label(self, patient, frame_ids, seq):
@@ -327,7 +377,7 @@ class Orsi(torch.utils.data.Dataset):
         df = self.dfs[self.dfs["patient_id"] == clip["patient_id"]]
         
         seq = utils.get_sequence(
-            clip["frame_id"],
+            df["frame_id"].to_list().index(clip["frame_id"]),
             self._seq_len,
             self._sample_rate,
             num_frames=len(df),
@@ -366,7 +416,7 @@ class Orsi(torch.utils.data.Dataset):
                 all_labels[task] = clip.get(f"{task}_id", -1)
                 extra_data[f"{task}_name"] = clip.get(f"{task}_name", "unknown")
 
-        frame_identifier = f"{clip['patient_name']}/{self.frame_folder}/{clip['frame_id']:0{self.zero_fill}d}.{self.image_type}"
+        frame_identifier = clip["frame_path"]
 
         return [imgs], all_labels, extra_data, frame_identifier
 

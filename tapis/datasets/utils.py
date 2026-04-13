@@ -186,9 +186,9 @@ def get_sequence(center_idx, length, sample_rate, num_frames, mode="center", tem
     
     if mode == "center":
         seq = list(range(center_idx - length//2, center_idx + length//2, effective_sample_rate))
-    elif mode == "before":
+    elif mode == "before" or mode == "last":
         seq = list(range(center_idx - length + effective_sample_rate, center_idx + effective_sample_rate, effective_sample_rate))
-    elif mode == "after":
+    elif mode == "after" or mode == "first":
         seq = list(range(center_idx, center_idx + length, effective_sample_rate))
     else:
         raise ValueError(f"Invalid sequence mode: {mode}")

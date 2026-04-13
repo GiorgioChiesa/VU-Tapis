@@ -47,7 +47,7 @@ def wandgb_log(stats):
     if wanbrun is not None:
         tasks_map = [k for k, v in stats.items() if isinstance(v,dict)]
         if len(tasks_map)==0:
-            stats = {f'{stats["mode"]}_{k}': v for k, v in stats.items()}
+            stats = {f'{stats["mode"]}/{k}': v for k, v in stats.items()}
             wanbrun.log(stats)
             return
         if stats["mode"].lower() in ['test', 'val']:
@@ -56,10 +56,11 @@ def wandgb_log(stats):
             for tasks in tasks_map:
                 stat = {}
                 for k, v in stats[tasks].items():
-                    stat[f'{stats["mode"]}_{k}'] = v
+                    stat[f'{stats["mode"]}/{k}'] = v
                 # stats ={f'{stats["mode"]}_{k}': v for k, v in stats["phases_map"].items()}
                 stat["cur_epoch"] = int(cur_epoch)
-                stat[f"{tasks}_cm"] = wandb.Image(os.path.join(stats["output_dir"], f"confusion_matrix_{tasks.split('_')[0]}.png"))
+                tasks = tasks.split('_')[0]
+                stat[f"{tasks}_cm"] = wandb.Image(os.path.join(stats["output_dir"], f"{stats['mode']}_confusion_matrix_{tasks}.png"))
                 wanbrun.log(stat)
             
         elif stats["mode"].lower() == 'train':
@@ -179,8 +180,8 @@ def train_epoch(
     data_size = len(train_loader)
     tasks = cfg.TASKS.TASKS
     loss_funs = cfg.TASKS.LOSS_FUNC
-    
-    weight = {task: losses.get_weight_from_csv(cfg.TASKS.WEIGHT_LOSS_BY_CLASS[t_id], cfg.TASKS.NUM_CLASSES[t_id]) for t_id, task in enumerate(tasks)}
+    weiths_paths = [os.path.join(cfg.OUTPUT_DIR, "distributions", cfg.TASKS.WEIGHT_LOSS_BY_CLASS[t_id]) for t_id, task in enumerate(tasks)]
+    weight = {task: losses.get_weight_from_csv(weiths_paths[t_id], cfg.TASKS.NUM_CLASSES[t_id]) for t_id, task in enumerate(tasks)}
     if cfg.NUM_GPUS:
         weight = {task: weight[task].to("cuda") if weight[task] is not None else None for task in weight}
     
@@ -199,6 +200,8 @@ def train_epoch(
                     # Could add manual alpha specification
                     pass
             loss_kwargs[task] = kwargs
+        elif loss_funs[t_id] == "cross_entropy":
+            loss_kwargs[task] = {"ignore_index": -1} 
         else:
             loss_kwargs[task] = {}
     
@@ -221,18 +224,21 @@ def train_epoch(
                 if cfg.MODEL.PRECISION == 64:
                     inputs[0] = inputs[0].double()
 
-                # for key, val in data.items():
-                #     data[key] = val.cuda(non_blocking=True)
-                #     if cfg.MODEL.PRECISION == 64:
-                #         data[key]  = data[key].double()
+                for key, val in data.items():
+                    try:
+                        data[key] = val.cuda(non_blocking=True)
+                        if cfg.MODEL.PRECISION == 64:
+                            data[key]  = data[key].double()
+                    except:
+                        pass
 
                 for key, val in labels.items():
                     labels[key] = val.cuda(non_blocking=True)
                     if cfg.MODEL.PRECISION == 64:
                         labels[key]  = labels[key].double()
                 
-                # if cfg.NUM_GPUS>1:
-                #     image_names = image_names.cuda(non_blocking=True)
+                if cfg.NUM_GPUS>1:
+                    image_names = image_names.cuda(non_blocking=True)
 
             # Update the learning rate.
             lr = optim.get_epoch_lr(cur_epoch + float(cur_iter) / data_size, cfg)
@@ -249,56 +255,65 @@ def train_epoch(
                 if hasattr(model, 'reset_memory_bank'):
                     model.reset_memory_bank() 
 
-                window_losses = []
-                n_windows = max(1, inputs[0].shape[2] - cfg.DATA.NUM_FRAMES + 1)
+                preds = model(inputs )
 
-                for i in range(n_windows):
-                    # rpn_ftrs = data["rpn_features"] if cfg.FEATURES.ENABLE else None
-                    # boxes_mask = data["boxes_mask"] if cfg.REGIONS.ENABLE else None
-                    # boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
-                    # images = data["images"] if cfg.FEATURES.USE_RPN else None
-                    preds = model([inputs[0][:, :, i:i+cfg.DATA.NUM_FRAMES, ... ]] )
+                if isinstance(preds, tuple):
+                    preds = preds[0]  # 0 = Loss with memory, 1 to don't use memory
 
-                    if isinstance(preds, tuple):
-                        preds = preds[0]  # 0 = Loss with memory, 1 to don't use memory
+                # Clip logits to prevent explosion
+                for task in tasks:
+                    preds[task] = torch.clamp(preds[task], 
+                                              torch.tensor(-10.0, device=preds[task].device), 
+                                              torch.tensor(10.0, device=preds[task].device))
 
-                    # Explicitly declare reduction to mean and compute the loss for each task for this window.
-                    window_loss_items = []
-                    for task in loss_dict:
-                        loss_fun = loss_dict[task]
-                        target_type = type_dict[task]
-                        window_loss_items.append(loss_fun(preds[task], labels[task].to(target_type)))
+                # Explicitly declare reduction to mean and compute the loss for each task for this window.
+                window_loss_items = []
+                for task in loss_dict:
+                    loss_fun = loss_dict[task]
+                    target_type = type_dict[task]
+                    window_loss_items.append(loss_fun(preds[task], labels[task].to(target_type)))
 
-                    if len(window_loss_items) > 1:
-                        window_loss = losses.compute_weighted_loss(window_loss_items, loss_weights)
-                    else:
-                        window_loss = window_loss_items[0]
-
-                    window_losses.append(window_loss)
-
-                final_loss = torch.stack(window_losses).mean()
-
+                if len(window_loss_items) > 1:
+                    final_loss = losses.compute_weighted_loss(window_loss_items, loss_weights)
+                else:
+                    final_loss = window_loss_items[0]
+               
+            # check Nan Loss and log detailed diagnostics
+            if cur_iter % 100 == 0:
+                # Check for NaN
+                if torch.isnan(final_loss) or torch.isinf(final_loss):
+                    logger.error(f"[Iter {cur_iter}] NaN or Inf loss detected! Loss={final_loss}")
+                    raise RuntimeError("Loss is NaN or Inf - training diverged")
                 
-            # check Nan Loss.
-            if cur_iter % 50 == 0:
-                misc.check_nan_losses(final_loss.item())
-            # Perform the backward pass.
-            # scaler.scale(final_loss).backward()
-
-            # Unscales the gradients of optimizer's assigned params in-place
-            # scaler.unscale_(optimizer)
-
-            # Clip gradients if necessary
-            if cfg.SOLVER.CLIP_GRAD_VAL:
-                torch.nn.utils.clip_grad_value_(
-                    model.parameters(), cfg.SOLVER.CLIP_GRAD_VAL
-                )
-            elif cfg.SOLVER.CLIP_GRAD_L2NORM:
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), cfg.SOLVER.CLIP_GRAD_L2NORM
-                )
+                # Log predictions diagnostics
+                preds_classes = preds[cfg.TASKS.TASKS[0]].argmax(1)
+                labels_tensor = labels[cfg.TASKS.TASKS[0]]
+                unique_preds = torch.unique(preds_classes)
+                unique_labels = torch.unique(labels_tensor)
+                logger.info(f"[Iter {cur_iter}] Unique pred classes: {len(unique_preds)}, values: {unique_preds[:10].tolist()}")
+                logger.info(f"[Iter {cur_iter}] Unique label classes: {len(unique_labels)}, values: {unique_labels[:10].tolist()}")
                 
+                # Log logits diagnostics for each task
+                for task in tasks:
+                    max_logit = preds[task].abs().max().item()
+                    min_logit = preds[task].min().item()
+                    mean_logit = preds[task].mean().item()
+                    logger.info(f"[Iter {cur_iter}] Task '{task}': max|logit|={max_logit:.4f}, min_logit={min_logit:.4f}, mean_logit={mean_logit:.6f}, loss={final_loss:.6f}")
+            
+            # Perform the backward pass first
             scaler.scale(final_loss / cfg.TRAIN.ACCUM_STEPS).backward()  # normalizza il loss
+
+            # Log gradient norms AFTER backward pass (when gradients are actually computed)
+            if cur_iter % 100 == 0:
+                total_norm = 0.0
+                num_params_with_grad = 0
+                for p in model.parameters():
+                    if p.grad is not None:
+                        param_norm = p.grad.data.norm(2)
+                        total_norm += param_norm.item() ** 2
+                        num_params_with_grad += 1
+                total_norm = total_norm ** 0.5 if total_norm > 0 else 0.0
+                logger.info(f"[Iter {cur_iter}] Gradient norm: {total_norm:.8f}, params_with_grad: {num_params_with_grad}")
 
             if (cur_iter + 1) % cfg.TRAIN.ACCUM_STEPS == 0:
                 scaler.unscale_(optimizer)
@@ -309,13 +324,23 @@ def train_epoch(
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
+                
+                # Debug: log if parameters are actually being updated
+                if cur_iter % 100 == 0:
+                    first_param = next(model.parameters())
+                    logger.info(f"[Iter {cur_iter}] First param mean: {first_param.mean().item():.8f}, std: {first_param.std().item():.8f}")
             
             if cfg.NUM_GPUS > 1:
                 final_loss = du.all_reduce([final_loss])[0]
             final_loss = final_loss.item()
 
             # Update and log stats.
-            train_meter.update_stats(None, None, None, final_loss=final_loss,losses=[window_loss_items[-1]], lr=lr)
+            train_meter.update_stats(preds = preds,
+                                     names=image_names,
+                                     labels=labels,
+                                     final_loss=final_loss,
+                                     losses=[window_loss_items[-1]], 
+                                     lr=lr)
             train_meter.iter_toc()  # measure allreduce for this meter
             stats = train_meter.log_iter_stats(cur_epoch, cur_iter)
             train_meter.iter_tic()
@@ -326,10 +351,10 @@ def train_epoch(
             
     t.close()
     # Log epoch stats.
-    train_meter.log_epoch_stats(cur_epoch)
+    task_map, mean_map, out_files, stats, early_stop = train_meter.log_epoch_stats(cur_epoch)
 
     # Log confusion matrix for each task
-    if cfg.WANDB_ENABLE:
+    if cfg.WANDB_ENABLE and stats:
         wandgb_log(stats)
     train_meter.reset()
 
@@ -428,7 +453,7 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
                     preds[task] = preds[task].tolist()
 
             # Update and log stats.
-            val_meter.update_stats(preds, image_names, None, labels=labels)
+            val_meter.update_stats(preds, image_names, labels=labels)
             stats = val_meter.log_iter_stats(cur_epoch, cur_iter)
             val_meter.iter_tic()
             # t.set_postfix(stats.items())
@@ -639,27 +664,13 @@ def train(cfg):
                             cfg,
                             scaler if cfg.TRAIN.MIXED_PRECISION else None,
                         )
-                # # Log confusion matrix for best or last epoch
-                # is_best = mean_map > old_best_mean_map
-                # if cfg.WANDB_ENABLE and cfg.NUM_GPUS <= 1:
-                #     name_wandb = "best_epoch" if is_best else "last_epoch"
-                #     for task in complete_tasks:
-                #         if len(val_meter.all_preds[task]) > 0 and len(val_meter.all_labels[task]) > 0:
-                #             log_confusion_matrix_wandb(
-                #                 val_meter,
-                #                 task,
-                #                 "val",
-                #                 cur_epoch,
-                #                 mean_map,
-                #                 name_wandb,
-                #                 cfg
-                #             )
-                
+
                 # Early stopping check
                 if early_stop:
                     logger.info(f"Early stopping triggered after {cur_epoch + 1} epochs: no improvement >= {cfg.SOLVER.EARLY_STOP_ep_th[1]} for {cfg.SOLVER.EARLY_STOP_ep_th[0]} epochs")
                     break
             val_meter.reset()
+
     if "cur_epoch" in locals():
         cu.save_checkpoint(
                 cfg.OUTPUT_DIR,

@@ -820,10 +820,10 @@ _C.REGIONS.FILTER_INCOMPLETE = False
 _C.ENDOVIS_DATASET = CfgNode()
 
 # Directory path of frames.
-_C.ENDOVIS_DATASET.FRAME_DIR = ""
+_C.ENDOVIS_DATASET.FRAME_DIR = "/home/gchie/workspace/data"
 
 # Directory path for files of frame lists.
-_C.ENDOVIS_DATASET.FRAME_LIST_DIR = ""
+_C.ENDOVIS_DATASET.FRAME_LIST_DIR = "/home/gchie/workspace/data"
 
 # Directory path for annotation files.
 _C.ENDOVIS_DATASET.ANNOTATION_DIR = ""
@@ -846,7 +846,7 @@ _C.ENDOVIS_DATASET.ORSI_ROOT_DIR = "/home/gchie/workspace/data/orsi_tensors"
 _C.ENDOVIS_DATASET.ORSI_LABEL_DIR = "/home/gchie/workspace/data/orsi_tensors"
 _C.ENDOVIS_DATASET.ORSI_FRAME_FOLDER = "Video_1fps"
 _C.ENDOVIS_DATASET.ORSI_LABEL_FOLDER = "Label"
-_C.ENDOVIS_DATASET.EXCLUDE_EVENT_NAMES = ["Idle", "Out_of_body", "Test_image_start"]
+_C.ENDOVIS_DATASET.EXCLUDE_EVENT_NAMES = []
 
 # Filenames of box list files for train.
 _C.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON = ["train_coco_preds.json"]

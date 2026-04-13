@@ -65,14 +65,15 @@ def eval_task(task, metric, coco_anns, preds, masks_path=None, **kwargs):
     return main_metric, aux_metrics
 
 
-def main_per_task(coco_ann_path, pred_path, task, metric, masks_path=None):
+def main_per_task(coco_ann_path, pred_path, task, metric, masks_path=None, **kwargs):
     # Load coco anns and preds        
     coco_anns = load_json(coco_ann_path)
     preds = load_json(pred_path) if type(pred_path)==str else pred_path
 
     task_eval, aux_metrics = eval_task(task, metric, coco_anns, preds, masks_path)
     aux_metrics = dict(zip(aux_metrics.keys(),map(lambda x: round(x,8), aux_metrics.values())))
-    print('{} task {}: {} {}'.format(task, metric, round(task_eval,8), aux_metrics))
+    if kwargs.get("log", False):
+        print('{} task {}: {} {}'.format(task, metric, round(task_eval,8), aux_metrics))
     
     final_metrics = {metric: round(task_eval,8)}
     final_metrics.update(aux_metrics)    
@@ -81,7 +82,8 @@ def main_per_task(coco_ann_path, pred_path, task, metric, masks_path=None):
 def main_per_long_tasks(all_labels, all_preds, task, metric, **kwargs):
     task_eval, aux_metrics = eval_task(task, metric, all_labels, all_preds, **kwargs)
     aux_metrics = dict(zip(aux_metrics.keys(),map(lambda x: round(x,8), aux_metrics.values())))
-    print('{} task {}: {} {}'.format(task, metric, round(task_eval,8), aux_metrics))
+    if kwargs.get("log", False):
+        print('{} task {}: {} {}'.format(task, metric, round(task_eval,8), aux_metrics))
     
     final_metrics = {metric: round(task_eval,8)}
     final_metrics.update(aux_metrics)    

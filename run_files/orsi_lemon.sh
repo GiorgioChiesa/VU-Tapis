@@ -4,7 +4,6 @@
 # GT_TRAIN_FOLDS="['RARP01_coco.json','RARP07_coco.json','RARP18_coco.json','RARP23_coco.json','RARP29_coco.json','RARP34_coco.json','RARP40_coco.json','RARP46_coco.json','RARP59_coco.json','RARP02_coco.json','RARP08_coco.json','RARP13_coco.json','RARP19_coco.json','RARP25_coco.json','RARP30_coco.json','RARP35_coco.json','RARP41_coco.json','RARP47_coco.json','RARP61_coco.json','RARP03_coco.json','RARP09_coco.json','RARP15_coco.json','RARP20_coco.json','RARP26_coco.json','RARP31_coco.json','RARP43_coco.json','RARP48_coco.json','RARP62_coco.json','RARP04_coco.json','RARP10_coco.json','RARP16_coco.json','RARP21_coco.json','RARP27_coco.json','RARP32_coco.json','RARP37_coco.json','RARP44_coco.json','RARP49_coco.json','RARP64_coco.json']"
 # GT_TEST_FOLDS="['RARP06_coco.json','RARP11_coco.json','RARP17_coco.json','RARP22_coco.json','RARP28_coco.json','RARP33_coco.json','RARP38_coco.json','RARP45_coco.json','RARP65_coco.json']"
 EXP_PREFIX=$NAME  #costumize
-TASK="LONG"
 ARCH="TAPIS"
 all_patients=('RARP01' 'RARP02' 'RARP03' 'RARP04' 'RARP06' 'RARP07' 'RARP08' 'RARP09' 'RARP10' 'RARP11' 'RARP12' 'RARP13' 'RARP15' 'RARP16' 'RARP17' 'RARP18' 'RARP19' 'RARP20' 'RARP21' 'RARP22' 'RARP23' 'RARP25' 'RARP26' 'RARP27' 'RARP28' 'RARP29' 'RARP30' 'RARP31' 'RARP32' 'RARP33' 'RARP34' 'RARP35' 'RARP36' 'RARP37' 'RARP38' 'RARP40' 'RARP41' 'RARP43' 'RARP44' 'RARP45' 'RARP46' 'RARP47' 'RARP48' 'RARP49' 'RARP50' 'RARP59' 'RARP61' 'RARP62' 'RARP64' 'RARP65')
 n_train=43
@@ -56,11 +55,12 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="Orsi-Lemon"
-GPUIDS="1"
+NAME="overfit_lemon"
+GPUIDS="0"
+TASK="STEPS"
 
 DATASET="orsi"
-CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_LONG.yaml"
+CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_$TASK.yaml"
 OUTPUT_DIR="/home/gchie/workspace/VU-Tapis/outputs/"$DATASET"/"$TASK"/"$NAME"/totale"
 
 #Change this variables if data is not located in ./data
@@ -68,7 +68,7 @@ FRAME_DIR="/home/gchie/workspace/nas_private/data/orsi"
 FRAME_LIST="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frame_lists"
 ANNOT_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations"
 COCO_ANN_PATH="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations/grasp_long-term_"$TEST_FOLD".json"
-CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_models/fold1/"$TASK".pyth"
+CHECKPOINT=""
 
 #-------------------------
 # Run experiment
@@ -88,16 +88,14 @@ CUDA_VISIBLE_DEVICES=$GPUIDS python -B tools/run_net.py \
 WANDB_ENABLE True \
 NAME $NAME \
 GPUIDS "[$GPUIDS]" \
-TRAIN.ACCUM_STEPS 5 \
-TRAIN.BATCH_SIZE 32 \
-TEST.BATCH_SIZE 50 \
+TRAIN.ACCUM_STEPS 1 \
+TRAIN.BATCH_SIZE 4 \
+TEST.BATCH_SIZE 40 \
 SOLVER.MAX_ITER 10000 \
 SOLVER.MAX_EPOCH 30 \
-TRAIN.FREEZE_ENCODER False \
+TRAIN.FREEZE_ENCODER True \
 MODEL.MODEL_NAME VideoLEMON \
 OUTPUT_DIR $OUTPUT_DIR \
-ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/nas_private/data/orsi \
-ENDOVIS_DATASET.FRAME_LIST_DIR /home/gchie/workspace/data/coco \
 ENDOVIS_DATASET.TRAIN_LISTS "[$TRAIN_FOLDS_STR]" \
 ENDOVIS_DATASET.TEST_LISTS "[$TEST_FOLDS_STR]" \
 ENDOVIS_DATASET.ANNOTATION_DIR /home/gchie/workspace/data/coco \

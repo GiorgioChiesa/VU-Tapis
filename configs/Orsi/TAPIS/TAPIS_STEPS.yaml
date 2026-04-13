@@ -1,7 +1,7 @@
 TRAIN:
   ENABLE: True
   DATASET: orsi
-  BATCH_SIZE: 12 #24
+  BATCH_SIZE: 16
   ACCUM_STEPS: 1
   EVAL_PERIOD: 1
   CHECKPOINT_PERIOD: 1
@@ -69,19 +69,19 @@ AUG:
   SPATIAL_AUG: True     # Random crops, flips
 SOLVER:
   BASE_LR_SCALE_NUM_SHARDS: True
-  BASE_LR: 5e-5 # 0.0125
-  CLIP_GRAD_L2NORM: 1.0
+  BASE_LR: 0.0001
+  CLIP_GRAD_L2NORM: 0.01
   LR_POLICY: cosine
   COSINE_AFTER_WARMUP: True
-  COSINE_END_LR: 1e-6 #1e-4
+  COSINE_END_LR: 1e-4 #1e-4
   MAX_EPOCH: 30
   MAX_ITER: 10000
-  EARLY_STOP_ep_th: [5, 0.0] # epoch and threshold for early stopping, if the metric does not improve for this many epochs by at least this threshold, stop training.
+  EARLY_STOP_ep_th: [5, -1.0] # epoch and threshold for early stopping, if the metric does not improve for this many epochs by at least this threshold, stop training.
   WARMUP_EPOCHS: 5.0
   MOMENTUM: 0.9
   WEIGHT_DECAY: 1e-4
   ZERO_WD_1D_PARAM: True
-  WARMUP_START_LR:  1.25e-6 # 0.00125
+  WARMUP_START_LR:  1.25e-5 # 0.0000125
   OPTIMIZING_METHOD: adam
 MODEL:
   ARCH: mvit
@@ -91,11 +91,11 @@ MODEL:
 TASKS:
   TASKS:  ["steps"]
   NUM_CLASSES: [72]
-  LOSS_FUNC: ["focal_loss"]
+  LOSS_FUNC: ["cross_entropy"]
   HEAD_ACT:  ["softmax"]
   LOSS_WEIGHTS:  [1.0]
   METRICS: ["mAP"]  
-  WEIGHT_LOSS_BY_CLASS: ["/home/gchie/workspace/data/dataset_analisis/tables/01_step_distribution.csv"]
+  WEIGHT_LOSS_BY_CLASS: [steps_distribution.csv]
   FOCAL_GAMMA: 2.0
   FOCAL_ALPHA_MODE: "auto"  # auto, manual, or None
 DATA_LOADER:
@@ -108,5 +108,6 @@ LOG_PERIOD: 50000
 OUTPUT_DIR: .
 MAX_SAVE_VIDEO: 10
 ENDOVIS_DATASET:
+  EXCLUDE_EVENT_NAMES: ["Idle", "Out_of_body", "Test_image_start"]
   TRAIN_GT_BOX_JSON: [all_merged.json]
   TEST_GT_BOX_JSON: [all_merged.json]

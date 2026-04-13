@@ -15,7 +15,7 @@ import json
 import cv2
 import subprocess
 import imageio
-
+from glob import glob
 
 def eval_classification(task, coco_anns, preds, **kwargs):
     if kwargs.get("class_names", None) is not None:
@@ -24,6 +24,7 @@ def eval_classification(task, coco_anns, preds, **kwargs):
         classes = coco_anns[f'{task}_categories']
     else:
         raise ValueError(f"Class names not found for task {task} in coco annotations. Please provide class_names in kwargs.")
+    mode = kwargs.get("mode", "")
     classes = sorted(classes, key=lambda x: x['id'])
     num_classes = len(classes)
     bin_labels = []
@@ -69,7 +70,6 @@ def eval_classification(task, coco_anns, preds, **kwargs):
         bin_labels = label_binarize(coco_anns, classes=list(range(0, num_classes)))
         bin_preds = preds
     # Count missing annotations
-
     
     bin_labels = np.array(bin_labels)
     bin_preds = np.array(bin_preds)
@@ -79,6 +79,13 @@ def eval_classification(task, coco_anns, preds, **kwargs):
     ap = {}
     auc = {}
     acc = {}
+    plt.imsave(os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_labels_{task}.png"), bin_labels)
+    plt.imsave(os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_preds_{task}.png"), bin_preds)
+    plt.imsave(os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_preds_{task}>0.5.png"), bin_preds>0.5)
+    
+    
+    
+    
     for c in range(0, num_classes):
         precision[c], recall[c], threshs[c] = precision_recall_curve(bin_labels[:, c], bin_preds[:,c]  )
         auc[c] = roc_auc_score(bin_labels[:, c], bin_preds[:, c])
@@ -121,7 +128,7 @@ def eval_classification(task, coco_anns, preds, **kwargs):
     save_confusion_matrix(preds=bin_preds, 
                           labels=bin_labels, 
                           class_name=classes, 
-                          path=os.path.join(kwargs.get("output_dir", "./temp"), f"confusion_matrix_{task}.png"),
+                          path=os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_confusion_matrix_{task}.png"),
                           normalize='true' )
     
     # save_missmatches(preds=best_preds, 
@@ -153,7 +160,7 @@ def save_missmatches(preds, labels, task, class_name, output_dir="./temp", img_a
     start_video = 0
 
     for i, (pred_class, true_class, img_path) in enumerate(sorted(zip(preds, labels, img_ann_dict), key=lambda x: x[2])):
-        video = img_path.split('/')[0]
+        video = img_path.split('/')[1]
         if video not in consecutive_groups:
             consecutive_groups[video] = []
         if video not in mismatches_by_video:
@@ -189,8 +196,8 @@ def save_missmatches(preds, labels, task, class_name, output_dir="./temp", img_a
     os.makedirs(os.path.dirname(mismatch_path), exist_ok=True)
     with open(mismatch_path, 'w') as f:
         json.dump(mismatches, f, indent=4)
-    
-    plot_video_missmatches(mismatches_by_video, task, output_dir, maxCounter=Counter([im.split("/")[0] for im in img_ann_dict]))
+    maxCounter = Counter([im.split("/")[1] for im in img_ann_dict])
+    plot_video_missmatches(mismatches_by_video, task, output_dir, maxCounter=maxCounter, **kwargs)
     if imgs_folder is not None:
         max_save_video = kwargs.get("max_save_video", 0)
         save_missmatches_videos(mismatches, output_dir, imgs_folder, max_save_video,  **kwargs)
@@ -200,7 +207,7 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0
     """
     Save mismatch frames as videos organized by error type.
     """
-    if imgs_folder is None or mismatches is None:
+    if imgs_folder is None or mismatches is None or not imgs_folder or not mismatches:
         return
     if max_video <= 0:
         return
@@ -271,18 +278,12 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0
                                             mode=kwargs.get("mode", "center"), 
                                             csv_folder=kwargs.get("csv_folder", None))
                 
-                # for f, frame_idx in enumerate(frame_indices):
-                #     #TODO: ricerca del frame è sbagliata
-                #     frame_path = os.path.join(imgs_folder, group[f]['image_name'])
-                #     frames.append(load_frame(frame_path))
-
-
                 # Save video if frames exist
                 if frames and len(frames)>=16:
                     video_name = f"{video}_{start_idx}_{end_idx}.mp4"
                     video_path = os.path.join(error_dir, video_name)
                     
-                    h, w = frames[0].shape[:2]
+                    # h, w = frames[0].shape[:2]
                     # fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                     # out = cv2.VideoWriter(video_path, fourcc, 1.0, (w, h))
                     
@@ -315,8 +316,11 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0
             
 def loadpadding_frames(imgs_folder, frames, video, time_window=16, mode="center", csv_folder=None):
     try:
-        csv_path = os.path.join(csv_folder, f"{video}.csv")
-        list_frames = pd.read_csv(csv_path, sep=' ', header=None).iloc[:,3].tolist()
+        regexcsv_path = os.path.join(csv_folder,"**", video, "**","*all*.csv")
+        csv_path = glob(regexcsv_path, recursive=True)
+        assert len(csv_path)==1, f"Expected exactly one CSV file for video {video}, regex: {regexcsv_path}, found: {csv_path}"
+        csv_path = csv_path[0]
+        list_frames = pd.read_csv(csv_path)["frame_path"].tolist()
         frame_idxs = [list_frames.index(frame['image_name']) for frame in frames]
         
         if mode == "center":
@@ -428,6 +432,18 @@ def save_confusion_matrix(preds, labels, class_name:list=[],path:str="./temp/con
         preds = np.argmax(preds, axis=1)
     if len(labels.shape) == 2 and labels.shape[1] > 1:
         labels = np.argmax(labels, axis=1)
+    
+    # Safety check: filter out invalid labels (-1) if present
+    valid_mask = labels != -1
+    if (~valid_mask).sum() > 0:
+        logging.warning(f"Found {(~valid_mask).sum()} invalid labels (-1) in confusion matrix. Filtering them out.")
+        preds = preds[valid_mask]
+        labels = labels[valid_mask]
+    
+    if len(preds) == 0:
+        print("No valid predictions or labels after filtering -1 labels.")
+        return None
+    
     cm = confusion_matrix(labels, preds , normalize=kwargs.get("normalize", None))
     
     if len(class_name) >0 and isinstance(class_name[0], dict):

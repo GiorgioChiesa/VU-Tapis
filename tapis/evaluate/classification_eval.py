@@ -73,24 +73,26 @@ def eval_classification(task, coco_anns, preds, **kwargs):
     
     bin_labels = np.array(bin_labels)
     bin_preds = np.array(bin_preds)
-    precision = {}
-    recall = {}
-    threshs = {}
-    ap = {}
-    auc = {}
-    acc = {}
+    cat_res_dict = {}
+    # precision = {}
+    # recall = {}
+    # threshs = {}
+    # ap = {}
+    # auc = {}
+    # acc = {}
     plt.imsave(os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_labels_{task}.png"), bin_labels)
     plt.imsave(os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_preds_{task}.png"), bin_preds)
     plt.imsave(os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_preds_{task}>0.5.png"), bin_preds>0.5)
+    plt.imsave(os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_preds_{task}_argmax.png"), label_binarize(bin_preds.argmax(axis=1), classes=list(range(0, num_classes))))
     
     
+    #TODO: discomment for all metrics, for now only AP to speed up
     
-    
-    for c in range(0, num_classes):
-        precision[c], recall[c], threshs[c] = precision_recall_curve(bin_labels[:, c], bin_preds[:,c]  )
-        auc[c] = roc_auc_score(bin_labels[:, c], bin_preds[:, c])
-        acc[c] = balanced_accuracy_score(bin_labels[:, c], bin_preds[:, c]>0.5)
-        ap[c] = average_precision_score(bin_labels[:, c], bin_preds[:, c])
+    # for c in range(0, num_classes):
+    #     precision[c], recall[c], threshs[c] = precision_recall_curve(bin_labels[:, c], bin_preds[:,c]  )
+    #     auc[c] = roc_auc_score(bin_labels[:, c], bin_preds[:, c])
+    #     acc[c] = balanced_accuracy_score(bin_labels[:, c], bin_preds[:, c]>0.5)
+    #     ap[c] = average_precision_score(bin_labels[:, c], bin_preds[:, c])
 
     mAP = np.nanmean(average_precision_score(bin_labels, bin_preds))
     best_preds = np.argmax(bin_preds, axis=1)
@@ -99,22 +101,22 @@ def eval_classification(task, coco_anns, preds, **kwargs):
     mAUC = np.nanmean(roc_auc_score(bin_labels, bin_preds))
     mf1 = np.nanmean(f1_score(best_labels, best_preds, average='macro'))
 
-    cat_names = [f"{cat['name']}-AP" for cat in classes]
-    cat_res_dict = dict(zip(cat_names,list(ap.values())))
+    # cat_names = [f"{cat['name']}-AP" for cat in classes]
+    # cat_res_dict = dict(zip(cat_names,list(ap.values())))
 
-    cat_res_dict.update({f"{cat['name']}-AUC": auc[c] for c, cat in enumerate(classes)})
-    cat_res_dict.update({f"{cat['name']}-ACC": acc[c] for c, cat in enumerate(classes)})
+    # cat_res_dict.update({f"{cat['name']}-AUC": auc[c] for c, cat in enumerate(classes)})
+    # cat_res_dict.update({f"{cat['name']}-ACC": acc[c] for c, cat in enumerate(classes)})
     
 
-    f1_dict = {}
-    auc_dict = {}
-    acc_dict = {}
-    for video, anns_preds in ann_preds_dict.items():
-        np_anns_preds = np.array(anns_preds)
-        anns = np_anns_preds[:,0]
-        preds = np_anns_preds[:,1]
-        f1_dict[video] = f1_score(anns, preds, average='macro')
-        acc_dict[video] = balanced_accuracy_score(anns, preds)
+    # f1_dict = {}
+    # auc_dict = {}
+    # acc_dict = {}
+    # for video, anns_preds in ann_preds_dict.items():
+    #     np_anns_preds = np.array(anns_preds)
+    #     anns = np_anns_preds[:,0]
+    #     preds = np_anns_preds[:,1]
+    #     f1_dict[video] = f1_score(anns, preds, average='macro')
+    #     acc_dict[video] = balanced_accuracy_score(anns, preds)
     
     # f1 = np.nanmean(list(f1_dict.values()))
     # acc = np.nanmean(list(acc_dict.values()))
@@ -122,7 +124,7 @@ def eval_classification(task, coco_anns, preds, **kwargs):
     cat_res_dict.update({f"{task}_mAP":mAP})
     cat_res_dict.update({f"{task}_f1_score":mf1})
     cat_res_dict.update({f"{task}_balanced_accuracy":mACC})
-    cat_res_dict.update(f1_dict)
+    # cat_res_dict.update(f1_dict)
 
     # create confusion matrix
     save_confusion_matrix(preds=bin_preds, 

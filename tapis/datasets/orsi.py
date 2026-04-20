@@ -100,50 +100,49 @@ class Orsi(torch.utils.data.Dataset):
             self._load_data()
             if any(self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS):
                 self.generate_weight_vector()
+                self.remapping_local_id()
+            
+    def remapping_local_id(self):
+        map_task={"steps": "event", "phases": "phase"}
+        for task in self.cfg.TASKS.TASKS:
+            id_map = dict(zip(self.counter[task]["id"], range(len(self.counter[task]))))
+            self.filtered_dfs[f"{map_task[task]}_id"] = self.filtered_dfs[f"{map_task[task]}_id"].map(id_map).fillna(0)
+        
     
     def generate_weight_vector(self):
         map_task={"steps": "event", "phases": "phase"}
+        self.counter = {}
         for task, weight_loss_by_class in zip(self.cfg.TASKS.TASKS, self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS):
-            if not weight_loss_by_class:
-                continue
-            if isinstance(weight_loss_by_class, str) and (os.path.isfile(weight_loss_by_class) or os.path.isfile(os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class))):
-                weight_loss_by_class = os.path.abspath(os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class))
-                
-                if "csv" in weight_loss_by_class:
-                    clip = pd.read_csv(weight_loss_by_class)
-                elif "json" in weight_loss_by_class:
-                    clip = pd.read_json(weight_loss_by_class)
-                elif "xlsx" in weight_loss_by_class:
-                    clip = pd.read_excel(weight_loss_by_class)
-                else:
-                    print(f"Unsupported file format for weight_loss_by_class: {weight_loss_by_class}. Supported formats are .csv, .json, and .xlsx")
-                
-                if "total_count" in list(clip.columns):
-                    continue
-                else:
-                    print(f"Column 'total_count' not found in {weight_loss_by_class}. Please make sure the file has a column named 'total_count' with the count of samples for each class.")
-                    print(f"Generating weight vector from dataset distribution instead.")
-                
+            
             clip = self.filtered_dfs.copy() if self.filtered_dfs is not None else self.dfs.copy()
-
-            his =[]
-            for id in range(self.cfg.TASKS.NUM_CLASSES[self.cfg.TASKS.TASKS.index(task)]):
+            
+            his = []
+            mapping = self.event_idx2name if task == "steps" else self.phase_idx2name
+            for id, event in mapping.items():
+                if event.strip().lower().replace(" ","_") in self.exclude_event_names:
+                    continue
                 his.append({
                     "id": id,
-                    "name": self.event_idx2name.get(id, "unknown") if task == "steps" else self.phase_idx2name.get(id, "unknown"),
-                    "total_count": len(clip[clip[f"{map_task[task]}_id"] == id ]),
-
+                    "name": event,
+                    "total_count": sum(clip["event_id"]==id),
                 })
+            self.counter[task] = pd.DataFrame(his)
             
-            df = pd.DataFrame(his)
-            assert df["total_count"].sum() == len(clip), f"Total count in distribution ({df['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
-            if isinstance(weight_loss_by_class, str) and os.path.isabs(weight_loss_by_class):
-                df.to_csv(weight_loss_by_class, index=False)
-            else:
-                csv_path = os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class)
-                print(f"Weight loss by class for task {task}:\n{df}")
-                os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-                df.to_csv(csv_path, index=False)
+            # if "total_count" not in list(clip.columns):
+            #     clip.insert(len(clip.columns), "total_count",[0]*len(clip))
+                
+            # df = clip.groupby([f"{map_task[task]}_id",f"{map_task[task]}_name"])['total_count'].agg('count').reset_index()
+            # print(f"Distribution for task {task} before weight computation:\n{self.counter[task]}")
+            # print(df)
+            
+            assert self.counter[task]["total_count"].sum() == len(clip), f"Total count in distribution ({df['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
+            assert len(self.counter[task]) == self._num_classes[task] , f"Numero di classi non coincide"
+            
+            csv_path = os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class)
+            print(f"Weight loss by class for task {task} -- {self._split}:\n{self.counter[task]}")
+            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+            if self._split == "train":
+                self.counter[task].to_csv(csv_path, index=False)
 
     def _list_patient_ids(self):
         if self._split == "train":
@@ -201,7 +200,9 @@ class Orsi(torch.utils.data.Dataset):
             
         self.dfs = pd.concat(dfs, ignore_index=True) 
         if self.exclude_event_names: #TODO: pensare se filtrare solo nel train !!!
-            self.filtered_dfs = self.dfs[~self.dfs["event_name"].str.strip().str.lower().isin(self.exclude_event_names)].reset_index(drop=True)
+            self.filtered_dfs = self.dfs[~self.dfs["event_name"].str.strip().str.lower().str.replace(" ", "_").isin(self.exclude_event_names)].reset_index(drop=True)
+        else:
+            self.filtered_dfs = self.dfs.copy()
         saving = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
         saving.to_csv(os.path.join(self.cfg.OUTPUT_DIR, f"{self._split}_data.csv"), index=False)
         return   

@@ -969,7 +969,7 @@ class MViT(nn.Module):
                 
         return out
     
-# TODO aggiornare con lemon3m model
+
 from LemonFM.model_loader import build_LemonFM
 @MODEL_REGISTRY.register()  
 class LEMON(nn.Module):

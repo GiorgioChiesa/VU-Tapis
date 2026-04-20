@@ -73,8 +73,8 @@ SOLVER:
   CLIP_GRAD_L2NORM: 0.01
   LR_POLICY: cosine
   COSINE_AFTER_WARMUP: True
-  COSINE_END_LR: 1e-4 #1e-4
-  MAX_EPOCH: 30
+  COSINE_END_LR: 1e-5 #1e-5
+  MAX_EPOCH: 50
   MAX_ITER: 10000
   EARLY_STOP_ep_th: [5, -1.0] # epoch and threshold for early stopping, if the metric does not improve for this many epochs by at least this threshold, stop training.
   WARMUP_EPOCHS: 5.0
@@ -108,6 +108,6 @@ LOG_PERIOD: 50000
 OUTPUT_DIR: .
 MAX_SAVE_VIDEO: 10
 ENDOVIS_DATASET:
-  EXCLUDE_EVENT_NAMES: ["Idle", "Out_of_body", "Test_image_start"]
+  EXCLUDE_EVENT_NAMES: ["Idle", "Out_of_body", "Back_inside_body ","Final_reinforcing_suture" ,"Inside_abdomen", "Test_image_start", "Remove_gauze","Remove_hemostatic_agens", "Unsuccesful_clip_placement","Hemostatic_metal_clip_placement","Aiding_suture_stitch","Aiding_suture_clip_placement","3D_model", "Fat_removal", "Instrument_swap:_insertion", "Test_image_stop", "Incision_of_the_fascia_-_right"," Remove_needle_bladder_stretch_stitch", "Lift_right_seminal_vesicle", "Lift_left_seminal_vesicle", "Stitch_in_DVC_after_apical_dissection","Needle_removal_DVC_ligation", "Stitch_in_urethra", "Tie_suture", "Threads_removal","Vessel_loop_removal", "Camera_stop","Camera_out_of_body","Hemolock_clip_removal","Hemolock_clip_on_bladder_pedicle_attached_to_prostate"]
   TRAIN_GT_BOX_JSON: [all_merged.json]
   TEST_GT_BOX_JSON: [all_merged.json]

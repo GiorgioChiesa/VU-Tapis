@@ -21,7 +21,7 @@ from tapis.evaluate.classification_eval import save_missmatches
 import tapis.utils.logging as logging
 import tapis.utils.misc as misc
 from tapis.evaluate.utils import mask_to_rle, load_json
-
+import pandas as pd
 
 logger = logging.get_logger(__name__)
 
@@ -83,6 +83,18 @@ class SurgeryMeter(object):
         self.all_labels = {k: [] for k in self.tasks}
         data = load_json(cfg.ENDOVIS_DATASET.TEST_COCO_ANNS)
         self.class_dict = {task: data[f'{task}_categories'] for task in self.tasks}
+        try: 
+            for task, dist_file in zip(self.tasks, cfg.TASKS.WEIGHT_LOSS_BY_CLASS):
+                csv_file = os.path.join(cfg.OUTPUT_DIR,"distributions",dist_file)
+                if os.path.isfile(csv_file):
+                    temp = pd.read_csv(csv_file).to_dict()
+                    self.class_dict[task] = [ {"id":local_id,
+                                               "global_id":global_id,
+                                               "name":name } for (local_id,global_id), name in zip(temp["id"].items(), temp["name"].values())]
+        
+        except:
+            print("No distribution file, continua con tutte le classi")
+        
         self.early_stop = [0] + [deepcopy(th) for th in cfg.SOLVER.EARLY_STOP_ep_th] + [cfg.SOLVER.MAX_EPOCH] # [last_metric_value, epoch, threshold]
         
         if self.segmentation and os.path.isdir(cfg.ENDOVIS_DATASET.MASKS_PATH):

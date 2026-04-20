@@ -1034,6 +1034,10 @@ def assert_and_infer_cfg(cfg):
         cfg.SOLVER.WARMUP_START_LR *= cfg.NUM_SHARDS
         cfg.SOLVER.COSINE_END_LR *= cfg.NUM_SHARDS
 
+    for task in cfg.TASKS.TASKS:
+        if task == "steps":
+            cfg.TASKS.NUM_CLASSES[cfg.TASKS.TASKS.index(task)] = cfg.TASKS.NUM_CLASSES[cfg.TASKS.TASKS.index(task)] - len(cfg.ENDOVIS_DATASET.EXCLUDE_EVENT_NAMES)
+    
     # General assertions.
     assert cfg.SHARD_ID < cfg.NUM_SHARDS
     return cfg

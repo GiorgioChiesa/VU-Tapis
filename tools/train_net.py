@@ -255,7 +255,7 @@ def train_epoch(
                 if hasattr(model, 'reset_memory_bank'):
                     model.reset_memory_bank() 
 
-                preds = model(inputs )
+                preds = model(inputs)
 
                 if isinstance(preds, tuple):
                     preds = preds[0]  # 0 = Loss with memory, 1 to don't use memory
@@ -303,20 +303,20 @@ def train_epoch(
             # Perform the backward pass first
             scaler.scale(final_loss / cfg.TRAIN.ACCUM_STEPS).backward()  # normalizza il loss
 
-            # Log gradient norms AFTER backward pass (when gradients are actually computed)
-            if cur_iter % 100 == 0:
-                total_norm = 0.0
-                num_params_with_grad = 0
-                for p in model.parameters():
-                    if p.grad is not None:
-                        param_norm = p.grad.data.norm(2)
-                        total_norm += param_norm.item() ** 2
-                        num_params_with_grad += 1
-                total_norm = total_norm ** 0.5 if total_norm > 0 else 0.0
-                logger.info(f"[Iter {cur_iter}] Gradient norm: {total_norm:.8f}, params_with_grad: {num_params_with_grad}")
-
             if (cur_iter + 1) % cfg.TRAIN.ACCUM_STEPS == 0:
                 scaler.unscale_(optimizer)
+                
+                # Log gradient norms AFTER unscale (get the actual gradient values)
+                if cur_iter % 100 == 0:
+                    total_norm = 0.0
+                    num_params_with_grad = 0
+                    for p in model.parameters():
+                        if p.grad is not None:
+                            param_norm = p.grad.data.norm(2)
+                            total_norm += param_norm.item() ** 2
+                            num_params_with_grad += 1
+                    total_norm = total_norm ** 0.5 if total_norm > 0 else 0.0
+                    logger.info(f"[Iter {cur_iter}] Gradient norm (unscaled): {total_norm:.8f}, params_with_grad: {num_params_with_grad}")
                 if cfg.SOLVER.CLIP_GRAD_VAL:
                     torch.nn.utils.clip_grad_value_(model.parameters(), cfg.SOLVER.CLIP_GRAD_VAL)
                 elif cfg.SOLVER.CLIP_GRAD_L2NORM:
@@ -355,6 +355,8 @@ def train_epoch(
 
     # Log confusion matrix for each task
     if cfg.WANDB_ENABLE and stats:
+        # add learning rate to stats for better visualization in wandb
+        stats.update({"lr": lr})
         wandgb_log(stats)
     train_meter.reset()
 

@@ -16,6 +16,7 @@ import cv2
 import subprocess
 import imageio
 from glob import glob
+from sklearn.metrics import f1_score, precision_score
 
 def eval_classification(task, coco_anns, preds, **kwargs):
     if kwargs.get("class_names", None) is not None:
@@ -200,10 +201,44 @@ def save_missmatches(preds, labels, task, class_name, output_dir="./temp", img_a
         json.dump(mismatches, f, indent=4)
     maxCounter = Counter([im.split("/")[1] for im in img_ann_dict])
     plot_video_missmatches(mismatches_by_video, task, output_dir, maxCounter=maxCounter, **kwargs)
+    export_missmatches_per_classes(preds, labels, class_name, task, output_dir=os.path.join(output_dir,task))
+    
     if imgs_folder is not None:
         max_save_video = kwargs.get("max_save_video", 0)
         save_missmatches_videos(mismatches, output_dir, imgs_folder, max_save_video,  **kwargs)
+   
+   
+def export_missmatches_per_classes(preds, labels, class_name, task, output_dir="./temp"):
     
+    # Compute per-class metrics
+    f1_per_class = f1_score(labels, preds, labels=[c["id"] for c in class_name], average=None)
+    precision_per_class = precision_score(labels, preds, labels=[c["id"] for c in class_name], average=None)
+    
+    # Compute occurrences
+    occurrences = Counter(labels)
+    
+    # Prepare data
+    data = []
+    for i, cls in enumerate(class_name):
+        if isinstance(cls, dict):
+            cls_id = cls.get('id', i)
+            cls_name = cls.get('name', f'Class {i}')
+        else:
+            cls_id = i
+            cls_name = str(cls)
+        data.append({
+            'id_of_true_label': cls_id,
+            'name_of_label': cls_name,
+            'occurrence_of_the_label': occurrences[cls_id],
+            'f1_score_of_this_specific_label_over_all': f1_per_class[cls_id],
+            'precision': precision_per_class[cls_id]
+        })
+    
+    # Export to CSV
+    df = pd.DataFrame(data)
+    csv_path = os.path.join(output_dir, f"{task}_per_class_metrics.csv")
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    df.to_csv(csv_path, index=False)
     
 def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0, **kwargs):
     """

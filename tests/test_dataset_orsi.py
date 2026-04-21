@@ -29,10 +29,10 @@ def test_orsi_dataset_instantiation(num_iterations=50):
     cfg = get_cfg()
     cfg.TRAIN.DATASET = "orsi"
     cfg.TEST.DATASET = "orsi"
-    cfg.ENDOVIS_DATASET.FRAME_DIR = "/home/gchie/workspace/data/orsi_tensors"
-    cfg.ENDOVIS_DATASET.ANNOTATION_DIR = "/home/gchie/workspace/data/orsi_tensors"
-    cfg.ENDOVIS_DATASET.ORSI_ROOT_DIR = "/home/gchie/workspace/data/orsi_tensors"
-    cfg.ENDOVIS_DATASET.ORSI_LABEL_DIR = "/home/gchie/workspace/data/orsi_tensors"
+    cfg.ENDOVIS_DATASET.FRAME_DIR = "/data/orsi_tensors"
+    cfg.ENDOVIS_DATASET.ANNOTATION_DIR = "/data/orsi_tensors"
+    cfg.ENDOVIS_DATASET.ORSI_ROOT_DIR = "/data/orsi_tensors"
+    cfg.ENDOVIS_DATASET.ORSI_LABEL_DIR = "/data/orsi_tensors"
     cfg.ENDOVIS_DATASET.TRAIN_LISTS = ["RARP01.csv", "RARP03.csv", "RARP04.csv", "RARP06.csv"]
     cfg.ENDOVIS_DATASET.TEST_LISTS = ["RARP02.csv", "RARP07.csv", "RARP08.csv", "RARP09.csv", "RARP10.csv"]
 

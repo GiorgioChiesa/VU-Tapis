@@ -178,7 +178,7 @@ class Orsi(SurgicalDataset):
                 
         # Load images of current clip.
         image = None
-        video_tensor = f"/home/gchie/workspace/data/orsi_tensors/{video_name}/TENSOR/{video_name}.pt"
+        video_tensor = f"/data/orsi_tensors/{video_name}/TENSOR/{video_name}.pt"
         if os.path.exists(video_tensor):
             video = torch.load(video_tensor)[seq]  # [T, 3, H, W]
             video = video.permute(1, 0, 2, 3).contiguous()  # [3, T, H, W]

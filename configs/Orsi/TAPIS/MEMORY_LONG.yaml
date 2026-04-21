@@ -95,7 +95,7 @@ TASKS:
   HEAD_ACT:  ["softmax" , "softmax"]
   LOSS_WEIGHTS:  [1.0, 1.0]
   METRICS: ["mAP", "mAP"]  
-  WEIGHT_LOSS_BY_CLASS: [False, "/home/gchie/workspace/data/dataset_analisis/tables/01_step_distribution.csv"]
+  WEIGHT_LOSS_BY_CLASS: [False, "/data/dataset_analisis/tables/01_step_distribution.csv"]
 DATA_LOADER:
   NUM_WORKERS: 5
   PIN_MEMORY: True

@@ -62,7 +62,7 @@ TASK="STEPS"
 
 DATASET="orsi"
 CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_$TASK.yaml"
-OUTPUT_DIR="/home/gchie/workspace/VU-Tapis/outputs/"$DATASET"/"$TASK"/"$NAME"/totale"
+OUTPUT_DIR="outputs/"$DATASET"/"$TASK"/"$NAME"/totale"
 
 #Change this variables if data is not located in ./data
 FRAME_DIR="/home/gchie/workspace/nas_private/data/orsi"
@@ -97,7 +97,7 @@ TRAIN.FREEZE_ENCODER False \
 OUTPUT_DIR $OUTPUT_DIR \
 ENDOVIS_DATASET.TRAIN_LISTS "[$TRAIN_FOLDS_STR]" \
 ENDOVIS_DATASET.TEST_LISTS "[$TEST_FOLDS_STR]" \
-ENDOVIS_DATASET.ANNOTATION_DIR /home/gchie/workspace/data/coco \
+ENDOVIS_DATASET.ANNOTATION_DIR /data/coco \
 ENDOVIS_DATASET.TRAIN_GT_BOX_JSON "[$GT_TRAIN_FOLDS_STR]" \
 ENDOVIS_DATASET.TEST_GT_BOX_JSON "[$GT_TEST_FOLDS_STR]" \
-ENDOVIS_DATASET.TEST_COCO_ANNS /home/gchie/workspace/data/coco/all_merged.json 
+ENDOVIS_DATASET.TEST_COCO_ANNS /data/coco/all_merged.json 

@@ -3,71 +3,75 @@
 
 """Train a video classification model."""
 
-from asyncio import tasks
 import sys
+from asyncio import tasks
 from pathlib import Path
 
 # Add parent directory to path so tapis can be imported
 if Path(__file__).parent.parent not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent.parent))
-if Path(__file__).parent.parent.joinpath('detectron2') not in sys.path:
-    sys.path.insert(0, str(Path(__file__).parent.parent.joinpath('detectron2')))
+if Path(__file__).parent.parent.joinpath("detectron2") not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent.parent.joinpath("detectron2")))
 
-import random
-import numpy as np
-import shutil
 import os
 import pprint
-import torch
+import random
+import shutil
 
+import matplotlib.pyplot as plt
+import numpy as np
 import tapis.models.losses as losses
 import tapis.models.optimizer as optim
 import tapis.utils.checkpoint as cu
 import tapis.utils.distributed as du
 import tapis.utils.logging as logging
 import tapis.utils.misc as misc
-
+import torch
+import torch.backends.cudnn
+import torch.backends.cudnn as cudnn
+import wandb
+from pyinstrument import Profiler
+from sklearn.metrics import confusion_matrix
 from tapis.datasets import loader
 from tapis.models import build_model
 from tapis.utils.meters import EpochTimer, SurgeryMeter
-import torch.backends.cudnn as cudnn
-import torch.backends.cudnn
-import wandb
 from tqdm import tqdm
-from sklearn.metrics import confusion_matrix
-import matplotlib.pyplot as plt
-from pyinstrument import Profiler
-
 
 logger = logging.get_logger(__name__)
 wanbrun = None
 
+
 def wandgb_log(stats):
     global wanbrun
     if wanbrun is not None:
-        tasks_map = [k for k, v in stats.items() if isinstance(v,dict)]
-        if len(tasks_map)==0:
-            stats = {f'{stats["mode"]}/{k}': v for k, v in stats.items()}
+        tasks_map = [k for k, v in stats.items() if isinstance(v, dict)]
+        if len(tasks_map) == 0:
+            stats = {f"{stats['mode']}/{k}": v for k, v in stats.items()}
             wanbrun.log(stats)
             return
-        if stats["mode"].lower() in ['test', 'val']:
+        if stats["mode"].lower() in ["test", "val"]:
             cur_epoch = int(stats["cur_epoch"])
             stat = {}
             for tasks in tasks_map:
                 stat = {}
                 for k, v in stats[tasks].items():
-                    stat[f'{stats["mode"]}/{k}'] = v
+                    stat[f"{stats['mode']}/{k}"] = v
                 # stats ={f'{stats["mode"]}_{k}': v for k, v in stats["phases_map"].items()}
                 stat["cur_epoch"] = int(cur_epoch)
-                tasks = tasks.split('_')[0]
-                stat[f"{tasks}_cm"] = wandb.Image(os.path.join(stats["output_dir"], f"{stats['mode']}_confusion_matrix_{tasks}.png"))
+                tasks = tasks.split("_")[0]
+                stat[f"{tasks}_cm"] = wandb.Image(
+                    os.path.join(
+                        stats["output_dir"], f"{stats['mode']}_confusion_matrix_{tasks}.png"
+                    )
+                )
                 wanbrun.log(stat)
-            
-        elif stats["mode"].lower() == 'train':
+
+        elif stats["mode"].lower() == "train":
             cur_epoch = int(stats["cur_epoch"])
-            stats = {f'{stats["mode"]}_{k}': v for k, v in stats.items()}
+            stats = {f"{stats['mode']}_{k}": v for k, v in stats.items()}
             stats["cur_epoch"] = int(cur_epoch)
             wanbrun.log(stats)
+
 
 def log_confusion_matrix_wandb(meter, task, mode, epoch, mean_map, name_wandb, cfg):
     """
@@ -88,12 +92,12 @@ def log_confusion_matrix_wandb(meter, task, mode, epoch, mean_map, name_wandb, c
     try:
         pred = meter.all_preds[task]
         labels = meter.all_labels[task]
-        
+
         # Converti le probabilità in predizioni tramite argmax
         pred_classes = np.argmax(np.array(pred), axis=1)
 
         # Calcola la confusion matrix
-        cm = confusion_matrix(labels, pred_classes )
+        cm = confusion_matrix(labels, pred_classes)
 
         # Crea una lista di nomi delle classi
         num_classes = cm.shape[0]
@@ -108,20 +112,22 @@ def log_confusion_matrix_wandb(meter, task, mode, epoch, mean_map, name_wandb, c
 
         # Crea la figura
         fig, ax = plt.subplots(figsize=(8, 6))
-        im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+        im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
         ax.figure.colorbar(im, ax=ax)
 
         # Aggiungi ticks e labels
-        ax.set(xticks=np.arange(cm.shape[1]),
-               yticks=np.arange(cm.shape[0]),
-               xticklabels=class_names, yticklabels=class_names,
-               title=f"Confusion Matrix - {task} ({mode}) - Epoch {epoch} - mAP: {mean_map:.4f}",
-               ylabel='True label',
-               xlabel='Predicted label')
+        ax.set(
+            xticks=np.arange(cm.shape[1]),
+            yticks=np.arange(cm.shape[0]),
+            xticklabels=class_names,
+            yticklabels=class_names,
+            title=f"Confusion Matrix - {task} ({mode}) - Epoch {epoch} - mAP: {mean_map:.4f}",
+            ylabel="True label",
+            xlabel="Predicted label",
+        )
 
         # Ruota i tick labels
-        plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
-                 rotation_mode="anchor")
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
         # # Aggiungi i valori nella matrice
         # thresh = cm.max() / 2.
@@ -153,15 +159,8 @@ def log_confusion_matrix_wandb(meter, task, mode, epoch, mean_map, name_wandb, c
     except Exception as e:
         logger.warning(f"Errore nel logging della confusion matrix per task {task}: {e}")
 
-def train_epoch(
-    train_loader,
-    model,
-    optimizer,
-    scaler,
-    train_meter,
-    cur_epoch,
-    cfg,
-):
+
+def train_epoch(train_loader, model, optimizer, scaler, train_meter, cur_epoch, cfg):
     """
     Perform the video training for one epoch.
     Args:
@@ -180,42 +179,65 @@ def train_epoch(
     data_size = len(train_loader)
     tasks = cfg.TASKS.TASKS
     loss_funs = cfg.TASKS.LOSS_FUNC
-    weiths_paths = [os.path.join(cfg.OUTPUT_DIR, "distributions", cfg.TASKS.WEIGHT_LOSS_BY_CLASS[t_id]) for t_id, task in enumerate(tasks)]
-    weight = {task: losses.get_weight_from_csv(weiths_paths[t_id], cfg.TASKS.NUM_CLASSES[t_id]) for t_id, task in enumerate(tasks)}
+    weiths_paths = [
+        os.path.join(cfg.OUTPUT_DIR, "distributions", cfg.TASKS.WEIGHT_LOSS_BY_CLASS[t_id])
+        for t_id, task in enumerate(tasks)
+    ]
+    weight = {
+        task: losses.get_weight_from_csv(weiths_paths[t_id], cfg.TASKS.NUM_CLASSES[t_id])
+        for t_id, task in enumerate(tasks)
+    }
     if cfg.NUM_GPUS:
-        weight = {task: weight[task].to("cuda") if weight[task] is not None else None for task in weight}
-    
+        weight = {
+            task: weight[task].to("cuda") if weight[task] is not None else None for task in weight
+        }
+
     # Handle focal loss parameters
     loss_kwargs = {}
     for t_id, task in enumerate(tasks):
         if loss_funs[t_id] == "focal_loss":
             kwargs = {}
-            if hasattr(cfg.TASKS, 'FOCAL_GAMMA'):
-                kwargs['gamma'] = cfg.TASKS.FOCAL_GAMMA
-            if hasattr(cfg.TASKS, 'FOCAL_ALPHA_MODE'):
+            if hasattr(cfg.TASKS, "FOCAL_GAMMA"):
+                kwargs["gamma"] = cfg.TASKS.FOCAL_GAMMA
+            if hasattr(cfg.TASKS, "FOCAL_ALPHA_MODE"):
                 if cfg.TASKS.FOCAL_ALPHA_MODE == "auto" and weight[task] is not None:
                     # Use inverse class frequency as alpha
-                    kwargs['alpha'] = weight[task].cpu().numpy()
+                    kwargs["alpha"] = weight[task].cpu().numpy()
                 elif cfg.TASKS.FOCAL_ALPHA_MODE == "manual":
                     # Could add manual alpha specification
                     pass
             loss_kwargs[task] = kwargs
         elif loss_funs[t_id] == "cross_entropy":
-            loss_kwargs[task] = {"ignore_index": -1} 
+            loss_kwargs[task] = {"ignore_index": -1}
         else:
             loss_kwargs[task] = {}
-    
-    loss_dict = {task: losses.get_loss_func(loss_funs[t_id])(weight=weight[task], reduction=cfg.SOLVER.REDUCTION, **loss_kwargs[task]) for t_id, task in enumerate(tasks)}
-    type_dict = {task: losses.get_loss_type(loss_funs[t_id], cfg.MODEL.PRECISION) for t_id, task in enumerate(tasks)}
+
+    loss_dict = {
+        task: losses.get_loss_func(loss_funs[t_id])(
+            weight=weight[task], reduction=cfg.SOLVER.REDUCTION, **loss_kwargs[task]
+        )
+        for t_id, task in enumerate(tasks)
+    }
+    type_dict = {
+        task: losses.get_loss_type(loss_funs[t_id], cfg.MODEL.PRECISION)
+        for t_id, task in enumerate(tasks)
+    }
     loss_weights = cfg.TASKS.LOSS_WEIGHTS
     if cfg.REGIONS.ENABLE and cfg.TASKS.PRESENCE_RECOGNITION:
-        pres_loss_dict = {f'{task}_presence':losses.get_loss_func('bce')(reduction=cfg.SOLVER.REDUCTION) for task in cfg.TASKS.PRESENCE_TASKS}
-        pres_type_dict = {f'{task}_presence':losses.get_loss_type('bce') for task in cfg.TASKS.PRESENCE_TASKS}
+        pres_loss_dict = {
+            f"{task}_presence": losses.get_loss_func("bce")(reduction=cfg.SOLVER.REDUCTION)
+            for task in cfg.TASKS.PRESENCE_TASKS
+        }
+        pres_type_dict = {
+            f"{task}_presence": losses.get_loss_type("bce") for task in cfg.TASKS.PRESENCE_TASKS
+        }
         loss_dict.update(pres_loss_dict)
         type_dict.update(pres_type_dict)
         loss_weights += cfg.TASKS.PRESENCE_WEIGHTS
 
-    with tqdm(total=data_size, desc=f"Train Epoch {cur_epoch+1}/{cfg.SOLVER.MAX_EPOCH}", unit="it") as t:     
+    with tqdm(
+        total=data_size, desc=f"Train Epoch {cur_epoch + 1}/{cfg.SOLVER.MAX_EPOCH}", unit="it"
+    ) as t:
         for cur_iter, (inputs, labels, data, image_names) in enumerate(train_loader):
             t.update(1)
             # Transfer the data to the current GPU device.
@@ -228,16 +250,16 @@ def train_epoch(
                     try:
                         data[key] = val.cuda(non_blocking=True)
                         if cfg.MODEL.PRECISION == 64:
-                            data[key]  = data[key].double()
+                            data[key] = data[key].double()
                     except:
                         pass
 
                 for key, val in labels.items():
                     labels[key] = val.cuda(non_blocking=True)
                     if cfg.MODEL.PRECISION == 64:
-                        labels[key]  = labels[key].double()
-                
-                if cfg.NUM_GPUS>1:
+                        labels[key] = labels[key].double()
+
+                if cfg.NUM_GPUS > 1:
                     image_names = image_names.cuda(non_blocking=True)
 
             # Update the learning rate.
@@ -252,8 +274,8 @@ def train_epoch(
                 # boxes = data["boxes"] if cfg.REGIONS.ENABLE else None
                 # images = data["images"] if cfg.FEATURES.USE_RPN else None
                 # preds = model(inputs, bboxes=boxes, features=rpn_ftrs, boxes_mask=boxes_mask, images=images)
-                if hasattr(model, 'reset_memory_bank'):
-                    model.reset_memory_bank() 
+                if hasattr(model, "reset_memory_bank"):
+                    model.reset_memory_bank()
 
                 preds = model(inputs)
 
@@ -262,9 +284,11 @@ def train_epoch(
 
                 # Clip logits to prevent explosion
                 for task in tasks:
-                    preds[task] = torch.clamp(preds[task], 
-                                              torch.tensor(-10.0, device=preds[task].device), 
-                                              torch.tensor(10.0, device=preds[task].device))
+                    preds[task] = torch.clamp(
+                        preds[task],
+                        torch.tensor(-10.0, device=preds[task].device),
+                        torch.tensor(10.0, device=preds[task].device),
+                    )
 
                 # Explicitly declare reduction to mean and compute the loss for each task for this window.
                 window_loss_items = []
@@ -277,35 +301,41 @@ def train_epoch(
                     final_loss = losses.compute_weighted_loss(window_loss_items, loss_weights)
                 else:
                     final_loss = window_loss_items[0]
-               
+
             # check Nan Loss and log detailed diagnostics
             if cur_iter % 100 == 0:
                 # Check for NaN
                 if torch.isnan(final_loss) or torch.isinf(final_loss):
                     logger.error(f"[Iter {cur_iter}] NaN or Inf loss detected! Loss={final_loss}")
                     raise RuntimeError("Loss is NaN or Inf - training diverged")
-                
+
                 # Log predictions diagnostics
                 preds_classes = preds[cfg.TASKS.TASKS[0]].argmax(1)
                 labels_tensor = labels[cfg.TASKS.TASKS[0]]
                 unique_preds = torch.unique(preds_classes)
                 unique_labels = torch.unique(labels_tensor)
-                logger.info(f"[Iter {cur_iter}] Unique pred classes: {len(unique_preds)}, values: {unique_preds[:10].tolist()}")
-                logger.info(f"[Iter {cur_iter}] Unique label classes: {len(unique_labels)}, values: {unique_labels[:10].tolist()}")
-                
+                logger.info(
+                    f"[Iter {cur_iter}] Unique pred classes: {len(unique_preds)}, values: {unique_preds[:10].tolist()}"
+                )
+                logger.info(
+                    f"[Iter {cur_iter}] Unique label classes: {len(unique_labels)}, values: {unique_labels[:10].tolist()}"
+                )
+
                 # Log logits diagnostics for each task
                 for task in tasks:
                     max_logit = preds[task].abs().max().item()
                     min_logit = preds[task].min().item()
                     mean_logit = preds[task].mean().item()
-                    logger.info(f"[Iter {cur_iter}] Task '{task}': max|logit|={max_logit:.4f}, min_logit={min_logit:.4f}, mean_logit={mean_logit:.6f}, loss={final_loss:.6f}")
-            
+                    logger.info(
+                        f"[Iter {cur_iter}] Task '{task}': max|logit|={max_logit:.4f}, min_logit={min_logit:.4f}, mean_logit={mean_logit:.6f}, loss={final_loss:.6f}"
+                    )
+
             # Perform the backward pass first
             scaler.scale(final_loss / cfg.TRAIN.ACCUM_STEPS).backward()  # normalizza il loss
 
             if (cur_iter + 1) % cfg.TRAIN.ACCUM_STEPS == 0:
                 scaler.unscale_(optimizer)
-                
+
                 # Log gradient norms AFTER unscale (get the actual gradient values)
                 if cur_iter % 100 == 0:
                     total_norm = 0.0
@@ -315,8 +345,10 @@ def train_epoch(
                             param_norm = p.grad.data.norm(2)
                             total_norm += param_norm.item() ** 2
                             num_params_with_grad += 1
-                    total_norm = total_norm ** 0.5 if total_norm > 0 else 0.0
-                    logger.info(f"[Iter {cur_iter}] Gradient norm (unscaled): {total_norm:.8f}, params_with_grad: {num_params_with_grad}")
+                    total_norm = total_norm**0.5 if total_norm > 0 else 0.0
+                    logger.info(
+                        f"[Iter {cur_iter}] Gradient norm (unscaled): {total_norm:.8f}, params_with_grad: {num_params_with_grad}"
+                    )
                 if cfg.SOLVER.CLIP_GRAD_VAL:
                     torch.nn.utils.clip_grad_value_(model.parameters(), cfg.SOLVER.CLIP_GRAD_VAL)
                 elif cfg.SOLVER.CLIP_GRAD_L2NORM:
@@ -324,31 +356,35 @@ def train_epoch(
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
-                
+
                 # Debug: log if parameters are actually being updated
                 if cur_iter % 100 == 0:
                     first_param = next(model.parameters())
-                    logger.info(f"[Iter {cur_iter}] First param mean: {first_param.mean().item():.8f}, std: {first_param.std().item():.8f}")
-            
+                    logger.info(
+                        f"[Iter {cur_iter}] First param mean: {first_param.mean().item():.8f}, std: {first_param.std().item():.8f}"
+                    )
+
             if cfg.NUM_GPUS > 1:
                 final_loss = du.all_reduce([final_loss])[0]
             final_loss = final_loss.item()
 
             # Update and log stats.
-            train_meter.update_stats(preds = preds,
-                                     names=image_names,
-                                     labels=labels,
-                                     final_loss=final_loss,
-                                     losses=[window_loss_items[-1]], 
-                                     lr=lr)
+            train_meter.update_stats(
+                preds=preds,
+                names=image_names,
+                labels=labels,
+                final_loss=final_loss,
+                losses=[window_loss_items[-1]],
+                lr=lr,
+            )
             train_meter.iter_toc()  # measure allreduce for this meter
             stats = train_meter.log_iter_stats(cur_epoch, cur_iter)
             train_meter.iter_tic()
             # t.set_postfix({"dt_data":stats["dt_data"], "dt_net": stats["dt_net"], "loss": stats["overall_loss"]})
 
-            if cfg.SOLVER.MAX_ITER and cur_iter+1 >= cfg.SOLVER.MAX_ITER:
+            if cfg.SOLVER.MAX_ITER and cur_iter + 1 >= cfg.SOLVER.MAX_ITER:
                 break
-            
+
     t.close()
     # Log epoch stats.
     task_map, mean_map, out_files, stats, early_stop = train_meter.log_epoch_stats(cur_epoch)
@@ -359,6 +395,7 @@ def train_epoch(
         stats.update({"lr": lr})
         wandgb_log(stats)
     train_meter.reset()
+
 
 @torch.no_grad()
 def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
@@ -377,13 +414,19 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
     model.eval()
     val_meter.iter_tic()
     complete_tasks = cfg.TASKS.TASKS
-    region_tasks = {task for task in cfg.TASKS.TASKS if cfg.REGIONS.ENABLE and task in cfg.ENDOVIS_DATASET.REGION_TASKS}
+    region_tasks = {
+        task
+        for task in cfg.TASKS.TASKS
+        if cfg.REGIONS.ENABLE and task in cfg.ENDOVIS_DATASET.REGION_TASKS
+    }
     if cfg.REGIONS.ENABLE:
         if cfg.TASKS.PRESENCE_RECOGNITION and cfg.TASKS.EVAL_PRESENCE:
-            pres_tasks = [f'{task}_presence' for task in cfg.TASKS.PRESENCE_TASKS]
+            pres_tasks = [f"{task}_presence" for task in cfg.TASKS.PRESENCE_TASKS]
             complete_tasks += pres_tasks
     last_video = ""
-    with tqdm(total=len(val_loader), desc=f"Eval Epoch {cur_epoch+1}/{cfg.SOLVER.MAX_EPOCH}", unit="it") as t:
+    with tqdm(
+        total=len(val_loader), desc=f"Eval Epoch {cur_epoch + 1}/{cfg.SOLVER.MAX_EPOCH}", unit="it"
+    ) as t:
         for cur_iter, (inputs, labels, data, image_names) in enumerate(val_loader):
             t.update(1)
             if cfg.NUM_GPUS:
@@ -399,19 +442,19 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
                 for key, val in labels.items():
                     labels[key] = val.cuda(non_blocking=True)
                     if cfg.MODEL.PRECISION == 64:
-                        labels[key]  = labels[key].double()
-                
+                        labels[key] = labels[key].double()
+
                 # if cfg.NUM_GPUS>1:
                 #     image_names = image_names.cuda(non_blocking=True)
-                
-            if hasattr(model, 'reset_memory_bank'):
+
+            if hasattr(model, "reset_memory_bank"):
                 current_video = None
 
                 try:
                     if isinstance(image_names, (list, tuple)) and len(image_names) > 0:
-                        current_video = str(image_names[0]).split('/')[0]
+                        current_video = str(image_names[0]).split("/")[0]
                     elif isinstance(image_names, torch.Tensor) and image_names.numel() > 0:
-                        current_video = str(image_names[0]).split('/')[0]
+                        current_video = str(image_names[0]).split("/")[0]
                 except Exception:
                     current_video = None
 
@@ -432,23 +475,23 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
 
             preds = model(inputs)
             if isinstance(preds, tuple):
-                preds = preds[0] # 0 = Loss with memory, 1 to don't use memory
+                preds = preds[0]  # 0 = Loss with memory, 1 to don't use memory
             # breakpoint()
             if cfg.NUM_GPUS:
                 preds = {task: preds[task].to("cpu", non_blocking=True) for task in complete_tasks}
                 # Accumula tutti i risultati prima di accedervi
                 torch.cuda.synchronize()  # una sola sync alla fine
 
-                if cfg.NUM_GPUS>1:
+                if cfg.NUM_GPUS > 1:
                     image_names = image_names.cpu()
-                    image_names = torch.cat(du.all_gather_unaligned(image_names),dim=0).tolist()
+                    image_names = torch.cat(du.all_gather_unaligned(image_names), dim=0).tolist()
 
-                    preds = {task: torch.cat(du.all_gather_unaligned(preds[task]), dim=0) for task in preds}
-
-
+                    preds = {
+                        task: torch.cat(du.all_gather_unaligned(preds[task]), dim=0)
+                        for task in preds
+                    }
 
             val_meter.iter_toc()
-
 
             for task in complete_tasks:
                 if task not in region_tasks:
@@ -459,17 +502,16 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
             stats = val_meter.log_iter_stats(cur_epoch, cur_iter)
             val_meter.iter_tic()
             # t.set_postfix(stats.items())
-            
+
             # if cfg.SOLVER.MAX_ITER and cur_iter+1 >= cfg.SOLVER.MAX_ITER:
             #     break
-
 
     t.close()
     if cfg.NUM_GPUS > 1:
         if du.is_master_proc():
             task_map, mean_map, out_files, stats, early_stop = val_meter.log_epoch_stats(cur_epoch)
         else:
-            task_map, mean_map, out_files, stats, early_stop =  [0, 0, 0, {}, False]
+            task_map, mean_map, out_files, stats, early_stop = [0, 0, 0, {}, False]
         torch.distributed.barrier()
     else:
         task_map, mean_map, out_files, stats, early_stop = val_meter.log_epoch_stats(cur_epoch)
@@ -487,7 +529,7 @@ def train(cfg):
         cfg (CfgNode): configs. Details can be found in
             slowfast/config/defaults.py
     """
-    
+
     profiler = Profiler()
     profiler.start()
     # Set up environment.
@@ -508,10 +550,12 @@ def train(cfg):
     if cfg.WANDB_ENABLE:
         global wanbrun
         wandb.login()
-        wanbrun = wandb.init(project=cfg.WANDB_PROJECT, 
-                         name=cfg.NAME,
-                        entity=cfg.WANDB_ENTITY,
-                        config= misc.flatten_dict(cfg))
+        wanbrun = wandb.init(
+            project=cfg.WANDB_PROJECT,
+            name=cfg.NAME,
+            entity=cfg.WANDB_ENTITY,
+            config=misc.flatten_dict(cfg),
+        )
 
     # Build the video model and print model statistics.
     model = build_model(cfg)
@@ -520,7 +564,7 @@ def train(cfg):
     if cfg.TRAIN.FREEZE_ENCODER:
         model.freeze_encoder()
 
-    # Calculating model info (param & flops). 
+    # Calculating model info (param & flops).
     # Remove if it is not working
     try:
         if du.is_master_proc() and cfg.LOG_MODEL_INFO:
@@ -529,11 +573,11 @@ def train(cfg):
                 head = getattr(model, "extra_heads_{}".format(task))
                 misc.log_model_info(head, cfg, use_train_input=False)
     except Exception as e:
-        logger.info(f'Error while trying to calculate model parameters and FLOPs:\n{e}')
+        logger.info(f"Error while trying to calculate model parameters and FLOPs:\n{e}")
 
     # Construct the optimizer.
     optimizer = optim.construct_optimizer(model, cfg)
-    
+
     # Create a GradScaler for mixed precision training
     scaler = torch.cuda.amp.GradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)
 
@@ -545,7 +589,7 @@ def train(cfg):
     # Create the video train and val loaders.
     train_loader = loader.construct_loader(cfg, "train")
     val_loader = loader.construct_loader(cfg, "val")
-    
+
     # Create meters.
     train_meter = SurgeryMeter(len(train_loader), cfg, mode="train")
     val_meter = SurgeryMeter(len(val_loader), cfg, mode="val")
@@ -553,36 +597,29 @@ def train(cfg):
     # Perform final test
     if cfg.TEST.ENABLE:
         logger.info("Evaluating epoch: {}".format(start_epoch))
-        map_task, mean_map, out_files, _ = eval_epoch(val_loader, model, val_meter, start_epoch-1, cfg)
+        map_task, mean_map, out_files, _ = eval_epoch(
+            val_loader, model, val_meter, start_epoch - 1, cfg
+        )
         val_meter.reset()
         if not cfg.TRAIN.ENABLE:
             return
     elif cfg.TRAIN.ENABLE:
         # Perform the training loop.
         logger.info("Start epoch: {}".format(start_epoch + 1))
-        
+
     # Stats for saving checkpoint:
     complete_tasks = cfg.TASKS.TASKS
     best_task_map = {task: 0 for task in complete_tasks}
     best_mean_map = 0
     epoch_timer = EpochTimer()
-    
-    for cur_epoch in range(start_epoch, cfg.SOLVER.MAX_EPOCH):
 
+    for cur_epoch in range(start_epoch, cfg.SOLVER.MAX_EPOCH):
         # Shuffle the dataset.
         loader.shuffle_dataset(train_loader, cur_epoch)
 
         # Train for one epoch.
         epoch_timer.epoch_tic()
-        train_epoch(
-            train_loader,
-            model,
-            optimizer,
-            scaler,
-            train_meter,
-            cur_epoch,
-            cfg,
-        )
+        train_epoch(train_loader, model, optimizer, scaler, train_meter, cur_epoch, cfg)
         epoch_timer.epoch_toc()
         logger.info(
             f"Epoch {cur_epoch} takes {epoch_timer.last_epoch_time():.2f}s. Epochs "
@@ -592,19 +629,13 @@ def train(cfg):
         )
         logger.info(
             f"For epoch {cur_epoch}, each iteraction takes "
-            f"{epoch_timer.last_epoch_time()/len(train_loader):.2f}s in average. "
+            f"{epoch_timer.last_epoch_time() / len(train_loader):.2f}s in average. "
             f"From epoch {start_epoch} to {cur_epoch}, each iteraction takes "
-            f"{epoch_timer.avg_epoch_time()/len(train_loader):.2f}s in average."
+            f"{epoch_timer.avg_epoch_time() / len(train_loader):.2f}s in average."
         )
 
-        is_checkp_epoch = cu.is_checkpoint_epoch(
-            cfg,
-            cur_epoch,
-            None
-        )
-        is_eval_epoch = misc.is_eval_epoch(
-            cfg, cur_epoch, None
-        )
+        is_checkp_epoch = cu.is_checkpoint_epoch(cfg, cur_epoch, None)
+        is_eval_epoch = misc.is_eval_epoch(cfg, cur_epoch, None)
 
         _ = misc.aggregate_sub_bn_stats(model)
 
@@ -618,19 +649,23 @@ def train(cfg):
                 cfg,
                 scaler if cfg.TRAIN.MIXED_PRECISION else None,
             )
-        
+
         if not cfg.MODEL.KEEP_ALL_CHECKPOINTS:
-            del_fil = os.path.join(cfg.OUTPUT_DIR,'checkpoints', 'checkpoint_epoch_{0:05d}.pyth'.format(cur_epoch-1))
+            del_fil = os.path.join(
+                cfg.OUTPUT_DIR, "checkpoints", "checkpoint_epoch_{0:05d}.pyth".format(cur_epoch - 1)
+            )
             if os.path.exists(del_fil):
                 os.remove(del_fil)
-            
+
         # Evaluate the model on validation set.
         if is_eval_epoch:
-            map_task, mean_map, out_files, early_stop = eval_epoch(val_loader, model, val_meter, cur_epoch, cfg)
+            map_task, mean_map, out_files, early_stop = eval_epoch(
+                val_loader, model, val_meter, cur_epoch, cfg
+            )
             if (cfg.NUM_GPUS > 1 and du.is_master_proc()) or cfg.NUM_GPUS == 1:
                 main_path = os.path.split(list(out_files.values())[0])[0]
-                fold = main_path.split('/')[-1]
-                best_preds_path = main_path.replace(fold, fold+'/best_predictions')
+                fold = main_path.split("/")[-1]
+                best_preds_path = main_path.replace(fold, fold + "/best_predictions")
                 if not os.path.exists(best_preds_path):
                     os.makedirs(best_preds_path)
                 old_best_mean_map = best_mean_map
@@ -642,21 +677,21 @@ def train(cfg):
                         cfg.OUTPUT_DIR,
                         model,
                         optimizer,
-                        'mean',
+                        "mean",
                         cfg,
                         scaler if cfg.TRAIN.MIXED_PRECISION else None,
-                        )
+                    )
                     for task in complete_tasks:
-                        file = out_files[task].split('/')[-1]
-                        copy_path = os.path.join(best_preds_path, file.replace('epoch', 'best_all') )
+                        file = out_files[task].split("/")[-1]
+                        copy_path = os.path.join(best_preds_path, file.replace("epoch", "best_all"))
                         shutil.copyfile(out_files[task], copy_path)
-                
+
                 for task in complete_tasks:
                     if list(map_task[task].values())[0] > best_task_map[task]:
                         best_task_map[task] = list(map_task[task].values())[0]
                         logger.info("Best {} map at epoch {}".format(task, cur_epoch))
-                        file = out_files[task].split('/')[-1]
-                        copy_path = os.path.join(best_preds_path, file.replace('epoch', 'best') )
+                        file = out_files[task].split("/")[-1]
+                        copy_path = os.path.join(best_preds_path, file.replace("epoch", "best"))
                         shutil.copyfile(out_files[task], copy_path)
                         cu.save_best_checkpoint(
                             cfg.OUTPUT_DIR,
@@ -669,26 +704,26 @@ def train(cfg):
 
                 # Early stopping check
                 if early_stop:
-                    logger.info(f"Early stopping triggered after {cur_epoch + 1} epochs: no improvement >= {cfg.SOLVER.EARLY_STOP_ep_th[1]} for {cfg.SOLVER.EARLY_STOP_ep_th[0]} epochs")
+                    logger.info(
+                        f"Early stopping triggered after {cur_epoch + 1} epochs: no improvement >= {cfg.SOLVER.EARLY_STOP_ep_th[1]} for {cfg.SOLVER.EARLY_STOP_ep_th[0]} epochs"
+                    )
                     break
             val_meter.reset()
 
     if "cur_epoch" in locals():
         cu.save_checkpoint(
-                cfg.OUTPUT_DIR,
-                model,
-                optimizer,
-                cur_epoch,
-                cfg,
-                scaler if cfg.TRAIN.MIXED_PRECISION else None,
-                )
-    
-    
+            cfg.OUTPUT_DIR,
+            model,
+            optimizer,
+            cur_epoch,
+            cfg,
+            scaler if cfg.TRAIN.MIXED_PRECISION else None,
+        )
+
     profiler.stop()
     profiler.print()
-    with open(f'{cfg.OUTPUT_DIR}/profiler.html', 'wb+') as f:
-        f.write(profiler.output_html().encode('utf-8'))
-
+    with open(f"{cfg.OUTPUT_DIR}/profiler.html", "wb+") as f:
+        f.write(profiler.output_html().encode("utf-8"))
 
 
 print(f"Current working directory: {os.getcwd()}")
@@ -699,6 +734,7 @@ from tapis.utils.parser import load_config, parse_args
 
 from train_net import train
 import warnings
+
 warnings.filterwarnings("ignore")
 
 
@@ -706,18 +742,18 @@ def main():
     """
     Main function to spawn the train and test process.
     """
-    
+
     args = parse_args()
     cfg = load_config(args)
     cfg = assert_and_infer_cfg(cfg)
-    
+
     print("Working on gpu: {}".format(cfg.GPUIDS))
-    
+
     if cfg.FEATURES.USE_RPN:
         from detectron2.config import get_cfg
         from detectron2.projects.deeplab import add_deeplab_config
         from region_proposals.mask2former import add_maskformer2_config
-        
+
         rpn_cfg = get_cfg()
         add_deeplab_config(rpn_cfg)
         add_maskformer2_config(rpn_cfg)
@@ -728,6 +764,7 @@ def main():
     # Perform training.
     if cfg.TRAIN.ENABLE or cfg.TEST.ENABLE:
         launch_job(cfg=cfg, init_method=args.init_method, func=train)
+
 
 if __name__ == "__main__":
     main()

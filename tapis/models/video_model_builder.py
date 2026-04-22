@@ -3,29 +3,28 @@
 
 """Video models."""
 
-from copy import deepcopy
 import math
+from copy import deepcopy
 from functools import partial
+
 import torch
 import torch.nn as nn
-
 import torch.nn.functional as F
+from sklearn.preprocessing import label_binarize
 from torch.nn.init import trunc_normal_
 
 import tapis.utils.weight_init_helper as init_helper
+
+from . import head_helper, resnet_helper, stem_helper
 from .attention import MultiScaleBlock
 from .batchnorm_helper import get_norm
+from .build import MODEL_REGISTRY
 from .utils import (
     calc_mvit_feature_geometry,
     get_3d_sincos_pos_embed,
     round_width,
     validate_checkpoint_wrapper_import,
 )
-
-from sklearn.preprocessing import label_binarize
-
-from . import head_helper, resnet_helper, stem_helper
-from .build import MODEL_REGISTRY
 
 try:
     from fairscale.nn.checkpoint import checkpoint_wrapper
@@ -105,7 +104,7 @@ _POOL1 = {
     "slow": [[1, 1, 1]],
     "slowfast": [[1, 1, 1], [1, 1, 1]],
     "x3d": [[1, 1, 1]],
-    "mvit": [[2, 1, 1]], 
+    "mvit": [[2, 1, 1]],
 }
 
 
@@ -153,9 +152,7 @@ class FuseFastToSlow(nn.Module):
             bias=False,
         )
         self.bn = norm_module(
-            num_features=dim_in * fusion_conv_channel_ratio,
-            eps=eps,
-            momentum=bn_mmt,
+            num_features=dim_in * fusion_conv_channel_ratio, eps=eps, momentum=bn_mmt
         )
         self.relu = nn.ReLU(inplace_relu)
 
@@ -189,16 +186,16 @@ class SlowFast(nn.Module):
         """
         super(SlowFast, self).__init__()
         self.norm_module = get_norm(cfg)
-        # Extra heads for each task 
+        # Extra heads for each task
         self.tasks = cfg.TASKS.TASKS
-        self._region_tasks = {task for task in cfg.TASKS.TASKS if task in cfg.ENDOVIS_DATASET.REGION_TASKS}
+        self._region_tasks = {
+            task for task in cfg.TASKS.TASKS if task in cfg.ENDOVIS_DATASET.REGION_TASKS
+        }
         self.num_classes = cfg.TASKS.NUM_CLASSES
         self.act_fun = cfg.TASKS.HEAD_ACT
         self.num_pathways = 2
         self._construct_network(cfg)
-        init_helper.init_weights(
-            self, cfg.MODEL.FC_INIT_STD, cfg.RESNET.ZERO_INIT_FINAL_BN
-        )
+        init_helper.init_weights(self, cfg.MODEL.FC_INIT_STD, cfg.RESNET.ZERO_INIT_FINAL_BN)
 
     def _construct_network(self, cfg):
         """
@@ -218,9 +215,7 @@ class SlowFast(nn.Module):
         num_groups = cfg.RESNET.NUM_GROUPS
         width_per_group = cfg.RESNET.WIDTH_PER_GROUP
         dim_inner = num_groups * width_per_group
-        out_dim_ratio = (
-            cfg.SLOWFAST.BETA_INV // cfg.SLOWFAST.FUSION_CONV_CHANNEL_RATIO
-        )
+        out_dim_ratio = cfg.SLOWFAST.BETA_INV // cfg.SLOWFAST.FUSION_CONV_CHANNEL_RATIO
 
         temp_kernel = _TEMPORAL_KERNEL_BASIS[cfg.MODEL.ARCH]
 
@@ -229,10 +224,7 @@ class SlowFast(nn.Module):
             dim_out=[width_per_group, width_per_group // cfg.SLOWFAST.BETA_INV],
             kernel=[temp_kernel[0][0] + [7, 7], temp_kernel[0][1] + [7, 7]],
             stride=[[1, 2, 2]] * 2,
-            padding=[
-                [temp_kernel[0][0][0] // 2, 3, 3],
-                [temp_kernel[0][1][0] // 2, 3, 3],
-            ],
+            padding=[[temp_kernel[0][0][0] // 2, 3, 3], [temp_kernel[0][1][0] // 2, 3, 3]],
             norm_module=self.norm_module,
         )
         self.s1_fuse = FuseFastToSlow(
@@ -248,10 +240,7 @@ class SlowFast(nn.Module):
                 width_per_group + width_per_group // out_dim_ratio,
                 width_per_group // cfg.SLOWFAST.BETA_INV,
             ],
-            dim_out=[
-                width_per_group * 4,
-                width_per_group * 4 // cfg.SLOWFAST.BETA_INV,
-            ],
+            dim_out=[width_per_group * 4, width_per_group * 4 // cfg.SLOWFAST.BETA_INV],
             dim_inner=[dim_inner, dim_inner // cfg.SLOWFAST.BETA_INV],
             temp_kernel_sizes=temp_kernel[1],
             stride=cfg.RESNET.SPATIAL_STRIDES[0],
@@ -276,9 +265,7 @@ class SlowFast(nn.Module):
 
         for pathway in range(self.num_pathways):
             pool = nn.MaxPool3d(
-                kernel_size=pool_size[pathway],
-                stride=pool_size[pathway],
-                padding=[0, 0, 0],
+                kernel_size=pool_size[pathway], stride=pool_size[pathway], padding=[0, 0, 0]
             )
             self.add_module("pathway{}_pool".format(pathway), pool)
 
@@ -287,10 +274,7 @@ class SlowFast(nn.Module):
                 width_per_group * 4 + width_per_group * 4 // out_dim_ratio,
                 width_per_group * 4 // cfg.SLOWFAST.BETA_INV,
             ],
-            dim_out=[
-                width_per_group * 8,
-                width_per_group * 8 // cfg.SLOWFAST.BETA_INV,
-            ],
+            dim_out=[width_per_group * 8, width_per_group * 8 // cfg.SLOWFAST.BETA_INV],
             dim_inner=[dim_inner * 2, dim_inner * 2 // cfg.SLOWFAST.BETA_INV],
             temp_kernel_sizes=temp_kernel[2],
             stride=cfg.RESNET.SPATIAL_STRIDES[1],
@@ -318,10 +302,7 @@ class SlowFast(nn.Module):
                 width_per_group * 8 + width_per_group * 8 // out_dim_ratio,
                 width_per_group * 8 // cfg.SLOWFAST.BETA_INV,
             ],
-            dim_out=[
-                width_per_group * 16,
-                width_per_group * 16 // cfg.SLOWFAST.BETA_INV,
-            ],
+            dim_out=[width_per_group * 16, width_per_group * 16 // cfg.SLOWFAST.BETA_INV],
             dim_inner=[dim_inner * 4, dim_inner * 4 // cfg.SLOWFAST.BETA_INV],
             temp_kernel_sizes=temp_kernel[3],
             stride=cfg.RESNET.SPATIAL_STRIDES[2],
@@ -349,10 +330,7 @@ class SlowFast(nn.Module):
                 width_per_group * 16 + width_per_group * 16 // out_dim_ratio,
                 width_per_group * 16 // cfg.SLOWFAST.BETA_INV,
             ],
-            dim_out=[
-                width_per_group * 32,
-                width_per_group * 32 // cfg.SLOWFAST.BETA_INV,
-            ],
+            dim_out=[width_per_group * 32, width_per_group * 32 // cfg.SLOWFAST.BETA_INV],
             dim_inner=[dim_inner * 8, dim_inner * 8 // cfg.SLOWFAST.BETA_INV],
             temp_kernel_sizes=temp_kernel[4],
             stride=cfg.RESNET.SPATIAL_STRIDES[3],
@@ -370,21 +348,11 @@ class SlowFast(nn.Module):
 
         for idx, task in enumerate(self.tasks):
             if task in self._region_tasks:
-
                 extra_head = head_helper.ResNetRoIHead(
-                    dim_in=[
-                        width_per_group * 32,
-                        width_per_group * 32 // cfg.SLOWFAST.BETA_INV,
-                    ],
+                    dim_in=[width_per_group * 32, width_per_group * 32 // cfg.SLOWFAST.BETA_INV],
                     num_classes=self.num_classes[idx],
                     pool_size=[
-                        [
-                            cfg.DATA.NUM_FRAMES
-                            // cfg.SLOWFAST.ALPHA
-                            // pool_size[0][0],
-                            1,
-                            1,
-                        ],
+                        [cfg.DATA.NUM_FRAMES // cfg.SLOWFAST.ALPHA // pool_size[0][0], 1, 1],
                         [cfg.DATA.NUM_FRAMES // pool_size[1][0], 1, 1],
                     ],
                     resolution=[[cfg.REGIONS.ROI_XFORM_RESOLUTION] * 2] * 2,
@@ -395,18 +363,13 @@ class SlowFast(nn.Module):
                 )
             else:
                 extra_head = head_helper.ResNetBasicHead(
-                    dim_in=[
-                        width_per_group * 32,
-                        width_per_group * 32 // cfg.SLOWFAST.BETA_INV,
-                    ],
+                    dim_in=[width_per_group * 32, width_per_group * 32 // cfg.SLOWFAST.BETA_INV],
                     num_classes=self.num_classes[idx],
                     pool_size=[None, None]
                     if cfg.MULTIGRID.SHORT_CYCLE
                     else [
                         [
-                            cfg.DATA.NUM_FRAMES
-                            // cfg.SLOWFAST.ALPHA
-                            // pool_size[0][0],
+                            cfg.DATA.NUM_FRAMES // cfg.SLOWFAST.ALPHA // pool_size[0][0],
                             cfg.DATA.TRAIN_CROP_SIZE // 32 // pool_size[0][1],
                             cfg.DATA.TRAIN_CROP_SIZE // 32 // pool_size[0][2],
                         ],
@@ -422,7 +385,7 @@ class SlowFast(nn.Module):
             self.add_module("extra_heads_{}".format(task), extra_head)
 
     def forward(self, x, bboxes=None, features=None, boxes_mask=None, **kwargs):
-        out = {k:[] for k in self.tasks}
+        out = {k: [] for k in self.tasks}
         x = self.s1(x)
         x = self.s1_fuse(x)
         x = self.s2(x)
@@ -435,13 +398,16 @@ class SlowFast(nn.Module):
         x = self.s4(x)
         x = self.s4_fuse(x)
         x = self.s5(x)
-        
+
         for task in self.tasks:
             extra_head = getattr(self, "extra_heads_{}".format(task))
-                
-            out[task] = extra_head(inputs=x, bboxes=bboxes, features=features, boxes_mask=boxes_mask)
-        
+
+            out[task] = extra_head(
+                inputs=x, bboxes=bboxes, features=features, boxes_mask=boxes_mask
+            )
+
         return out
+
 
 @MODEL_REGISTRY.register()
 class MViT(nn.Module):
@@ -471,7 +437,7 @@ class MViT(nn.Module):
         self.patch_stride = cfg.MVIT.PATCH_STRIDE
         if self.use_2d_patch:
             self.patch_stride = [1] + self.patch_stride
-        
+
         # Prepare GraSP tasks
         self.tasks = deepcopy(cfg.TASKS.TASKS)
         self.num_classes = deepcopy(cfg.TASKS.NUM_CLASSES)
@@ -480,20 +446,25 @@ class MViT(nn.Module):
         self.use_rpn = cfg.FEATURES.USE_RPN
         self.precalc_test = cfg.FEATURES.PRECALCULATE_TEST
         self.recogn = cfg.TASKS.PRESENCE_RECOGNITION
-        self._frame_tasks = {task for task in cfg.TASKS.TASKS if task not in cfg.ENDOVIS_DATASET.REGION_TASKS}
+        self._frame_tasks = {
+            task for task in cfg.TASKS.TASKS if task not in cfg.ENDOVIS_DATASET.REGION_TASKS
+        }
 
         if cfg.REGIONS.ENABLE:
             self.features = cfg.FEATURES.ENABLE
-            self._region_tasks = {task for task in cfg.TASKS.TASKS if task in cfg.ENDOVIS_DATASET.REGION_TASKS}
+            self._region_tasks = {
+                task for task in cfg.TASKS.TASKS if task in cfg.ENDOVIS_DATASET.REGION_TASKS
+            }
             if cfg.TASKS.PRESENCE_RECOGNITION:
                 self.recog_tasks = set(cfg.TASKS.PRESENCE_TASKS)
-        
+
             if cfg.FEATURES.USE_RPN:
                 from .region_proposals import RegionProposal
-                self.rpn = RegionProposal(cfg.FEATURES.RPN_CFG, 
-                                          (cfg.DATA.TRAIN_CROP_SIZE,
-                                           cfg.DATA.TRAIN_CROP_SIZE_LARGE),
-                                           not self.precalc_test,
+
+                self.rpn = RegionProposal(
+                    cfg.FEATURES.RPN_CFG,
+                    (cfg.DATA.TRAIN_CROP_SIZE, cfg.DATA.TRAIN_CROP_SIZE_LARGE),
+                    not self.precalc_test,
                 )
                 # Freeze the parameters of the secondary model
                 for param in self.rpn.parameters():
@@ -516,7 +487,7 @@ class MViT(nn.Module):
         drop_path_rate = cfg.MVIT.DROPPATH_RATE
         mode = cfg.MVIT.MODE
         self.cls_embed_on = cfg.MVIT.CLS_EMBED_ON
-        
+
         self.multiple_cls_embeds = self.cls_embed_on and cfg.TASKS.MULTIPLE_CLS
         # Params for positional embedding
         self.use_abs_pos = cfg.MVIT.USE_ABS_POS
@@ -543,8 +514,7 @@ class MViT(nn.Module):
         self.input_dims = [temporal_size, spatial_size, spatial_size_large]
         # assert self.input_dims[1] == self.input_dims[2]
         self.patch_dims = [
-            self.input_dims[i] // self.patch_stride[i]
-            for i in range(len(self.input_dims))
+            self.input_dims[i] // self.patch_stride[i] for i in range(len(self.input_dims))
         ]
         num_patches = math.prod(self.patch_dims)
 
@@ -553,34 +523,38 @@ class MViT(nn.Module):
         ]  # stochastic depth decay rule
 
         if self.cls_embed_on:
-            self.cls_token = nn.Parameter(torch.zeros(1, 1 if not self.multiple_cls_embeds else len(self._frame_tasks), embed_dim))
-            pos_embed_dim = num_patches + (1 if not self.multiple_cls_embeds else len(self._frame_tasks))
+            self.cls_token = nn.Parameter(
+                torch.zeros(
+                    1, 1 if not self.multiple_cls_embeds else len(self._frame_tasks), embed_dim
+                )
+            )
+            pos_embed_dim = num_patches + (
+                1 if not self.multiple_cls_embeds else len(self._frame_tasks)
+            )
         else:
             pos_embed_dim = num_patches
 
         if self.use_abs_pos:
             if self.sep_pos_embed:
                 self.pos_embed_spatial = nn.Parameter(
-                    torch.zeros(
-                        1, self.patch_dims[1] * self.patch_dims[2], embed_dim
-                    )
+                    torch.zeros(1, self.patch_dims[1] * self.patch_dims[2], embed_dim)
                 )
-                
+
                 if self.use_temp_embed:
                     self.pos_embed_temporal = nn.Parameter(
                         torch.zeros(1, self.patch_dims[0], embed_dim)
                     )
                 if self.cls_embed_on:
                     self.pos_embed_class = nn.Parameter(
-                        torch.zeros(1, 1 if not self.multiple_cls_embeds else len(self._frame_tasks), embed_dim)
+                        torch.zeros(
+                            1,
+                            1 if not self.multiple_cls_embeds else len(self._frame_tasks),
+                            embed_dim,
+                        )
                     )
             else:
                 self.pos_embed = nn.Parameter(
-                    torch.zeros(
-                        1,
-                        pos_embed_dim,
-                        embed_dim,
-                    ),
+                    torch.zeros(1, pos_embed_dim, embed_dim),
                     requires_grad=not self.use_fixed_sincos_pos,
                 )
 
@@ -599,9 +573,7 @@ class MViT(nn.Module):
         stride_kv = [[] for i in range(cfg.MVIT.DEPTH)]
 
         for i in range(len(cfg.MVIT.POOL_Q_STRIDE)):
-            stride_q[cfg.MVIT.POOL_Q_STRIDE[i][0]] = cfg.MVIT.POOL_Q_STRIDE[i][
-                1:
-            ]
+            stride_q[cfg.MVIT.POOL_Q_STRIDE[i][0]] = cfg.MVIT.POOL_Q_STRIDE[i][1:]
             if cfg.MVIT.POOL_KVQ_KERNEL is not None:
                 pool_q[cfg.MVIT.POOL_Q_STRIDE[i][0]] = cfg.MVIT.POOL_KVQ_KERNEL
             else:
@@ -616,23 +588,17 @@ class MViT(nn.Module):
             for i in range(cfg.MVIT.DEPTH):
                 if len(stride_q[i]) > 0:
                     _stride_kv = [
-                        max(_stride_kv[d] // stride_q[i][d], 1)
-                        for d in range(len(_stride_kv))
+                        max(_stride_kv[d] // stride_q[i][d], 1) for d in range(len(_stride_kv))
                     ]
                 cfg.MVIT.POOL_KV_STRIDE.append([i] + _stride_kv)
 
         for i in range(len(cfg.MVIT.POOL_KV_STRIDE)):
-            stride_kv[cfg.MVIT.POOL_KV_STRIDE[i][0]] = cfg.MVIT.POOL_KV_STRIDE[
-                i
-            ][1:]
+            stride_kv[cfg.MVIT.POOL_KV_STRIDE[i][0]] = cfg.MVIT.POOL_KV_STRIDE[i][1:]
             if cfg.MVIT.POOL_KVQ_KERNEL is not None:
-                pool_kv[
-                    cfg.MVIT.POOL_KV_STRIDE[i][0]
-                ] = cfg.MVIT.POOL_KVQ_KERNEL
+                pool_kv[cfg.MVIT.POOL_KV_STRIDE[i][0]] = cfg.MVIT.POOL_KVQ_KERNEL
             else:
                 pool_kv[cfg.MVIT.POOL_KV_STRIDE[i][0]] = [
-                    s + 1 if s > 1 else s
-                    for s in cfg.MVIT.POOL_KV_STRIDE[i][1:]
+                    s + 1 if s > 1 else s for s in cfg.MVIT.POOL_KV_STRIDE[i][1:]
                 ]
 
         self.pool_q = pool_q
@@ -649,15 +615,11 @@ class MViT(nn.Module):
             num_heads = round_width(num_heads, head_mul[i])
             if cfg.MVIT.DIM_MUL_IN_ATT:
                 dim_out = round_width(
-                    embed_dim,
-                    dim_mul[i],
-                    divisor=round_width(num_heads, head_mul[i]),
+                    embed_dim, dim_mul[i], divisor=round_width(num_heads, head_mul[i])
                 )
             else:
                 dim_out = round_width(
-                    embed_dim,
-                    dim_mul[i + 1],
-                    divisor=round_width(num_heads, head_mul[i + 1]),
+                    embed_dim, dim_mul[i + 1], divisor=round_width(num_heads, head_mul[i + 1])
                 )
             attention_block = MultiScaleBlock(
                 dim=embed_dim,
@@ -689,10 +651,7 @@ class MViT(nn.Module):
                 attention_block = checkpoint_wrapper(attention_block)
             self.blocks.append(attention_block)
             if len(stride_q[i]) > 0:
-                input_size = [
-                    size // stride
-                    for size, stride in zip(input_size, stride_q[i])
-                ]
+                input_size = [size // stride for size, stride in zip(input_size, stride_q[i])]
 
             embed_dim = dim_out
 
@@ -702,35 +661,35 @@ class MViT(nn.Module):
             if self.regions and task in self._region_tasks:
                 if self.features:
                     extra_head = head_helper.TransformerRoIHead(
-                                cfg,
-                                num_classes=self.num_classes[idx],
-                                dropout_rate=cfg.MODEL.DROPOUT_RATE,
-                                act_func=self.act_fun[idx],
-                                cls_embed=self.cls_embed_on
-                                )
+                        cfg,
+                        num_classes=self.num_classes[idx],
+                        dropout_rate=cfg.MODEL.DROPOUT_RATE,
+                        act_func=self.act_fun[idx],
+                        cls_embed=self.cls_embed_on,
+                    )
                 else:
                     pass
 
                 if self.recogn and task in self.recog_tasks:
                     recog_head = head_helper.TransformerBasicHead(
-                                    embed_dim,
-                                    self.num_classes[idx],
-                                    dropout_rate=cfg.MODEL.DROPOUT_RATE,
-                                    act_func='sigmoid',
-                                    cls_embed=False,
-                                    recognition=True
-                                )
+                        embed_dim,
+                        self.num_classes[idx],
+                        dropout_rate=cfg.MODEL.DROPOUT_RATE,
+                        act_func="sigmoid",
+                        cls_embed=False,
+                        recognition=True,
+                    )
                     self.add_module("extra_heads_{}_presence".format(task), recog_head)
             else:
                 extra_head = head_helper.TransformerBasicHead(
-                            embed_dim,
-                            self.num_classes[idx],
-                            dropout_rate=cfg.MODEL.DROPOUT_RATE,
-                            act_func=self.act_fun[idx],
-                            cls_embed=self.cls_embed_on,
-                            recognition=False
-                        )
-                
+                    embed_dim,
+                    self.num_classes[idx],
+                    dropout_rate=cfg.MODEL.DROPOUT_RATE,
+                    act_func=self.act_fun[idx],
+                    cls_embed=self.cls_embed_on,
+                    recognition=False,
+                )
+
             self.add_module("extra_heads_{}".format(task), extra_head)
 
         if self.use_abs_pos:
@@ -744,14 +703,9 @@ class MViT(nn.Module):
                 trunc_normal_(self.pos_embed, std=0.02)
                 if self.use_fixed_sincos_pos:
                     pos_embed = get_3d_sincos_pos_embed(
-                        self.pos_embed.shape[-1],
-                        self.H,
-                        self.T,
-                        cls_token=self.cls_embed_on,
+                        self.pos_embed.shape[-1], self.H, self.T, cls_token=self.cls_embed_on
                     )
-                    self.pos_embed.data.copy_(
-                        torch.from_numpy(pos_embed).float().unsqueeze(0)
-                    )
+                    self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
         if self.cls_embed_on:
             trunc_normal_(self.cls_token, std=0.02)
@@ -774,21 +728,21 @@ class MViT(nn.Module):
         Only the classification heads will be trainable.
         """
         # Get the actual model in case it's wrapped by DataParallel
-        model = self.module if hasattr(self, 'module') else self
-        
+        model = self.module if hasattr(self, "module") else self
+
         # Freeze patch embedding
         for param in model.patch_embed.parameters():
             param.requires_grad = False
-        
+
         # Freeze transformer blocks
         for block in model.blocks:
             for param in block.parameters():
                 param.requires_grad = False
-        
+
         # Freeze norm layer
         for param in model.norm.parameters():
             param.requires_grad = False
-        
+
         # Freeze positional embeddings and class token
         if model.use_abs_pos:
             if model.sep_pos_embed:
@@ -799,22 +753,22 @@ class MViT(nn.Module):
                     model.pos_embed_class.requires_grad = False
             else:
                 model.pos_embed.requires_grad = False
-        
+
         if model.cls_embed_on:
             model.cls_token.requires_grad = False
-        
+
         # Freeze norm_stem if it exists
         if model.norm_stem is not None:
             for param in model.norm_stem.parameters():
                 param.requires_grad = False
-        
+
         # Freeze pos_drop if it exists
         if model.drop_rate > 0.0:
             for param in model.pos_drop.parameters():
                 param.requires_grad = False
 
         model._print_parameter_counts()
-    
+
     def _print_parameter_counts(self):
         """
         Print the number of learnable and fixed parameters.
@@ -822,11 +776,10 @@ class MViT(nn.Module):
         learnable = sum(p.numel() for p in self.parameters() if p.requires_grad)
         fixed = sum(p.numel() for p in self.parameters() if not p.requires_grad)
         total = learnable + fixed
-        
+
         print(f"Learnable parameters: {learnable:,}")
         print(f"Fixed parameters: {fixed:,}")
         print(f"Total parameters: {total:,}")
-
 
     @torch.jit.ignore
     def no_weight_decay(self):
@@ -834,13 +787,7 @@ class MViT(nn.Module):
         if self.cfg.MVIT.ZERO_DECAY_POS_CLS:
             if self.use_abs_pos:
                 if self.sep_pos_embed:
-                    names.extend(
-                        [
-                            "pos_embed_spatial",
-                            "pos_embed_temporal",
-                            "pos_embed_class",
-                        ]
-                    )
+                    names.extend(["pos_embed_spatial", "pos_embed_temporal", "pos_embed_class"])
                 else:
                     names.append("pos_embed")
             if self.rel_pos_spatial:
@@ -859,17 +806,19 @@ class MViT(nn.Module):
         else:
             t, h, w = bcthw[-3], bcthw[-2], bcthw[-1]
         if self.cls_embed_on:
-            cls_pos_embed = pos_embed[:, 0:(1 if not self.multiple_cls_embeds else len(self._frame_tasks)), :]
-            pos_embed = pos_embed[:, (1 if not self.multiple_cls_embeds else len(self._frame_tasks)):]
+            cls_pos_embed = pos_embed[
+                :, 0 : (1 if not self.multiple_cls_embeds else len(self._frame_tasks)), :
+            ]
+            pos_embed = pos_embed[
+                :, (1 if not self.multiple_cls_embeds else len(self._frame_tasks)) :
+            ]
         txy_num = pos_embed.shape[1]
         p_t, p_h, p_w = self.patch_dims
         assert p_t * p_h * p_w == txy_num
 
         if (p_t, p_h, p_w) != (t, h, w):
             new_pos_embed = F.interpolate(
-                pos_embed[:, :, :]
-                .reshape(1, p_t, p_h, p_w, -1)
-                .permute(0, 4, 1, 2, 3),
+                pos_embed[:, :, :].reshape(1, p_t, p_h, p_w, -1).permute(0, 4, 1, 2, 3),
                 size=(t, h, w),
                 mode="trilinear",
             )
@@ -883,17 +832,18 @@ class MViT(nn.Module):
     def forward(self, x, features=None, boxes_mask=False, images=None, bboxes=None, **kwargs):
         out = {}
 
-        if (features is None or self.training or not self.precalc_test) \
-            and self.regions \
-            and self.use_rpn \
-            and images is not None:
-
+        if (
+            (features is None or self.training or not self.precalc_test)
+            and self.regions
+            and self.use_rpn
+            and images is not None
+        ):
             features, boxes, masks = self.rpn(images, bboxes, boxes_mask, self.training)
 
             if (not self.training) and masks is not None:
-                out['masks'] = masks
-                out['boxes'] = boxes
-        
+                out["masks"] = masks
+                out["boxes"] = boxes
+
         x = x[0]
         if not self.use_temp_embed:
             x = x.squeeze(2)
@@ -919,15 +869,11 @@ class MViT(nn.Module):
 
         if self.use_abs_pos:
             if self.sep_pos_embed:
-                pos_embed = self.pos_embed_spatial.repeat(
-                    1, self.patch_dims[0], 1
-                ) 
-                
+                pos_embed = self.pos_embed_spatial.repeat(1, self.patch_dims[0], 1)
+
                 if self.use_temp_embed:
                     pos_embed += torch.repeat_interleave(
-                        self.pos_embed_temporal,
-                        self.patch_dims[1] * self.patch_dims[2],
-                        dim=1,
+                        self.pos_embed_temporal, self.patch_dims[1] * self.patch_dims[2], dim=1
                     )
                 if self.cls_embed_on:
                     pos_embed = torch.cat([self.pos_embed_class, pos_embed], 1)
@@ -945,14 +891,14 @@ class MViT(nn.Module):
 
         for blk in self.blocks:
             x, thw = blk(x, thw)
-        
+
         x = self.norm(x)
 
-        out['features'] = x
-        out['thw'] = thw
-        out['bcthw'] = bcthw
-        out['patch_dims'] = self.patch_dims
-        out['cls_tokens'] = x[:, :s, :] if self.cls_embed_on else None
+        out["features"] = x
+        out["thw"] = thw
+        out["bcthw"] = bcthw
+        out["patch_dims"] = self.patch_dims
+        out["cls_tokens"] = x[:, :s, :] if self.cls_embed_on else None
 
         # TAPIS head classification
         for task in self.tasks:
@@ -961,207 +907,238 @@ class MViT(nn.Module):
                 cls_idx = list(self._frame_tasks).index(task)
             else:
                 cls_idx = 0
-                
-            out[task] = extra_head(inputs=x, cls_idx=cls_idx, features=features, boxes_mask=boxes_mask)
+
+            out[task] = extra_head(
+                inputs=x, cls_idx=cls_idx, features=features, boxes_mask=boxes_mask
+            )
 
             if self.recogn and task in self.recog_tasks:
-                out[f'{task}_presence'] = getattr(self, "extra_heads_{}_presence".format(task))(x=x, features=features, boxes_mask=boxes_mask)
-                
+                out[f"{task}_presence"] = getattr(self, "extra_heads_{}_presence".format(task))(
+                    x=x, features=features, boxes_mask=boxes_mask
+                )
+
         return out
-    
+
 
 from LemonFM.model_loader import build_LemonFM
-@MODEL_REGISTRY.register()  
+
+
+@MODEL_REGISTRY.register()
 class LEMON(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        weiths_path = "LemonFM/lemonfm.pth" 
+        weiths_path = "LemonFM/lemonfm.pth"
         self.backbone = build_LemonFM(pretrained_weights=weiths_path)
-        
+
         self.tasks = deepcopy(cfg.TASKS.TASKS)
         self.num_classes = deepcopy(cfg.TASKS.NUM_CLASSES)
-        embed_dim = 1536 # For LEMON convnext #  cfg.MVIT.EMBED_DIM
+        embed_dim = 1536  # For LEMON convnext #  cfg.MVIT.EMBED_DIM
         self.act_fun = deepcopy(cfg.TASKS.HEAD_ACT)
 
         for idx, task in enumerate(self.tasks):
             extra_head = head_helper.ClassificationBasicHead(
-                        embed_dim,
-                        self.num_classes[idx],
-                        dropout_rate=cfg.MODEL.DROPOUT_RATE,
-                        act_func=self.act_fun[idx],
-                    )
+                embed_dim,
+                self.num_classes[idx],
+                dropout_rate=cfg.MODEL.DROPOUT_RATE,
+                act_func=self.act_fun[idx],
+            )
             self.add_module("extra_heads_{}".format(task), extra_head)
-
 
     def forward(self, batch_frames, **kwargs):
         # Input must be [B,C=3,H=224,W=224]
-        if isinstance(batch_frames, list) and len(batch_frames) == 1:  
-            batch_frames = batch_frames[0]  # Prendi il primo elemento se è una lista (caso SlowFast)
+        if isinstance(batch_frames, list) and len(batch_frames) == 1:
+            batch_frames = batch_frames[
+                0
+            ]  # Prendi il primo elemento se è una lista (caso SlowFast)
         # print(batch_frames.shape)
         features = self.backbone(batch_frames)  # [B, d_model]
         # print(features.shape)
-        out={"cls_tokens":features}
+        out = {"cls_tokens": features}
         # TAPIS head classification
         for task in self.tasks:
             extra_head = getattr(self, "extra_heads_{}".format(task))
             out[task] = extra_head(inputs=features, cls_idx=0)
         return out
-    
+
     def freeze_encoder(self):
         """
         Freeze the encoder (LEMON backbone).
         Only the classification heads will be trainable.
         """
         # Get the actual model in case it's wrapped by DataParallel
-        model = self.module if hasattr(self, 'module') else self
-        
+        model = self.module if hasattr(self, "module") else self
+
         # Freeze backbone
         for param in model.backbone.parameters():
             param.requires_grad = False
 
-        print("Total parameters in backbone: {:,}".format(sum(p.numel() for p in model.parameters())))
-        print("Learnable parameters: {:,}".format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
-        
+        print(
+            "Total parameters in backbone: {:,}".format(sum(p.numel() for p in model.parameters()))
+        )
+        print(
+            "Learnable parameters: {:,}".format(
+                sum(p.numel() for p in model.parameters() if p.requires_grad)
+            )
+        )
 
-@MODEL_REGISTRY.register()  
+
+@MODEL_REGISTRY.register()
 class VideoLEMON(LEMON):
     def __init__(self, cfg):
         super().__init__(cfg)
+
     def forward(self, batch_frames, **kwargs):
         # imput size = ([B, C=3, T=16, H=224, W=224])
         input = batch_frames[0]
         if self.cfg.DATA.SEQ_MODE == "center":
-            return super().forward(input[:,:,input.shape[2]//2:input.shape[2]//2+1,:,:].squeeze(2)) # get only the central frame of video
+            return super().forward(
+                input[:, :, input.shape[2] // 2 : input.shape[2] // 2 + 1, :, :].squeeze(2)
+            )  # get only the central frame of video
         if self.cfg.DATA.SEQ_MODE == "before":
-            return super().forward(input[:,:,-1,:,:].squeeze(2)) # get only the central frame of video
+            return super().forward(
+                input[:, :, -1, :, :].squeeze(2)
+            )  # get only the central frame of video
         if self.cfg.DATA.SEQ_MODE == "after":
-            return super().forward(input[:,:,0,:,:].squeeze(2)) # get only the central frame of video
+            return super().forward(
+                input[:, :, 0, :, :].squeeze(2)
+            )  # get only the central frame of video
 
         # input = input[:,:,-1,:,:] # get only the last frame of video
         # # input = torch.squeeze(input)
         # return super().forward(input)
-        
-        
-        
-        
-        
-        
-        
+
 
 from .memory import MemoryTokenizer, LightweightMemoryEncoder, MemoryAugmentedClassifier, MemoryBank
+
 
 @MODEL_REGISTRY.register()
 class TAPISWithMemory(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        
+
         # TAPIS backbone (MViT o SlowFast)
-        model_backbone = {"mvit": MViT,
-                          "slowfast": SlowFast,
-                          # "resnet": ResNetSlowFast,
-                          }
+        model_backbone = {
+            "mvit": MViT,
+            "slowfast": SlowFast,
+            # "resnet": ResNetSlowFast,
+        }
         self.backbone = model_backbone[cfg.MODEL.ARCH](cfg)
 
         self.num_classes = deepcopy(cfg.TASKS.NUM_CLASSES)
         self.tasks = deepcopy(cfg.TASKS.TASKS)
 
         dim_classification = sum(self.num_classes)
-        
+
         # Memory components (tutti allenabili)
-        self.memory_tokenizer = MemoryTokenizer(cfg.MVIT.D_MODEL, cfg.MODEL.MEMORY_BANK_SIZE, dim_classification)
+        self.memory_tokenizer = MemoryTokenizer(
+            cfg.MVIT.D_MODEL, cfg.MODEL.MEMORY_BANK_SIZE, dim_classification
+        )
         self.memory_encoder = LightweightMemoryEncoder(cfg.MVIT.D_MODEL, nhead=8, num_layers=2)
-        self.memory_classifier = MemoryAugmentedClassifier(cfg.MVIT.D_MODEL, nhead=8, tasks=self.tasks,
-                                                            num_classes=self.num_classes)
-        
+        self.memory_classifier = MemoryAugmentedClassifier(
+            cfg.MVIT.D_MODEL, nhead=8, tasks=self.tasks, num_classes=self.num_classes
+        )
+
         # Memory Bank (stato, non parametri)
-        self.memory_bank = MemoryBank(max_len=cfg.MODEL.MEMORY_BANK_SIZE, saving_rate=cfg.MODEL.MEMORY_SAVING_RATE,
-                                       d_model=cfg.MVIT.D_MODEL, num_classes=dim_classification)
+        self.memory_bank = MemoryBank(
+            max_len=cfg.MODEL.MEMORY_BANK_SIZE,
+            saving_rate=cfg.MODEL.MEMORY_SAVING_RATE,
+            d_model=cfg.MVIT.D_MODEL,
+            num_classes=dim_classification,
+        )
 
         self.per_video_memory = {}
-        
-        
+
     def forward(self, batch_frames, **kwargs):
         """
         batch_frames: [B, C, T, H, W] - batch di frame dal DataLoader
         """
         # if isinstance(batch_frames, list):
         #     batch_frames = batch_frames[0]  # Prendi il primo elemento se è una lista (caso SlowFast)
-        
+
         # 1. Estrai feature con MViT
-        # In TAPIS il backbone ritorna features a diverse scale; 
+        # In TAPIS il backbone ritorna features a diverse scale;
         # qui prendiamo il CLS token dell'ultimo layer
         backbone_out = self.backbone(batch_frames)
-        current_embedding = backbone_out['cls_tokens']  # [B, d_model]
-        
+        current_embedding = backbone_out["cls_tokens"]  # [B, d_model]
+
         # 2. Predizione baseline (senza memoria) per popolare la bank
         # Questa si fa con la testa di classificazione originale di TAPIS
-        baseline_logits = {task: backbone_out[task] for task in self.tasks}  # {task: [B, num_classes]}
-        
-        image_names =  kwargs.get('image_names', ["1"]*current_embedding.size(0))  # Lista di nomi o ID per ogni video nel batch
+        baseline_logits = {
+            task: backbone_out[task] for task in self.tasks
+        }  # {task: [B, num_classes]}
+
+        image_names = kwargs.get(
+            "image_names", ["1"] * current_embedding.size(0)
+        )  # Lista di nomi o ID per ogni video nel batch
         image_names = [im.split("/")[0] for im in image_names]  # Rimuovi estensione se presente
-        
-        gt = kwargs.get('gt', [None]*current_embedding.size(0))  
-        
-        
+
+        gt = kwargs.get("gt", [None] * current_embedding.size(0))
+
         logit_tasks = {task: None for task in self.tasks}
         for b, image_name in enumerate(image_names):
             # 3. Leggi dalla Memory Bank e costruisci i token
             mem_tokens_raw = self.memory_bank.get_list(video_id=image_name)
             # mem_tokens_raw: [L, d_model + num_classes]
-            
+
             # 4. Proietta e aggiungi positional encoding
             memory_tokens = self.memory_tokenizer(
                 mem_tokens_raw,  # [L, d_model + num_classes]
                 current_step=self.memory_bank.get_step_counter(image_name),
-                device=batch_frames[0].device
+                device=batch_frames[0].device,
             )  # [1, L+1, d_model]  (con MEM_CLS preposto)
-            
+
             # 5. Memory Encoder: comprime la sequenza di memoria
             # Passa la sequenza completa per la cross-attention nel decoder
             memory_context = self.memory_encoder(
-                memory_tokens.expand(1, -1, -1) # set B=1 in the loop
+                memory_tokens.expand(1, -1, -1)  # set B=1 in the loop
             )  # [B, L+1, d_model]  — tutti i token, non solo il CLS
-            
+
             # 6. Memory-Augmented Classification
             b_logit_tasks = self.memory_classifier(
-                current_embedding[b,...],  # [B, d_model]
-                memory_context      # [B, L+1, d_model]
+                current_embedding[b, ...],  # [B, d_model]
+                memory_context,  # [B, L+1, d_model]
             )
-            
+
             for task in self.tasks:
                 if logit_tasks[task] == None:
                     logit_tasks[task] = b_logit_tasks[task]
-                else: 
-                    logit_tasks[task] = torch.vstack([logit_tasks[task], b_logit_tasks[task]])  # Accumula i logit per ogni task
-        
+                else:
+                    logit_tasks[task] = torch.vstack(
+                        [logit_tasks[task], b_logit_tasks[task]]
+                    )  # Accumula i logit per ogni task
 
         # 7. Aggiorna la Memory Bank con embedding e predizioni correnti
         for b in range(current_embedding.size(0)):
-            
-            combined_logit = torch.cat([logit_tasks[task][b,:] for task in self.tasks], dim=-1)
+            combined_logit = torch.cat([logit_tasks[task][b, :] for task in self.tasks], dim=-1)
             if gt[b] is not None:
                 gt_combined = label_binarize(gt[b], classes=combined_logit.shape[-1])
-                combined_logit = 0.5 * combined_logit + 0.5 * gt_combined  # Smoothing tra predizione e ground truth
+                combined_logit = (
+                    0.5 * combined_logit + 0.5 * gt_combined
+                )  # Smoothing tra predizione e ground truth
             self.memory_bank.update(current_embedding[b], combined_logit, image_names[b])
-        
-        return logit_tasks #, baseline_logits
+
+        return logit_tasks  # , baseline_logits
 
     def reset_memory_bank(self):
         self.memory_bank.reset()
-    
+
     def freeze_encoder(self):
         """
         Freeze the TAPIS backbone (MViT or SlowFast).
         Only the memory components will be trainable.
         """
-        if hasattr(self.backbone, 'freeze_encoder'):
+        if hasattr(self.backbone, "freeze_encoder"):
             return self.backbone.freeze_encoder()
-        
+
         for param in self.backbone.parameters():
             param.requires_grad = False
         print("Backbone frozen. Memory components and classifier are trainable.")
-        
-        print(f"Num parameters trainable: {sum(p.numel() for p in self.parameters() if p.requires_grad)}")
-        print(f"Num parameters frozen: {sum(p.numel() for p in self.parameters() if not p.requires_grad)}")
+
+        print(
+            f"Num parameters trainable: {sum(p.numel() for p in self.parameters() if p.requires_grad)}"
+        )
+        print(
+            f"Num parameters frozen: {sum(p.numel() for p in self.parameters() if not p.requires_grad)}"
+        )
         print(f"Total parameters: {sum(p.numel() for p in self.parameters())}")

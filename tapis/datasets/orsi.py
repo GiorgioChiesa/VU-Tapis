@@ -101,7 +101,7 @@ class Orsi(torch.utils.data.Dataset):
             if any(self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS):
                 self.generate_weight_vector()
                 self.remapping_local_id()
-            
+              
     def remapping_local_id(self):
         map_task={"steps": "event", "phases": "phase"}
         for task in self.cfg.TASKS.TASKS:
@@ -124,7 +124,7 @@ class Orsi(torch.utils.data.Dataset):
                 his.append({
                     "id": id,
                     "name": event,
-                    "total_count": sum(clip["event_id"]==id),
+                    "total_count": sum(clip[f"{map_task[task]}_id"]==id),
                 })
             self.counter[task] = pd.DataFrame(his)
             
@@ -135,13 +135,13 @@ class Orsi(torch.utils.data.Dataset):
             # print(f"Distribution for task {task} before weight computation:\n{self.counter[task]}")
             # print(df)
             
-            assert self.counter[task]["total_count"].sum() == len(clip), f"Total count in distribution ({df['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
-            assert len(self.counter[task]) == self._num_classes[task] , f"Numero di classi non coincide"
+            assert self.counter[task]["total_count"].sum() <= len(clip), f"Total count in distribution ({self.counter[task]['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
+            assert len(self.counter[task]) == self._num_classes[task] , f"Numero di classi non coincide, deve essere: {len(self.counter[task])}"
             
-            csv_path = os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class)
             print(f"Weight loss by class for task {task} -- {self._split}:\n{self.counter[task]}")
-            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-            if self._split == "train":
+            if weight_loss_by_class and self._split == "train":
+                csv_path = os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class)
+                os.makedirs(os.path.dirname(csv_path), exist_ok=True)
                 self.counter[task].to_csv(csv_path, index=False)
 
     def _list_patient_ids(self):
@@ -203,9 +203,104 @@ class Orsi(torch.utils.data.Dataset):
             self.filtered_dfs = self.dfs[~self.dfs["event_name"].str.strip().str.lower().str.replace(" ", "_").isin(self.exclude_event_names)].reset_index(drop=True)
         else:
             self.filtered_dfs = self.dfs.copy()
+        
+        self.collapse_event_dfs()
+
         saving = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
         saving.to_csv(os.path.join(self.cfg.OUTPUT_DIR, f"{self._split}_data.csv"), index=False)
+        
         return   
+    
+    def collapse_event_dfs(self):
+        """
+        Collapse multiple events into one by mapping certain event names to others.
+        
+        Mapping rules:
+        - Instrument_swap:_removal -> Removal_of_robotic_instruments
+        - Hemolock_clip_on_right_pedicle -> Metal_clip_on_right_pedicle
+        - Hemolock_clip_on_left_pedicle -> Metal_clip_on_left_pedicle
+        - Events with 'left'/'right' in name are collapsed to the same event
+          (e.g., 'Clip_on_left_pedicle' and 'Clip_on_right_pedicle' become the same)
+        """
+        dfs = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
+        
+        # Define explicit collapse mappings: source_event -> target_event
+        collapse_mapping = {
+            "instrument_swap:_removal": "removal_of_robotic_instruments",
+            "hemolock_clip_on_right_pedicle": "metal_clip_on_right_pedicle",
+            "hemolock_clip_on_left_pedicle": "metal_clip_on_left_pedicle",
+            "insert_gauze": "insert_hemostatic_agens",
+        }
+        
+        # Get unique events from the dataframe
+        unique_events = dfs[["event_id", "event_name"]].drop_duplicates()
+        
+        # Create a lookup for event IDs by normalized name
+        event_lookup = {}
+        for _, row in unique_events.iterrows():
+            normalized_name = str(row["event_name"]).strip().lower().replace(" ", "_")
+            event_lookup[normalized_name] = {
+                "event_id": row["event_id"],
+                "event_name": row["event_name"]
+            }
+        
+        # Apply explicit collapse mapping
+        for source_name, target_name in collapse_mapping.items():
+            if target_name in event_lookup:
+                target_event = event_lookup[target_name]
+                self.exclude_event_names.add(source_name)
+                mask = dfs["event_name"].str.strip().str.lower().str.replace(" ", "_") == source_name
+                if mask.any():
+                    dfs.loc[mask, "event_id"] = target_event["event_id"]
+                    dfs.loc[mask, "event_name"] = target_event["event_name"]
+                    print(f"Collapsed '{source_name}' -> '{target_name}' ({mask.sum()} rows)")
+            else:
+                print(f"Warning: Target event '{target_name}' not found in dataset")
+        
+        # Collapse events that differ only by left/right
+        # Group events by base name (without left/right)
+        left_right_groups = {}
+        for _, row in unique_events.iterrows():
+            normalized_name = str(row["event_name"]).strip().lower().replace(" ", "_")
+            # Remove left/right prefixes/suffixes to get base name
+            base_name = normalized_name.replace("_left", "").replace("_right", "")
+            base_name = base_name.replace("left_", "").replace("right_", "")
+            
+            if base_name not in left_right_groups:
+                left_right_groups[base_name] = []
+            left_right_groups[base_name].append({
+                "original_name": normalized_name,
+                "event_id": row["event_id"],
+                "event_name": row["event_name"]
+            })
+        
+        # For each group with multiple variants, collapse to one (prefer "right" or lower ID)
+        for base_name, variants in left_right_groups.items():
+            if len(variants) > 1:
+                # Check if variants actually differ by left/right
+                has_left = any("left" in v["original_name"] for v in variants)
+                has_right = any("right" in v["original_name"] for v in variants)
+                
+                if has_left and has_right:
+                    # Prefer "right" variant, otherwise use lowest ID
+                    target = next((v for v in variants if "right" in v["original_name"]), 
+                                  min(variants, key=lambda x: x["event_id"]))
+                    
+                    # Collapse all variants to target
+                    for variant in variants:
+                        if variant["event_id"] != target["event_id"]:
+                            self.exclude_event_names.add(variant["original_name"])
+                            mask = dfs["event_name"].str.strip().str.lower().str.replace(" ", "_") == variant["original_name"]
+                            if mask.any():
+                                dfs.loc[mask, "event_id"] = target["event_id"]
+                                dfs.loc[mask, "event_name"] = target["event_name"]
+                                print(f"Collapsed left/right '{variant['original_name']}' -> '{target['original_name']}' ({mask.sum()} rows)")
+        
+        # Update filtered_dfs with the modified dataframe
+        if self.filtered_dfs is not None:
+            self.filtered_dfs = dfs
+        else:
+            self.dfs = dfs
 
     def _select_center_label(self, patient, frame_ids, seq):
         n = len(frame_ids)

@@ -1,30 +1,30 @@
 TRAIN:
   ENABLE: True
   DATASET: orsi
-  BATCH_SIZE: 16 #24
+  BATCH_SIZE: 16
   ACCUM_STEPS: 1
   EVAL_PERIOD: 1
   CHECKPOINT_PERIOD: 1
   AUTO_RESUME: True
-  CHECKPOINT_FILE_PATH:  checkpoints/Tapis-ph_ev-best.pyth # data/pretrained_models/train/LONG.pyth
+  CHECKPOINT_FILE_PATH: data/pretrained_models/train/LONG.pyth
   CHECKPOINT_EPOCH_RESET: True
   FREEZE_ENCODER: False
   MIXED_PRECISION: True   # aggiungere questa riga
 TEST:
   ENABLE: True
   DATASET: orsi
-  BATCH_SIZE: 60 #24
+  BATCH_SIZE: 64 #24
 DATA:
-  NUM_FRAMES: 32
-  SAMPLING_RATE: 2
-  SEQ_MODE: center # or "before", "center" or "after"
+  NUM_FRAMES: 16
+  SAMPLING_RATE: 1
+  SEQ_MODE: center # or "center" or "after"
   TRAIN_JITTER_SCALES: [256, 320]
   TRAIN_CROP_SIZE: 224
   TRAIN_CROP_SIZE_LARGE: 224
   TEST_CROP_SIZE: 224
   TEST_CROP_SIZE_LARGE: 224
   INPUT_CHANNEL_NUM: [3]
-  JUST_CENTER: False
+  JUST_CENTER: True
 ENDOVIS_DATASET:
   DETECTION_SCORE_THRESH: 0.75
   TRAIN_USE_COLOR_AUGMENTATION: True
@@ -58,42 +58,46 @@ REGIONS:
   ROI_XFORM_RESOLUTION: 3
 AUG:
   ENABLE: True
-  COLOR_JITTER: 0.5
+  COLOR_JITTER: 0.4
   AA_TYPE: rand-m7-n4-mstd0.5-inc1
   INTERPOLATION: bicubic
   NUM_SAMPLE: 1
   RE_MODE: pixel
   RE_COUNT: 1
   RE_SPLIT: False
+  TEMPORAL_JITTER: 0.1  # ±10% frame rate variation
+  SPATIAL_AUG: True     # Random crops, flips
 SOLVER:
   BASE_LR_SCALE_NUM_SHARDS: True
-  BASE_LR: 5e-5 # 0.0125
-  CLIP_GRAD_L2NORM: 1.0
+  BASE_LR: 0.0001
+  CLIP_GRAD_L2NORM: 0.01
   LR_POLICY: cosine
   COSINE_AFTER_WARMUP: True
-  COSINE_END_LR: 1e-6 #1e-4
-  MAX_EPOCH: 30
+  COSINE_END_LR: 1e-5 #1e-5
+  MAX_EPOCH: 50
   MAX_ITER: 10000
-  EARLY_STOP_ep_th: [5, 0.0] # epoch and threshold for early stopping, if the metric does not improve for this many epochs by at least this threshold, stop training.
+  EARLY_STOP_ep_th: [5, -1.0] # epoch and threshold for early stopping, if the metric does not improve for this many epochs by at least this threshold, stop training.
   WARMUP_EPOCHS: 5.0
   MOMENTUM: 0.9
   WEIGHT_DECAY: 1e-4
   ZERO_WD_1D_PARAM: True
-  WARMUP_START_LR:  1.25e-6 # 0.00125
+  WARMUP_START_LR:  1.25e-5 # 0.0000125
   OPTIMIZING_METHOD: adam
 MODEL:
   ARCH: mvit
   MODEL_NAME: MViT
   LOSS_FUNC: soft_cross_entropy
-  DROPOUT_RATE: 0.2
+  DROPOUT_RATE: 0.5
 TASKS:
-  TASKS:  ["phases","steps"]
-  NUM_CLASSES: [17, 72]
+  TASKS:  ["steps", "phases"]
+  NUM_CLASSES: [32, 14]
   LOSS_FUNC: ["cross_entropy", "cross_entropy"]
-  HEAD_ACT:  ["softmax" , "softmax"]
-  LOSS_WEIGHTS:  [1.0, 3.0]
-  METRICS: ["mAP", "mAP"]  
-  WEIGHT_LOSS_BY_CLASS: [False, "/home/gchie/workspace/data/dataset_analisis/tables/01_step_distribution.csv"]
+  HEAD_ACT:  ["softmax", "softmax"]
+  LOSS_WEIGHTS:  [1.0, 1.0]
+  METRICS: ["mAP","mAP"]  
+  WEIGHT_LOSS_BY_CLASS: [steps_distribution.csv, phases_distribution.csv]
+  FOCAL_GAMMA: 2.0
+  FOCAL_ALPHA_MODE: "auto"  # auto, manual, or None
 DATA_LOADER:
   NUM_WORKERS: 5
   PIN_MEMORY: True
@@ -102,8 +106,8 @@ FEATURES:
 RNG_SEED: 0
 LOG_PERIOD: 50000
 OUTPUT_DIR: .
-MAX_SAVE_VIDEO: 5
+MAX_SAVE_VIDEO: 10
 ENDOVIS_DATASET:
-  IMG_PROC_BACKEND: "pytorch"
+  EXCLUDE_EVENT_NAMES: ["Idle", "Lymphadenectomy_L", "Lymphadenectomy_R", "Out_of_body", "Back_inside_body ","Final_reinforcing_suture" ,"Inside_abdomen", "Test_image_start", "Remove_gauze","Remove_hemostatic_agens", "Unsuccesful_clip_placement","Hemostatic_metal_clip_placement","Aiding_suture_stitch","Aiding_suture_clip_placement","3D_model", "Fat_removal", "Instrument_swap:_insertion", "Test_image_stop", "Incision_of_the_fascia_-_right"," Remove_needle_bladder_stretch_stitch", "Lift_right_seminal_vesicle", "Lift_left_seminal_vesicle", "Stitch_in_DVC_after_apical_dissection","Needle_removal_DVC_ligation", "Stitch_in_urethra", "Tie_suture", "Threads_removal","Vessel_loop_removal", "Camera_stop","Camera_out_of_body","Hemolock_clip_removal","Hemolock_clip_on_bladder_pedicle_attached_to_prostate"]
   TRAIN_GT_BOX_JSON: [all_merged.json]
   TEST_GT_BOX_JSON: [all_merged.json]

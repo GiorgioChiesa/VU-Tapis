@@ -55,8 +55,8 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="overfit_lemon_unfreezed"
-GPUIDS="1"
+NAME="lemon-left_right-unfreezed"
+GPUIDS="3"
 TASK="STEPS"
 
 DATASET="orsi"
@@ -90,7 +90,7 @@ NAME $NAME \
 GPUIDS "[$GPUIDS]" \
 TRAIN.ACCUM_STEPS 1 \
 TRAIN.BATCH_SIZE 16 \
-TEST.BATCH_SIZE 40 \
+TEST.BATCH_SIZE 16 \
 SOLVER.MAX_ITER 10000 \
 TRAIN.FREEZE_ENCODER False \
 MODEL.MODEL_NAME VideoLEMON \

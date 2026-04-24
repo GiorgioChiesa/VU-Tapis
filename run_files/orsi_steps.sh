@@ -55,8 +55,8 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="overfit-filtered"
-GPUIDS="1"
+NAME="lr5e-5"
+GPUIDS="0"
 TASK="STEPS"
 
 

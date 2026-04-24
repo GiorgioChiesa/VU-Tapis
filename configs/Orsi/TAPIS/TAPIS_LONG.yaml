@@ -92,19 +92,12 @@ TASKS:
   TASKS:  ["steps", "phases"]
   NUM_CLASSES: [32, 14]
   LOSS_FUNC: ["cross_entropy", "cross_entropy"]
-<<<<<<< HEAD
-  HEAD_ACT:  ["softmax" , "softmax"]
-  LOSS_WEIGHTS:  [1.0, 3.0]
-  METRICS: ["mAP", "mAP"]  
-  WEIGHT_LOSS_BY_CLASS: [False, "/data/dataset_analisis/tables/01_step_distribution.csv"]
-=======
   HEAD_ACT:  ["softmax", "softmax"]
   LOSS_WEIGHTS:  [1.0, 1.0]
   METRICS: ["mAP","mAP"]  
   WEIGHT_LOSS_BY_CLASS: [steps_distribution.csv, phases_distribution.csv]
   FOCAL_GAMMA: 2.0
   FOCAL_ALPHA_MODE: "auto"  # auto, manual, or None
->>>>>>> 1e80d8c (Phase information)
 DATA_LOADER:
   NUM_WORKERS: 5
   PIN_MEMORY: True

@@ -56,45 +56,40 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="Orsi-center"
-GPUIDS="1"
+NAME="Container"
+GPUIDS="0"
 
 DATASET="orsi"
 CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_LONG.yaml"
 OUTPUT_DIR="outputs/"$DATASET"/"$TASK"/"$NAME"/totale"
 
 #Change this variables if data is not located in ./data
-FRAME_DIR="/home/gchie/workspace/nas_private/data/orsi"
-FRAME_LIST="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frame_lists"
-ANNOT_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations"
-COCO_ANN_PATH="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations/grasp_long-term_"$TEST_FOLD".json"
-CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_models/fold1/"$TASK".pyth"
+FRAME_DIR="/data/orsi_tensors"
+FRAME_LIST="/data/coco"
+ANNOT_DIR="/data/coco"
+COCO_ANN_PATH="/data/coco/all_merged.json"
+CHECKPOINT="data/pretrained_models/fold1/LONG.pyth"
 
 #-------------------------
 # Run experiment
-export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/tapis:$PYTHONPATH
-export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/region_proposals:$PYTHONPATH
+export PYTHONPATH=/workspaces/thesis_giorgiochiesa/src/VU-Tapis/tapis:$PYTHONPATH
+export PYTHONPATH=/workspaces/thesis_giorgiochiesa/src/VU-Tapis/region_proposals:$PYTHONPATH
 export CUDA_VISIBLE_DEVICES=$GPUIDS
 
-# export $(cut -f1 .secret/.export_vars.txt)
-# echo "Using WANDB_API_KEY: $WANDB_API"
-# wandb login --relogin --key $WANDB_API
-# eval "$(mamba shell hook --shell bash)"
-# mamba activate Vu-Tapis
 mkdir -p $OUTPUT_DIR
 
 CUDA_VISIBLE_DEVICES=$GPUIDS python -B tools/run_net.py \
 --cfg $CONFIG_PATH \
-WANDB_ENABLE True \
+WANDB_ENABLE False \
 NAME $NAME \
 GPUIDS "[$GPUIDS]" \
 TRAIN.ACCUM_STEPS 10 \
-TRAIN.BATCH_SIZE 16 \
-TEST.BATCH_SIZE 60 \
+TRAIN.BATCH_SIZE 12 \
+TEST.BATCH_SIZE 24 \
 SOLVER.MAX_ITER 7000 \
 TRAIN.FREEZE_ENCODER False \
 OUTPUT_DIR $OUTPUT_DIR \
-ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/nas_private/data/orsi \
+ENDOVIS_DATASET.FRAME_DIR /data/orsi_tensors \
 ENDOVIS_DATASET.FRAME_LIST_DIR /data/coco \
 ENDOVIS_DATASET.TRAIN_LISTS "[$TRAIN_FOLDS_STR]" \
 ENDOVIS_DATASET.TEST_LISTS "[$TEST_FOLDS_STR]" \

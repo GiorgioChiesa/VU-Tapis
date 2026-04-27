@@ -2,6 +2,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 
 """Configs."""
+
 from fvcore.common.config import CfgNode
 
 from . import custom_config
@@ -51,7 +52,7 @@ _C.TRAIN.DATASET = "kinetics"
 # Total mini-batch size.
 _C.TRAIN.BATCH_SIZE = 64
 
-#Accumula il gradiente per n iterazioni prima di fare l'update
+# Accumula il gradiente per n iterazioni prima di fare l'update
 _C.TRAIN.ACCUM_STEPS = 1
 
 # Evaluate model on test data every eval period epochs.
@@ -145,12 +146,7 @@ _C.MULTIGRID.SHORT_CYCLE_FACTORS = [0.5, 0.5**0.5]
 
 _C.MULTIGRID.LONG_CYCLE = False
 # (Temporal, Spatial) dimensions relative to the default shape.
-_C.MULTIGRID.LONG_CYCLE_FACTORS = [
-    (0.25, 0.5**0.5),
-    (0.5, 0.5**0.5),
-    (0.5, 1),
-    (1, 1),
-]
+_C.MULTIGRID.LONG_CYCLE_FACTORS = [(0.25, 0.5**0.5), (0.5, 0.5**0.5), (0.5, 1), (1, 1)]
 
 # While a standard BN computes stats across all examples in a GPU,
 # for multigrid training we fix the number of clips to compute BN stats on.
@@ -285,7 +281,17 @@ _C.MODEL.NUM_CLASSES = 400
 _C.MODEL.LOSS_FUNC = "cross_entropy"
 
 # Model architectures that has one single pathway.
-_C.MODEL.SINGLE_PATHWAY_ARCH = ["2d", "c2d", "i3d", "slow", "x3d", "mvit", "mvitv2", "videoswintransformer", "transformerroihead"]
+_C.MODEL.SINGLE_PATHWAY_ARCH = [
+    "2d",
+    "c2d",
+    "i3d",
+    "slow",
+    "x3d",
+    "mvit",
+    "mvitv2",
+    "videoswintransformer",
+    "transformerroihead",
+]
 
 # Model architectures that has multiple pathways.
 _C.MODEL.MULTI_PATHWAY_ARCH = ["slowfast"]
@@ -468,7 +474,7 @@ _C.MVIT.RESIDUAL_POOLING = False
 _C.MVIT.SEPARATE_QKV = False
 
 # Hidden dimension of the MViT backbone. This is used to control the size of the memory tokens in TAPIS.
-_C.MVIT.D_MODEL = 768 # Not modify with dimension 224
+_C.MVIT.D_MODEL = 768  # Not modify with dimension 224
 
 # -----------------------------------------------------------------------------
 # Video Swin Transformer (VST) Configuration Options
@@ -510,7 +516,7 @@ _C.VST.NUM_HEADS = [4, 8, 16, 32]
 
 # Dropout rate for fully connected layers
 # Default: 0.0 (no dropout)
-_C.VST.DROP_RATE = 0.
+_C.VST.DROP_RATE = 0.0
 
 # Enables gradient checkpointing to save memory at the cost of computation
 _C.VST.USE_CHECKPOINT = False
@@ -527,7 +533,7 @@ _C.VST.QK_SCALE = None
 
 # Dropout rate for attention probabilities in the multi-head attention mechanism
 # Default: 0.0 (no dropout)
-_C.VST.ATTN_DROP_RATE = 0.
+_C.VST.ATTN_DROP_RATE = 0.0
 
 # Number of channels in the input video frames
 # Default: 3 for RGB input
@@ -579,7 +585,7 @@ _C.DATA.NUM_FRAMES = 8
 # The video sampling rate of the input clip.
 _C.DATA.SAMPLING_RATE = 8
 
-_C.DATA.SEQ_MODE = "center" # or "before" or "after"
+_C.DATA.SEQ_MODE = "center"  # or "before" or "after"
 
 # Eigenvalues for PCA jittering. Note PCA is RGB based.
 _C.DATA.TRAIN_PCA_EIGVAL = [0.225, 0.224, 0.229]
@@ -697,7 +703,7 @@ _C.SOLVER.LRS = []
 # Maximal number of epochs.
 _C.SOLVER.MAX_EPOCH = 300
 
-#Max iteration for epoch, if None, it will be automatically calculated by the number of samples and batch size.
+# Max iteration for epoch, if None, it will be automatically calculated by the number of samples and batch size.
 _C.SOLVER.MAX_ITER = None
 
 # Early stop if the metric does not improve for this many epochs. Note that the metric should be specified in the config file and higher is better.
@@ -829,10 +835,10 @@ _C.ENDOVIS_DATASET.FRAME_LIST_DIR = "/data"
 _C.ENDOVIS_DATASET.ANNOTATION_DIR = ""
 
 # Filenames of training samples list files.
-_C.ENDOVIS_DATASET.TRAIN_LISTS = ["train.csv",]
+_C.ENDOVIS_DATASET.TRAIN_LISTS = ["train.csv"]
 
 # Filenames of test samples list files.
-_C.ENDOVIS_DATASET.TEST_LISTS = ["val.csv",]
+_C.ENDOVIS_DATASET.TEST_LISTS = ["val.csv"]
 
 # Filenames of box list files for training. Note that we assume files which
 # contains predicted boxes will have a suffix "predicted_boxes" in the
@@ -877,7 +883,7 @@ _C.ENDOVIS_DATASET.GROUNDTRUTH_FILE = ""
 # Backend to process image, includes `pytorch` and `cv2`.
 _C.ENDOVIS_DATASET.IMG_PROC_BACKEND = "cv2"
 
-# Test annotation file of groundtruth in coco 
+# Test annotation file of groundtruth in coco
 _C.ENDOVIS_DATASET.TEST_COCO_ANNS = ""
 
 # Supported Tasks
@@ -946,7 +952,7 @@ _C.TASKS.MULTIPLE_CLS = False
 _C.TASKS.USE_VIDEO = True
 
 _C.TASKS.FOCAL_GAMMA = 2.0
-_C.TASKS.FOCAL_ALPHA_MODE= "auto" # auto, manual, or None
+_C.TASKS.FOCAL_ALPHA_MODE = "auto"  # auto, manual, or None
 
 # ---------------------------------------------------------------------------- #
 # FEATURES
@@ -960,13 +966,13 @@ _C.FEATURES.ENABLE = False
 # If false, it adapts to load the faster rcnn features.
 _C.FEATURES.DIM_FEATURES = 256
 
-_C.FEATURES.MODEL = 'detr'
+_C.FEATURES.MODEL = "detr"
 
 # Path to .pth file with the detected train boxes features
-_C.FEATURES.TRAIN_FEATURES_PATH = ''
+_C.FEATURES.TRAIN_FEATURES_PATH = ""
 
 # Path to .pth file with the detected validation boxes features
-_C.FEATURES.TEST_FEATURES_PATH = ''
+_C.FEATURES.TEST_FEATURES_PATH = ""
 
 # Use a Region Proposal Network to calculate region features on the fly instead of loading precalculated featrues
 _C.FEATURES.USE_RPN = False
@@ -975,7 +981,7 @@ _C.FEATURES.USE_RPN = False
 _C.FEATURES.RPN_CFG = CfgNode()
 
 # Path to config.yaml file for the Region Proposal Network
-_C.FEATURES.RPN_CFG_PATH = ''
+_C.FEATURES.RPN_CFG_PATH = ""
 
 # Use a precaulculated regions for test instead of RPN
 _C.FEATURES.PRECALCULATE_TEST = True
@@ -984,7 +990,7 @@ _C.FEATURES.PRECALCULATE_TEST = True
 _C.FEATURES.RPN_CHECKPOINT = ""
 
 
-#==============================================
+# ==============================================
 _C.MODEL.MEMORY_SAVING_RATE = 5
 
 # Memory bank size for temporal streaming. If >0 the model will keep a FIFO
@@ -995,7 +1001,7 @@ _C.MODEL.MEMORY_BANK_SIZE = 0
 
 _C.MAX_SAVE_VIDEO = 0
 
-#Additional configs for wandb logging
+# Additional configs for wandb logging
 _C.WANDB_ENABLE = False
 _C.NAME = "tapis_experiment"
 
@@ -1007,14 +1013,17 @@ def assert_and_infer_cfg(cfg):
     # BN assertions.
     if cfg.BN.USE_PRECISE_STATS:
         assert cfg.BN.NUM_BATCHES_PRECISE >= 0
-        
+
     # GPU assertion
-    cfg.NUM_GPUS = len(cfg.GPUIDS) 
+    cfg.NUM_GPUS = len(cfg.GPUIDS)
     cfg.NUM_SHARDS = cfg.NUM_GPUS
     import os, torch
+
     os.environ["CUDA_VISIBLE_DEVICES"] = str(cfg.GPUIDS)[1:-1].replace(" ", "")
     assert torch.cuda.is_available(), "Cuda is not available"
-    assert torch.cuda.device_count() == cfg.NUM_GPUS, f"Too many GPU required, {torch.cuda.device_count()} available, you ask {cfg.NUM_GPU}({cfg.GPUIDS})"
+    assert torch.cuda.device_count() == cfg.NUM_GPUS, (
+        f"Too many GPU required, {torch.cuda.device_count()} available, you ask {cfg.NUM_GPU}({cfg.GPUIDS})"
+    )
     # TRAIN assertions.
     assert cfg.TRAIN.CHECKPOINT_TYPE in ["pytorch", "caffe2"]
     assert cfg.NUM_GPUS == 0 or cfg.TRAIN.BATCH_SIZE % cfg.NUM_GPUS == 0
@@ -1034,10 +1043,10 @@ def assert_and_infer_cfg(cfg):
         cfg.SOLVER.WARMUP_START_LR *= cfg.NUM_SHARDS
         cfg.SOLVER.COSINE_END_LR *= cfg.NUM_SHARDS
 
-    for task in cfg.TASKS.TASKS:
-        if task == "steps":
-            cfg.TASKS.NUM_CLASSES[cfg.TASKS.TASKS.index(task)] = cfg.TASKS.NUM_CLASSES[cfg.TASKS.TASKS.index(task)] - len(cfg.ENDOVIS_DATASET.EXCLUDE_EVENT_NAMES)
-    
+    # for task in cfg.TASKS.TASKS:
+    #     if task == "steps":
+    #         cfg.TASKS.NUM_CLASSES[cfg.TASKS.TASKS.index(task)] = cfg.TASKS.NUM_CLASSES[cfg.TASKS.TASKS.index(task)] - len(cfg.ENDOVIS_DATASET.EXCLUDE_EVENT_NAMES)
+
     # General assertions.
     assert cfg.SHARD_ID < cfg.NUM_SHARDS
     return cfg

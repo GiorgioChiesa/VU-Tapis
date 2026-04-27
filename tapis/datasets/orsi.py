@@ -135,7 +135,7 @@ class Orsi(torch.utils.data.Dataset):
             # print(f"Distribution for task {task} before weight computation:\n{self.counter[task]}")
             # print(df)
             
-            assert self.counter[task]["total_count"].sum() == len(clip), f"Total count in distribution ({df['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
+            assert self.counter[task]["total_count"].sum() == len(clip), f"Total count in distribution ({self.counter[task]['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
             assert len(self.counter[task]) == self._num_classes[task] , f"Numero di classi non coincide"
             
             csv_path = os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class)

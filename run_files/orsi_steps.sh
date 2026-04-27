@@ -86,7 +86,7 @@ mkdir -p $OUTPUT_DIR
 
 CUDA_VISIBLE_DEVICES=$GPUIDS python -B tools/run_net.py \
 --cfg $CONFIG_PATH \
-WANDB_ENABLE True \
+WANDB_ENABLE False \
 NAME $NAME \
 GPUIDS "[$GPUIDS]" \
 TRAIN.ACCUM_STEPS 1 \

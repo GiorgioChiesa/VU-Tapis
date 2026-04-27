@@ -1,39 +1,47 @@
 # AGENTS.md - TAPIS Project Context
 
-## Project Overview
-TAPIS (Transformers for Actions, Phases, Steps and Instrument Segmentation) is a video understanding framework for surgical scene understanding from the GraSP benchmark. Uses MViT (Multiscale Vision Transformers) as backbone.
+## Execution Flow
 
-**Datasets supported**: Orsi, GraSP, EndoVis-2017, EndoVis-2018
-**Tasks**: Steps, Phases, Actions, Instruments, Segmentation
+```
+run_files/orsi_steps.sh
+  └── tools/run_net.py --cfg configs/Orsi/TAPIS/TAPIS_STEPS.yaml
+        └── train(cfg)            # tools/train_net.py:525
+              ├── build_model(cfg)  # tapis/models/build.py
+              ├── loader.construct_loader  # tapis/datasets/loader.py
+              ├── train_epoch()     # line 163
+              └── eval_epoch()     # line 400
+```
 
-## Quick Commands
+## Run Commands
 
 ```bash
-# Run experiment (from run_files/)
+# From run_files/ (uses bash scripts that configure paths and PYTHONPATH)
 bash run_files/orsi_steps.sh         # Orsi STEPS task
 bash run_files/orsi_phases.sh        # Orsi PHASES task
 bash run_files/grasp_long-term.sh   # GraSP long-term tasks
 
-# Direct execution
-python tools/run_net.py --cfg configs/Orsi/TAPIS/TAPIS_STEPS.yaml \
+# Direct execution (use -B to skip .pyc caching)
+python -B tools/run_net.py --cfg configs/Orsi/TAPIS/TAPIS_STEPS.yaml \
     TRAIN.ENABLE True TEST.ENABLE True \
     OUTPUT_DIR outputs/orsi/steps/run1
 ```
 
-## Required Environment Variables
+## Environment Setup
 
 ```bash
-export PYTHONPATH=/path/to/TAPIS/tapis:$PYTHONPATH
-export PYTHONPATH=/path/to/TAPIS/region_proposals:$PYTHONPATH
+# Required PYTHONPATH (set in run_files/*.sh)
+export PYTHONPATH=$TAPIS_DIR/tapis:$PYTHONPATH
+export PYTHONPATH=$TAPIS_DIR/region_proposals:$PYTHONPATH
+export CUDA_VISIBLE_DEVICES=1  # set GPU
 ```
 
 ## Architecture Layers
 
 | Layer | Entry Point | Description |
 |-------|-----------|-------------|
-| Shell | `run_files/*.sh` | Configures paths, patient splits |
+| Shell | `run_files/*.sh` | Generates patient splits, configures paths |
 | Main | `tools/run_net.py` | Parses args, loads config, calls train |
-| Training | `tools/train_net.py` | train(), train_epoch(), eval_epoch() |
+| Training | `tools/train_net.py` | train() (line 525), train_epoch() (line 163), eval_epoch() (line 400) |
 | Model | `tapis/models/build.py` | MODEL_REGISTRY.get(name)(cfg) |
 | Dataset | `tapis/datasets/build.py` | DATASET_REGISTRY.get(name)(cfg, split) |
 | Loader | `tapis/datasets/loader.py` | construct_loader(cfg, split) |

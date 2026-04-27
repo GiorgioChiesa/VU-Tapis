@@ -42,12 +42,22 @@ class Orsi(torch.utils.data.Dataset):
         self.cfg = cfg
         self._split = split
         self._sample_rate = cfg.DATA.SAMPLING_RATE
-        self._video_length = max(cfg.DATA.NUM_FRAMES, cfg.MODEL.MEMORY_BANK_SIZE) if split == "train" else cfg.DATA.NUM_FRAMES
+        self._video_length = (
+            max(cfg.DATA.NUM_FRAMES, cfg.MODEL.MEMORY_BANK_SIZE)
+            if split == "train"
+            else cfg.DATA.NUM_FRAMES
+        )
         self._seq_mode = cfg.DATA.SEQ_MODE
         self._seq_len = self._video_length * self._sample_rate
-        self._num_classes = {key: n_class for key, n_class in zip(cfg.TASKS.TASKS, cfg.TASKS.NUM_CLASSES)}
-        self._region_tasks = {task for task in cfg.TASKS.TASKS if task in cfg.ENDOVIS_DATASET.REGION_TASKS}
-        self._frame_tasks = {task for task in cfg.TASKS.TASKS if task not in cfg.ENDOVIS_DATASET.REGION_TASKS}
+        self._num_classes = {
+            key: n_class for key, n_class in zip(cfg.TASKS.TASKS, cfg.TASKS.NUM_CLASSES)
+        }
+        self._region_tasks = {
+            task for task in cfg.TASKS.TASKS if task in cfg.ENDOVIS_DATASET.REGION_TASKS
+        }
+        self._frame_tasks = {
+            task for task in cfg.TASKS.TASKS if task not in cfg.ENDOVIS_DATASET.REGION_TASKS
+        }
 
         # Augmentation params.
         self._data_mean = cfg.DATA.MEAN
@@ -67,13 +77,19 @@ class Orsi(torch.utils.data.Dataset):
             self._test_force_flip = cfg.ENDOVIS_DATASET.TEST_FORCE_FLIP
             self.aspect_ratio_th = cfg.ENDOVIS_DATASET.ASPECT_RATION_TH
 
-        #paths
-        self.video_root = getattr(cfg.ENDOVIS_DATASET, "ORSI_ROOT_DIR", cfg.ENDOVIS_DATASET.FRAME_DIR)
-        self.label_dir = getattr(cfg.ENDOVIS_DATASET, "ORSI_LABEL_DIR", cfg.ENDOVIS_DATASET.ANNOTATION_DIR)
+        # paths
+        self.video_root = getattr(
+            cfg.ENDOVIS_DATASET, "ORSI_ROOT_DIR", cfg.ENDOVIS_DATASET.FRAME_DIR
+        )
+        self.label_dir = getattr(
+            cfg.ENDOVIS_DATASET, "ORSI_LABEL_DIR", cfg.ENDOVIS_DATASET.ANNOTATION_DIR
+        )
         self.frame_folder = getattr(cfg.ENDOVIS_DATASET, "ORSI_FRAME_FOLDER", "Video_1fps")
         self.frame_folder_alternatives = [self.frame_folder, "IMAGES"]
         self.label_folder = getattr(cfg.ENDOVIS_DATASET, "ORSI_LABEL_FOLDER", "Label")
-        self.exclude_event_names = {name.strip().lower() for name in getattr(cfg.ENDOVIS_DATASET, "EXCLUDE_EVENT_NAMES", [])}
+        self.exclude_event_names = {
+            name.strip().lower() for name in getattr(cfg.ENDOVIS_DATASET, "EXCLUDE_EVENT_NAMES", [])
+        }
         self.image_type = getattr(cfg.ENDOVIS_DATASET, "ORSI_IMAGE_TYPE", "pt")
 
         # Store loaded data
@@ -83,11 +99,12 @@ class Orsi(torch.utils.data.Dataset):
         self.dfs = pd.DataFrame()
         self.filtered_dfs = None
         self.clips = []
-        
+
         if self.video_root not in sys.path:
             sys.path.insert(0, self.video_root)
         try:
             from events_lists import mapping_events_name_to_id, mapping_phases_name_to_id
+
             self.event_name2idx = mapping_events_name_to_id
             self.phase_name2idx = mapping_phases_name_to_id
             self.event_idx2name = {v: k for k, v in mapping_events_name_to_id.items()}
@@ -101,47 +118,55 @@ class Orsi(torch.utils.data.Dataset):
             if any(self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS):
                 self.generate_weight_vector()
                 self.remapping_local_id()
-            
+
     def remapping_local_id(self):
-        map_task={"steps": "event", "phases": "phase"}
+        map_task = {"steps": "event", "phases": "phase"}
         for task in self.cfg.TASKS.TASKS:
             id_map = dict(zip(self.counter[task]["id"], range(len(self.counter[task]))))
-            self.filtered_dfs[f"{map_task[task]}_id"] = self.filtered_dfs[f"{map_task[task]}_id"].map(id_map).fillna(0)
-        
-    
+            self.filtered_dfs[f"{map_task[task]}_id"] = (
+                self.filtered_dfs[f"{map_task[task]}_id"].map(id_map).fillna(0)
+            )
+
     def generate_weight_vector(self):
-        map_task={"steps": "event", "phases": "phase"}
+        map_task = {"steps": "event", "phases": "phase"}
         self.counter = {}
-        for task, weight_loss_by_class in zip(self.cfg.TASKS.TASKS, self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS):
-            
+        for task, weight_loss_by_class in zip(
+            self.cfg.TASKS.TASKS, self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS
+        ):
             clip = self.filtered_dfs.copy() if self.filtered_dfs is not None else self.dfs.copy()
-            
+
             his = []
             mapping = self.event_idx2name if task == "steps" else self.phase_idx2name
             for id, event in mapping.items():
-                if event.strip().lower().replace(" ","_") in self.exclude_event_names:
+                if event.strip().lower().replace(" ", "_") in self.exclude_event_names:
                     continue
-                his.append({
-                    "id": id,
-                    "name": event,
-                    "total_count": sum(clip["event_id"]==id),
-                })
+                his.append(
+                    {
+                        "id": id,
+                        "name": event,
+                        "total_count": sum(clip[f"{map_task[task]}_id"] == id),
+                    }
+                )
             self.counter[task] = pd.DataFrame(his)
-            
+
             # if "total_count" not in list(clip.columns):
             #     clip.insert(len(clip.columns), "total_count",[0]*len(clip))
-                
+
             # df = clip.groupby([f"{map_task[task]}_id",f"{map_task[task]}_name"])['total_count'].agg('count').reset_index()
             # print(f"Distribution for task {task} before weight computation:\n{self.counter[task]}")
             # print(df)
-            
-            assert self.counter[task]["total_count"].sum() == len(clip), f"Total count in distribution ({self.counter[task]['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
-            assert len(self.counter[task]) == self._num_classes[task] , f"Numero di classi non coincide"
-            
-            csv_path = os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class)
+
+            assert self.counter[task]["total_count"].sum() <= len(clip), (
+                f"Total count in distribution ({self.counter[task]['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
+            )
+            assert len(self.counter[task]) == self._num_classes[task], (
+                f"Numero di classi non coincide, deve essere: {len(self.counter[task])}"
+            )
+
             print(f"Weight loss by class for task {task} -- {self._split}:\n{self.counter[task]}")
-            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-            if self._split == "train":
+            if weight_loss_by_class and self._split == "train":
+                csv_path = os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class)
+                os.makedirs(os.path.dirname(csv_path), exist_ok=True)
                 self.counter[task].to_csv(csv_path, index=False)
 
     def _list_patient_ids(self):
@@ -173,11 +198,15 @@ class Orsi(torch.utils.data.Dataset):
         candidates = []
         if self.label_dir:
             candidates += [
-                os.path.join(self.video_root, patient, self.label_folder, f"{patient}_all_labels.csv"),
+                os.path.join(
+                    self.video_root, patient, self.label_folder, f"{patient}_all_labels.csv"
+                )
             ]
         if self.video_root:
             candidates += [
-                os.path.join(self.video_root, patient, self.label_folder, f"{patient}_all_labels.csv"),
+                os.path.join(
+                    self.video_root, patient, self.label_folder, f"{patient}_all_labels.csv"
+                )
             ]
 
         for path in candidates:
@@ -197,15 +226,127 @@ class Orsi(torch.utils.data.Dataset):
 
             df = pd.read_csv(label_path)
             dfs.append(df)
-            
-        self.dfs = pd.concat(dfs, ignore_index=True) 
-        if self.exclude_event_names: #TODO: pensare se filtrare solo nel train !!!
-            self.filtered_dfs = self.dfs[~self.dfs["event_name"].str.strip().str.lower().str.replace(" ", "_").isin(self.exclude_event_names)].reset_index(drop=True)
+
+        self.dfs = pd.concat(dfs, ignore_index=True)
+        if self.exclude_event_names:  # TODO: pensare se filtrare solo nel train !!!
+            self.filtered_dfs = self.dfs[
+                ~self.dfs["event_name"]
+                .str.strip()
+                .str.lower()
+                .str.replace(" ", "_")
+                .isin(self.exclude_event_names)
+            ].reset_index(drop=True)
         else:
             self.filtered_dfs = self.dfs.copy()
+
+        self.collapse_event_dfs()
+
         saving = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
         saving.to_csv(os.path.join(self.cfg.OUTPUT_DIR, f"{self._split}_data.csv"), index=False)
-        return   
+
+        return
+
+    def collapse_event_dfs(self):
+        """
+        Collapse multiple events into one by mapping certain event names to others.
+
+        Mapping rules:
+        - Instrument_swap:_removal -> Removal_of_robotic_instruments
+        - Hemolock_clip_on_right_pedicle -> Metal_clip_on_right_pedicle
+        - Hemolock_clip_on_left_pedicle -> Metal_clip_on_left_pedicle
+        - Events with 'left'/'right' in name are collapsed to the same event
+          (e.g., 'Clip_on_left_pedicle' and 'Clip_on_right_pedicle' become the same)
+        """
+        dfs = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
+
+        # Define explicit collapse mappings: source_event -> target_event
+        collapse_mapping = {
+            "instrument_swap:_removal": "removal_of_robotic_instruments",
+            "hemolock_clip_on_right_pedicle": "metal_clip_on_right_pedicle",
+            "hemolock_clip_on_left_pedicle": "metal_clip_on_left_pedicle",
+            "insert_gauze": "insert_hemostatic_agens",
+        }
+
+        # Get unique events from the dataframe
+        unique_events = dfs[["event_id", "event_name"]].drop_duplicates()
+
+        # Create a lookup for event IDs by normalized name
+        event_lookup = {}
+        for _, row in unique_events.iterrows():
+            normalized_name = str(row["event_name"]).strip().lower().replace(" ", "_")
+            event_lookup[normalized_name] = {
+                "event_id": row["event_id"],
+                "event_name": row["event_name"],
+            }
+
+        # Apply explicit collapse mapping
+        for source_name, target_name in collapse_mapping.items():
+            if target_name in event_lookup:
+                target_event = event_lookup[target_name]
+                self.exclude_event_names.add(source_name)
+                mask = (
+                    dfs["event_name"].str.strip().str.lower().str.replace(" ", "_") == source_name
+                )
+                if mask.any():
+                    dfs.loc[mask, "event_id"] = target_event["event_id"]
+                    dfs.loc[mask, "event_name"] = target_event["event_name"]
+                    print(f"Collapsed '{source_name}' -> '{target_name}' ({mask.sum()} rows)")
+            else:
+                print(f"Warning: Target event '{target_name}' not found in dataset")
+
+        # Collapse events that differ only by left/right
+        # Group events by base name (without left/right)
+        left_right_groups = {}
+        for _, row in unique_events.iterrows():
+            normalized_name = str(row["event_name"]).strip().lower().replace(" ", "_")
+            # Remove left/right prefixes/suffixes to get base name
+            base_name = normalized_name.replace("_left", "").replace("_right", "")
+            base_name = base_name.replace("left_", "").replace("right_", "")
+
+            if base_name not in left_right_groups:
+                left_right_groups[base_name] = []
+            left_right_groups[base_name].append(
+                {
+                    "original_name": normalized_name,
+                    "event_id": row["event_id"],
+                    "event_name": row["event_name"],
+                }
+            )
+
+        # For each group with multiple variants, collapse to one (prefer "right" or lower ID)
+        for base_name, variants in left_right_groups.items():
+            if len(variants) > 1:
+                # Check if variants actually differ by left/right
+                has_left = any("left" in v["original_name"] for v in variants)
+                has_right = any("right" in v["original_name"] for v in variants)
+
+                if has_left and has_right:
+                    # Prefer "right" variant, otherwise use lowest ID
+                    target = next(
+                        (v for v in variants if "right" in v["original_name"]),
+                        min(variants, key=lambda x: x["event_id"]),
+                    )
+
+                    # Collapse all variants to target
+                    for variant in variants:
+                        if variant["event_id"] != target["event_id"]:
+                            self.exclude_event_names.add(variant["original_name"])
+                            mask = (
+                                dfs["event_name"].str.strip().str.lower().str.replace(" ", "_")
+                                == variant["original_name"]
+                            )
+                            if mask.any():
+                                dfs.loc[mask, "event_id"] = target["event_id"]
+                                dfs.loc[mask, "event_name"] = target["event_name"]
+                                print(
+                                    f"Collapsed left/right '{variant['original_name']}' -> '{target['original_name']}' ({mask.sum()} rows)"
+                                )
+
+        # Update filtered_dfs with the modified dataframe
+        if self.filtered_dfs is not None:
+            self.filtered_dfs = dfs
+        else:
+            self.dfs = dfs
 
     def _select_center_label(self, patient, frame_ids, seq):
         n = len(frame_ids)
@@ -271,14 +412,11 @@ class Orsi(torch.utils.data.Dataset):
             boxes = np.zeros((1, 4))
         boxes = cv2_transform.clip_boxes_to_image(boxes, height, width)
 
-        boxes = [boxes.astype('float')]
+        boxes = [boxes.astype("float")]
 
         if self._split == "train" and not self.cfg.DATA.JUST_CENTER:
             imgs, boxes = cv2_transform.random_short_side_scale_jitter_list(
-                imgs,
-                min_size=self._jitter_min_scale,
-                max_size=self._jitter_max_scale,
-                boxes=boxes,
+                imgs, min_size=self._jitter_min_scale, max_size=self._jitter_max_scale, boxes=boxes
             )
             imgs, boxes, image = cv2_transform.random_crop_list(
                 imgs, self._crop_size, order="HWC", boxes=boxes, image=image
@@ -297,36 +435,27 @@ class Orsi(torch.utils.data.Dataset):
 
         elif self._split == "val" or self.cfg.DATA.JUST_CENTER:
             imgs = [cv2_transform.scale(self._crop_size[0], img) for img in imgs]
-            boxes = [
-                cv2_transform.scale_boxes(
-                    self._crop_size[0], boxes[0], height, width
-                )
-            ]
+            boxes = [cv2_transform.scale_boxes(self._crop_size[0], boxes[0], height, width)]
             imgs, boxes, _ = cv2_transform.spatial_shift_crop_list(
                 self._crop_size, imgs, 1, boxes=boxes, image=None
             )
 
-            ori_aspect_ratio = (width / height)
-            crop_aspect_ratio = (self.cfg.DATA.TEST_CROP_SIZE_LARGE / self.cfg.DATA.TEST_CROP_SIZE)
-            assert (
-                image is None
-                or ori_aspect_ratio - crop_aspect_ratio < self.aspect_ratio_th
-            ), f"Test aspect ratio difference is too large for inference with RPN"
+            ori_aspect_ratio = width / height
+            crop_aspect_ratio = self.cfg.DATA.TEST_CROP_SIZE_LARGE / self.cfg.DATA.TEST_CROP_SIZE
+            assert image is None or ori_aspect_ratio - crop_aspect_ratio < self.aspect_ratio_th, (
+                f"Test aspect ratio difference is too large for inference with RPN"
+            )
 
             if not self.cfg.DATA.JUST_CENTER and self._test_force_flip:
                 if image is not None:
                     imgs.append(image)
 
-                imgs, boxes = cv2_transform.horizontal_flip_list(
-                    1, imgs, order="HWC", boxes=boxes
-                )
+                imgs, boxes = cv2_transform.horizontal_flip_list(1, imgs, order="HWC", boxes=boxes)
 
                 if image is not None:
                     image = imgs.pop()
         else:
-            raise NotImplementedError(
-                "Unsupported split mode {}".format(self._split)
-            )
+            raise NotImplementedError("Unsupported split mode {}".format(self._split))
 
         imgs = [cv2_transform.HWC2CHW(img) for img in imgs]
         imgs = [img / 255.0 for img in imgs]
@@ -334,10 +463,7 @@ class Orsi(torch.utils.data.Dataset):
         if self._split == "train" and self._use_color_augmentation:
             if not self._pca_jitter_only:
                 imgs = cv2_transform.color_jitter_list(
-                    imgs,
-                    img_brightness=0.4,
-                    img_contrast=0.4,
-                    img_saturation=0.4,
+                    imgs, img_brightness=0.4, img_contrast=0.4, img_saturation=0.4
                 )
 
             imgs = cv2_transform.lighting_list(
@@ -363,9 +489,7 @@ class Orsi(torch.utils.data.Dataset):
 
         imgs = np.ascontiguousarray(imgs)
         imgs = torch.from_numpy(imgs)
-        boxes = cv2_transform.clip_boxes_to_image(
-            boxes[0], imgs[0].shape[1], imgs[0].shape[2]
-        )
+        boxes = cv2_transform.clip_boxes_to_image(boxes[0], imgs[0].shape[1], imgs[0].shape[2])
         if image is not None:
             image = cv2_transform.BGR2RGB(image)
             image = cv2_transform.HWC2CHW(image)
@@ -376,7 +500,7 @@ class Orsi(torch.utils.data.Dataset):
         clip = self.filtered_dfs.iloc[idx] if self.filtered_dfs is not None else self.dfs.iloc[idx]
 
         df = self.dfs[self.dfs["patient_id"] == clip["patient_id"]]
-        
+
         seq = utils.get_sequence(
             df["frame_id"].to_list().index(clip["frame_id"]),
             self._seq_len,
@@ -384,12 +508,14 @@ class Orsi(torch.utils.data.Dataset):
             num_frames=len(df),
             mode=self._seq_mode,
         )
-        
+
         # Load all clip frames
         image_paths = df.iloc[seq]["frame_path"].to_list()
-        
-        imgs = utils.retry_load_images([os.path.join(self.video_root, path) for path in image_paths],
-                                       backend=self.cfg.ENDOVIS_DATASET.IMG_PROC_BACKEND)
+
+        imgs = utils.retry_load_images(
+            [os.path.join(self.video_root, path) for path in image_paths],
+            backend=self.cfg.ENDOVIS_DATASET.IMG_PROC_BACKEND,
+        )
         if isinstance(imgs, list):
             imgs = torch.as_tensor(np.stack(imgs))
 
@@ -421,30 +547,29 @@ class Orsi(torch.utils.data.Dataset):
 
         return [imgs], all_labels, extra_data, frame_identifier
 
-
-
     def keyframe_mapping(self, video_idx, sec_idx, sec):
-        return round(sec/60)
+        return round(sec / 60)
         try:
             video_name = self._video_idx_to_name[video_idx]
             if video_name in self.fps_videos:
                 return sec
-            elif video_name=='CASE014':
-                complete_name = '{}/{}.{}'.format(video_name, str(sec).zfill(self.zero_fill), self.image_type)
-                complete_path = os.path.join(self.cfg.ENDOVIS_DATASET.FRAME_DIR,complete_name)
+            elif video_name == "CASE014":
+                complete_name = "{}/{}.{}".format(
+                    video_name, str(sec).zfill(self.zero_fill), self.image_type
+                )
+                complete_path = os.path.join(self.cfg.ENDOVIS_DATASET.FRAME_DIR, complete_name)
                 return self._image_paths[video_idx].index(complete_path)
             else:
-                return round((sec*30)/45) 
+                return round((sec * 30) / 45)
         except:
             breakpoint()
-    
+
     def frame_name_spliting(self, video_name, sec):
-        video_num = int(video_name.replace('RARP',''))
-        return [video_num,sec]
-    
+        video_num = int(video_name.replace("RARP", ""))
+        return [video_num, sec]
+
     def frame_num_joining(self, video_num, sec):
-        return f'RARP{video_num:03d}/{sec:0{self.zero_fill}d}.{self.image_type}'
-    
+        return f"RARP{video_num:03d}/{sec:0{self.zero_fill}d}.{self.image_type}"
+
     def frame_name_joining(self, video_name, sec):
         return f"{video_name}/IMAGES/{sec:0{self.zero_fill}d}.{self.image_type}"
-        

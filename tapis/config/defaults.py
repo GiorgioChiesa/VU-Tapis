@@ -1046,7 +1046,6 @@ def assert_and_infer_cfg(cfg):
     # for task in cfg.TASKS.TASKS:
     #     if task == "steps":
     #         cfg.TASKS.NUM_CLASSES[cfg.TASKS.TASKS.index(task)] = cfg.TASKS.NUM_CLASSES[cfg.TASKS.TASKS.index(task)] - len(cfg.ENDOVIS_DATASET.EXCLUDE_EVENT_NAMES)
-
     # General assertions.
     assert cfg.SHARD_ID < cfg.NUM_SHARDS
     return cfg

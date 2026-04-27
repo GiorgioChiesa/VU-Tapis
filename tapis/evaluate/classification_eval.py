@@ -81,10 +81,14 @@ def eval_classification(task, coco_anns, preds, **kwargs):
     # ap = {}
     # auc = {}
     # acc = {}
-    plt.imsave(os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_labels_{task}.png"), bin_labels)
-    plt.imsave(os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_preds_{task}.png"), bin_preds)
-    plt.imsave(os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_preds_{task}>0.5.png"), bin_preds>0.5)
-    plt.imsave(os.path.join(kwargs.get("output_dir", "./temp"), f"{mode}_preds_{task}_argmax.png"), label_binarize(bin_preds.argmax(axis=1), classes=list(range(0, num_classes))))
+    saving_dir = os.path.join(kwargs.get("output_dir", "./temp"), "saved_arrays")
+    os.makedirs(saving_dir, exist_ok=True)
+    plt.imsave(os.path.join(saving_dir, f"{mode}_labels_{task}.png"), bin_labels)
+    plt.imsave(os.path.join(saving_dir, f"{mode}_preds_{task}.png"), bin_preds)
+    # threshold = kwargs.get("threshold", 0.5)
+    threshold = 1 / max(int(num_classes*0.6),2)
+    plt.imsave(os.path.join(saving_dir, f"{mode}_preds_{task}>{threshold}.png"), bin_preds>threshold)
+    plt.imsave(os.path.join(saving_dir, f"{mode}_preds_{task}_argmax.png"), label_binarize(bin_preds.argmax(axis=1), classes=list(range(0, num_classes))))
     
     
     #TODO: discomment for all metrics, for now only AP to speed up
@@ -195,17 +199,17 @@ def save_missmatches(preds, labels, task, class_name, output_dir="./temp", img_a
             prev_status = curr_status
         length +=1     
             
-    mismatch_path = os.path.join(output_dir,"missmatches", f"{task}.json")
+    mismatch_path = os.path.join(output_dir,task, f"{task}_missmatches.json")
     os.makedirs(os.path.dirname(mismatch_path), exist_ok=True)
     with open(mismatch_path, 'w') as f:
         json.dump(mismatches, f, indent=4)
     maxCounter = Counter([im.split("/")[1] for im in img_ann_dict])
     plot_video_missmatches(mismatches_by_video, task, output_dir, maxCounter=maxCounter, **kwargs)
-    export_missmatches_per_classes(preds, labels, class_name, task, output_dir=os.path.join(output_dir,task))
+    export_missmatches_per_classes(preds, labels, class_name, task, output_dir)
     
     if imgs_folder is not None:
         max_save_video = kwargs.get("max_save_video", 0)
-        save_missmatches_videos(mismatches, output_dir, imgs_folder, max_save_video,  **kwargs)
+        save_missmatches_videos(mismatches, os.path.join(output_dir,task), imgs_folder, max_save_video,  **kwargs)
    
    
 def export_missmatches_per_classes(preds, labels, class_name, task, output_dir="./temp"):
@@ -236,7 +240,7 @@ def export_missmatches_per_classes(preds, labels, class_name, task, output_dir="
     
     # Export to CSV
     df = pd.DataFrame(data)
-    csv_path = os.path.join(output_dir, f"{task}_per_class_metrics.csv")
+    csv_path = os.path.join(output_dir, task, f"{task}_per_class_metrics.csv")
     os.makedirs(os.path.dirname(csv_path), exist_ok=True)
     df.to_csv(csv_path, index=False)
     
@@ -260,7 +264,7 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0
         errors_by_type[error_key].append(mismatch)
     
     # Process each error type
-    for error_type, error_mismatches in errors_by_type.items():
+    for error_type, error_mismatches in tqdm(errors_by_type.items(), total=len(errors_by_type), desc="Processing Mismatches"):
         error_dir = os.path.join(output_dir, "missmatches", error_type)
         os.makedirs(error_dir, exist_ok=True)
         video_saved = 0        
@@ -275,7 +279,7 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0
             by_video[video].append(mismatch)
         
         # Process each video
-        for video, video_mismatches in by_video.items():
+        for video, video_mismatches in tqdm(by_video.items(), total=len(by_video), desc=f"{video}:", leave=False):
             # Sort by index
             video_mismatches = sorted(video_mismatches, key=lambda x: x['idx'])
             
@@ -334,12 +338,15 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0
                         fps=1.0,
                         codec='libx264',
                         quality=None,
-                        output_params=['-movflags', 'faststart', '-pix_fmt', 'yuv420p']
+                        output_params=['-movflags', 'faststart']
                     )
 
                     for frame in frames:
                         # imageio vuole RGB, OpenCV usa BGR
                         frame_rgb = frame[:, :, ::-1]
+                        # Convert float32 [0,1] to uint8 [0,255] to avoid lossy conversion warning
+                        if frame_rgb.dtype == np.float32 or frame_rgb.dtype == np.float64:
+                            frame_rgb = (frame_rgb * 255).astype(np.uint8)
                         writer.append_data(frame_rgb)
 
                     writer.close()
@@ -352,52 +359,52 @@ def save_missmatches_videos(mismatches, output_dir, imgs_folder, max_video:int=0
             
             
 def loadpadding_frames(imgs_folder, frames, video, time_window=16, mode="center", csv_folder=None):
-    try:
-        regexcsv_path = os.path.join(csv_folder,"**", video, "**","*all*.csv")
-        csv_path = glob(regexcsv_path, recursive=True)
-        assert len(csv_path)==1, f"Expected exactly one CSV file for video {video}, regex: {regexcsv_path}, found: {csv_path}"
-        csv_path = csv_path[0]
-        list_frames = pd.read_csv(csv_path)["frame_path"].tolist()
-        frame_idxs = [list_frames.index(frame['image_name']) for frame in frames]
-        
+    def get_time_range(indices):
         if mode == "center":
-            start_idx = frame_idxs[0] - time_window // 2
-            end_idx = frame_idxs[-1] + time_window // 2
+            start_idx = indices[0] - time_window // 2
+            end_idx = indices[-1] + time_window // 2
         elif mode == "right":
-            start_idx = frame_idxs[0]
-            end_idx = frame_idxs[-1] + time_window
+            start_idx = indices[0]
+            end_idx = indices[-1] + time_window
         elif mode == "left":
-            start_idx = frame_idxs[0] - time_window
-            end_idx = frame_idxs[-1]
-        
-        frame_idxs = [r if r>0 else 0 for r in range(start_idx, end_idx)]
-        frames_list = [list_frames[i] for i in frame_idxs]
-        frames = [load_frame(os.path.join(imgs_folder, f)) for f in frames_list]
-        return frames
-    
-    except Exception as e:
-        path = os.path.join(imgs_folder, frames[0]['image_name'])
-        list_frames = sorted(os.listdir(os.path.dirname(path)))
-        frame_idxs = [list_frames.index(os.path.basename(frame['image_name'])) for frame in frames]
+            start_idx = indices[0] - time_window
+            end_idx = indices[-1]
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
+        return max(start_idx, 0), max(end_idx, 0)
 
-    
-        if mode == "center":
-            start_idx = frame_idxs[0] - time_window // 2
-            end_idx = frame_idxs[-1] + time_window // 2
-        elif mode == "right":
-            start_idx = frame_idxs[0]
-            end_idx = frame_idxs[-1] + time_window
-        elif mode == "left":
-            start_idx = frame_idxs[0] - time_window
-            end_idx = frame_idxs[-1]
+    def load_frames(base_dir, frame_paths):
+        return [load_frame(os.path.join(base_dir, f)) for f in frame_paths]
 
-        frame_idxs = [r if r>0 else 0 for r in range(start_idx, end_idx)]
-        frames_list = [list_frames[i] for i in frame_idxs]
-        frames = [load_frame(os.path.join(os.path.dirname(path), f)) for f in frames_list]
-        return frames
+    def build_frame_list_from_dir(base_dir):
+        path = os.path.join(base_dir, frames[0]["image_name"])
+        directory = os.path.dirname(path)
+        list_frames = sorted(os.listdir(directory))
+        frame_idxs = [list_frames.index(os.path.basename(frame["image_name"])) for frame in frames]
+        start_idx, end_idx = get_time_range(frame_idxs)
+        return directory, list_frames[start_idx:end_idx]
+
+    if csv_folder:
+        try:
+            regexcsv_path = os.path.join(csv_folder, "**", video, "**", "*all*.csv")
+            csv_paths = glob(regexcsv_path, recursive=True)
+            assert len(csv_paths) == 1, (
+                f"Expected exactly one CSV file for video {video}, regex: {regexcsv_path}, found: {csv_paths}"
+            )
+            list_frames = pd.read_csv(csv_paths[0])["frame_path"].tolist()
+            frame_idxs = [list_frames.index(frame["image_name"]) for frame in frames]
+            start_idx, end_idx = get_time_range(frame_idxs)
+            return load_frames(imgs_folder, list_frames[start_idx:end_idx])
+        except Exception:
+            print(f"Could not load frames from CSV for video {video}, falling back to directory listing.")
+            pass
+
+    directory, frames_list = build_frame_list_from_dir(imgs_folder)
+    return [load_frame(os.path.join(directory, f)) for f in frames_list]
 
 
 def load_frame(frame_path):
+    frame_path = frame_path.replace("/orsi_tensors/orsi_tensors/","/orsi_tensors/")
     try:
         frame = cv2.imread(frame_path)
         if frame is not None:
@@ -453,7 +460,7 @@ def plot_video_missmatches(mismatches_by_video:dict, task:str, output_dir:str=".
         ax.legend(['Correct', 'Mismatch'], loc='upper right')
         
         # Save plot
-        plot_path = os.path.join(output_dir, "missmatches", f"{task}_frames_plot.png")
+        plot_path = os.path.join(output_dir, task,f"{task}_missmatches_frames_plot.png")
         os.makedirs(os.path.dirname(plot_path), exist_ok=True)
         plt.savefig(plot_path, dpi=100, bbox_inches='tight')
         plt.close(fig)

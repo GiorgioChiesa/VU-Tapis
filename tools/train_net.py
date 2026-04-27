@@ -310,26 +310,20 @@ def train_epoch(train_loader, model, optimizer, scaler, train_meter, cur_epoch, 
                     raise RuntimeError("Loss is NaN or Inf - training diverged")
 
                 # Log predictions diagnostics
-                preds_classes = preds[cfg.TASKS.TASKS[0]].argmax(1)
-                labels_tensor = labels[cfg.TASKS.TASKS[0]]
-                unique_preds = torch.unique(preds_classes)
-                unique_labels = torch.unique(labels_tensor)
-                logger.info(
-                    f"[Iter {cur_iter}] Unique pred classes: {len(unique_preds)}, values: {unique_preds[:10].tolist()}"
-                )
-                logger.info(
-                    f"[Iter {cur_iter}] Unique label classes: {len(unique_labels)}, values: {unique_labels[:10].tolist()}"
-                )
-
+                # preds_classes = preds[cfg.TASKS.TASKS[0]].argmax(1)
+                # labels_tensor = labels[cfg.TASKS.TASKS[0]]
+                # unique_preds = torch.unique(preds_classes)
+                # unique_labels = torch.unique(labels_tensor)
+                # logger.info(f"[Iter {cur_iter}] Unique pred classes: {len(unique_preds)}, values: {unique_preds[:10].tolist()}")
+                # logger.info(f"[Iter {cur_iter}] Unique label classes: {len(unique_labels)}, values: {unique_labels[:10].tolist()}")
+                
                 # Log logits diagnostics for each task
-                for task in tasks:
-                    max_logit = preds[task].abs().max().item()
-                    min_logit = preds[task].min().item()
-                    mean_logit = preds[task].mean().item()
-                    logger.info(
-                        f"[Iter {cur_iter}] Task '{task}': max|logit|={max_logit:.4f}, min_logit={min_logit:.4f}, mean_logit={mean_logit:.6f}, loss={final_loss:.6f}"
-                    )
-
+                # for task in tasks:
+                #     max_logit = preds[task].abs().max().item()
+                #     min_logit = preds[task].min().item()
+                #     mean_logit = preds[task].mean().item()
+                #     logger.info(f"[Iter {cur_iter}] Task '{task}': max|logit|={max_logit:.4f}, min_logit={min_logit:.4f}, mean_logit={mean_logit:.6f}, loss={final_loss:.6f}")
+            
             # Perform the backward pass first
             scaler.scale(final_loss / cfg.TRAIN.ACCUM_STEPS).backward()  # normalizza il loss
 
@@ -358,25 +352,21 @@ def train_epoch(train_loader, model, optimizer, scaler, train_meter, cur_epoch, 
                 optimizer.zero_grad()
 
                 # Debug: log if parameters are actually being updated
-                if cur_iter % 100 == 0:
-                    first_param = next(model.parameters())
-                    logger.info(
-                        f"[Iter {cur_iter}] First param mean: {first_param.mean().item():.8f}, std: {first_param.std().item():.8f}"
-                    )
-
+                # if cur_iter % 100 == 0:
+                #     first_param = next(model.parameters())
+                #     logger.info(f"[Iter {cur_iter}] First param mean: {first_param.mean().item():.8f}, std: {first_param.std().item():.8f}")
+            
             if cfg.NUM_GPUS > 1:
                 final_loss = du.all_reduce([final_loss])[0]
             final_loss = final_loss.item()
 
             # Update and log stats.
-            train_meter.update_stats(
-                preds=preds,
-                names=image_names,
-                labels=labels,
-                final_loss=final_loss,
-                losses=[window_loss_items[-1]],
-                lr=lr,
-            )
+            train_meter.update_stats(preds = preds,
+                                     names=image_names,
+                                     labels=labels,
+                                     final_loss=final_loss,
+                                     losses=window_loss_items, 
+                                     lr=lr)
             train_meter.iter_toc()  # measure allreduce for this meter
             stats = train_meter.log_iter_stats(cur_epoch, cur_iter)
             train_meter.iter_tic()

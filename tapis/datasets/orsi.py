@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 
-import itertools
-import logging
 import os
 import sys
+from pathlib import Path
+
+_repo_root = Path(__file__).parent.parent.parent
+if __name__ == "__main__":
+    os.chdir(str(_repo_root))
+for _p in [str(_repo_root), str(_repo_root / "tapis"), str(_repo_root / "region_proposals"), str(_repo_root / "detectron2")]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+import itertools
+import logging
 from copy import deepcopy
 
 import numpy as np
@@ -242,6 +251,8 @@ class Orsi(torch.utils.data.Dataset):
 
         self.collapse_event_dfs()
 
+        self._add_idle_frames()
+
         saving = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
         saving.to_csv(os.path.join(self.cfg.OUTPUT_DIR, f"{self._split}_data.csv"), index=False)
 
@@ -348,6 +359,78 @@ class Orsi(torch.utils.data.Dataset):
             self.filtered_dfs = dfs
         else:
             self.dfs = dfs
+
+    def _add_idle_frames(self):
+        num_idle_frames = getattr(self.cfg.ENDOVIS_DATASET, "ADD_IDLE", 0)
+        if num_idle_frames <= 0:
+            return
+
+        idle_seconds_needed = 30
+        idle_frames = []
+
+        selected_frame_ids = set()
+
+        for patient in self._list_patient_ids():
+            patient_df = self.dfs[self.dfs["patient_id"] == patient].copy()
+            if len(patient_df) == 0:
+                continue
+
+            patient_df = patient_df.sort_values("frame_id").reset_index(drop=True)
+
+            idle_rows = patient_df[patient_df["event_name"].str.strip().str.lower() == "idle"]
+
+            if idle_rows.empty:
+                continue
+
+            non_idle_events = self.filtered_dfs[self.filtered_dfs["patient_id"] == patient][
+                "frame_id"
+            ].values
+
+            valid_idle_rows = []
+            for _, row in idle_rows.iterrows():
+                frame_id = row["frame_id"]
+
+                too_close = False
+                for event_frame_id in non_idle_events:
+                    if abs(event_frame_id - frame_id) <= idle_seconds_needed:
+                        too_close = True
+                        break
+
+                if not too_close:
+                    valid_idle_rows.append(row.to_dict())
+
+            if not valid_idle_rows:
+                continue
+
+            total_frames = len(patient_df)
+            num_bins = min(num_idle_frames, len(valid_idle_rows))
+            bin_size = total_frames / max(num_bins, 1)
+
+            patient_selected = []
+            for bin_idx in range(num_bins):
+                start_frame = int(bin_idx * bin_size)
+                end_frame = int((bin_idx + 1) * bin_size)
+
+                candidates = [
+                    r
+                    for r in valid_idle_rows
+                    if r["patient_id"] == patient
+                    and start_frame <= r["frame_id"] < end_frame
+                    and r["frame_id"] not in selected_frame_ids
+                ]
+
+                if candidates:
+                    bin_center = (start_frame + end_frame) / 2
+                    best_candidate = min(candidates, key=lambda r: abs(r["frame_id"] - bin_center))
+                    patient_selected.append(best_candidate)
+                    selected_frame_ids.add(best_candidate["frame_id"])
+
+            idle_frames.extend(patient_selected)
+
+        if idle_frames:
+            idle_df = pd.DataFrame(idle_frames)
+            self.filtered_dfs = pd.concat([self.filtered_dfs, idle_df], ignore_index=True)
+            print(f"Added {len(idle_frames)} Idle frames to {self._split} dataset")
 
     def _select_center_label(self, patient, frame_ids, seq):
         n = len(frame_ids)
@@ -574,3 +657,55 @@ class Orsi(torch.utils.data.Dataset):
 
     def frame_name_joining(self, video_name, sec):
         return f"{video_name}/IMAGES/{sec:0{self.zero_fill}d}.{self.image_type}"
+
+
+if __name__ == "__main__":
+    import argparse
+
+    from fvcore.config import get_cfg
+    from tapis.config.defaults import assert_and_infer_cfg
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cfg", type=str, required=True, help="Path to config file")
+    parser.add_argument("--split", type=str, default="train", help="Dataset split (train/val/test)")
+    parser.add_argument(
+        "--opts", nargs=argparse.REMAINDER, default=[], help="Override config options"
+    )
+    args = parser.parse_args()
+
+    cfg = get_cfg()
+    cfg.merge_from_file(args.cfg)
+    if args.opts:
+        cfg.merge_from_list(args.opts)
+    cfg = assert_and_infer_cfg(cfg)
+    cfg.freeze()
+
+    print(f"\n{'=' * 60}")
+    print(f"Loading Orsi dataset for split: {args.split}")
+    print(f"{'=' * 60}\n")
+
+    dataset = Orsi(cfg, split=args.split, load=True)
+
+    print(f"\nTotal samples: {len(dataset)}")
+    print(f"Patients: {len(dataset._list_patient_ids())}")
+
+    task_counts = {}
+    for task in cfg.TASKS.TASKS:
+        df = dataset.filtered_dfs if dataset.filtered_dfs is not None else dataset.dfs
+        if task == "steps":
+            col = "event_name"
+        elif task == "phases":
+            col = "phase_name"
+        else:
+            col = f"{task}_name"
+
+        if col in df.columns:
+            counts = df[col].value_counts().sort_index()
+            task_counts[task] = counts
+            print(f"\n--- {task.upper()} distribution ({len(counts)} classes) ---")
+            for name, count in counts.items():
+                print(f"  {name}: {count}")
+
+    if task_counts:
+        print(f"\n{'=' * 60}")
+        print("Done!")

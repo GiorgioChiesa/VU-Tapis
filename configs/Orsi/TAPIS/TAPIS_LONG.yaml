@@ -30,6 +30,7 @@ ENDOVIS_DATASET:
   TRAIN_USE_COLOR_AUGMENTATION: True
   INCLUDE_GT: True
   USE_PREDS: False
+  ADD_IDLE: 0  # Number of Idle frames to add (0 to disable)
 MVIT:
   ZERO_DECAY_POS_CLS: False
   NUM_HEADS: 1

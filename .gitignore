@@ -4,6 +4,7 @@ checkpoints
 fold1/
 fold2/
 outputs
+reports/
 wandb/
 ffmpeg
 # output dir

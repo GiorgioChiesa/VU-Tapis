@@ -663,11 +663,13 @@ if __name__ == "__main__":
     import argparse
 
     from fvcore.config import get_cfg
-    from tapis.config.defaults import assert_and_infer_cfg
+    from tapas.config.defaults import assert_and_infer_cfg
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--cfg", type=str, required=True, help="Path to config file")
     parser.add_argument("--split", type=str, default="train", help="Dataset split (train/val/test)")
+    parser.add_argument("--train_lists", type=str, default="", help="Train lists (comma-separated)")
+    parser.add_argument("--test_lists", type=str, default="", help="Test lists (comma-separated)")
     parser.add_argument(
         "--opts", nargs=argparse.REMAINDER, default=[], help="Override config options"
     )
@@ -675,6 +677,13 @@ if __name__ == "__main__":
 
     cfg = get_cfg()
     cfg.merge_from_file(args.cfg)
+    
+    # Override train/test lists if provided on command line
+    if args.train_lists:
+        cfg.ENDOVIS_DATASET.TRAIN_LISTS = args.train_lists.split(",")
+    if args.test_lists:
+        cfg.ENDOVIS_DATASET.TEST_LISTS = args.test_lists.split(",")
+    
     if args.opts:
         cfg.merge_from_list(args.opts)
     cfg = assert_and_infer_cfg(cfg)

@@ -2,15 +2,16 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 
 import itertools
-import os
 import logging
+import os
 import sys
-import numpy as np
-
 from copy import deepcopy
+
+import numpy as np
 import pandas as pd
-from tapis.datasets import cv2_transform
 import torch
+
+from tapis.datasets import cv2_transform
 
 from . import utils as utils
 from .build import DATASET_REGISTRY

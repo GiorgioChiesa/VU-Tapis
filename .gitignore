@@ -1,4 +1,4 @@
-.secret/
+.export_vars.txt
 .vscode
 checkpoints
 data
@@ -10,6 +10,7 @@ LemonFM
 output
 instant_test_output
 inference_test_output
+session-*.md
 
 *.mp4
 *.csv

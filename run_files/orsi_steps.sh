@@ -55,7 +55,7 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="overfit-filtered"
+NAME="container"
 GPUIDS="1"
 TASK="STEPS"
 

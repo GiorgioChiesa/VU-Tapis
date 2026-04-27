@@ -105,3 +105,4 @@ MAX_SAVE_VIDEO: 10
 ENDOVIS_DATASET:
   TRAIN_GT_BOX_JSON: [all_merged.json]
   TEST_GT_BOX_JSON: [all_merged.json]
+  ORSI_ROOT_DIR: /home/gchie/workspace/data/orsi_tensors

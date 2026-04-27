@@ -77,7 +77,7 @@ SOLVER:
   MAX_EPOCH: 50
   MAX_ITER: 10000
   EARLY_STOP_ep_th: [5, -1.0] # epoch and threshold for early stopping, if the metric does not improve for this many epochs by at least this threshold, stop training.
-  WARMUP_EPOCHS: 5.0
+  WARMUP_EPOCHS: 10.0
   MOMENTUM: 0.9
   WEIGHT_DECAY: 1e-4
   ZERO_WD_1D_PARAM: True
@@ -111,3 +111,4 @@ ENDOVIS_DATASET:
   EXCLUDE_EVENT_NAMES: ["Idle", "Out_of_body", "Back_inside_body ","Final_reinforcing_suture" ,"Inside_abdomen", "Test_image_start", "Remove_gauze","Remove_hemostatic_agens", "Unsuccesful_clip_placement","Hemostatic_metal_clip_placement","Aiding_suture_stitch","Aiding_suture_clip_placement","3D_model", "Fat_removal", "Instrument_swap:_insertion", "Test_image_stop", "Incision_of_the_fascia_-_right"," Remove_needle_bladder_stretch_stitch", "Lift_right_seminal_vesicle", "Lift_left_seminal_vesicle", "Stitch_in_DVC_after_apical_dissection","Needle_removal_DVC_ligation", "Stitch_in_urethra", "Tie_suture", "Threads_removal","Vessel_loop_removal", "Camera_stop","Camera_out_of_body","Hemolock_clip_removal","Hemolock_clip_on_bladder_pedicle_attached_to_prostate"]
   TRAIN_GT_BOX_JSON: [all_merged.json]
   TEST_GT_BOX_JSON: [all_merged.json]
+  ORSI_ROOT_DIR: /home/gchie/workspace/data/orsi_tensors

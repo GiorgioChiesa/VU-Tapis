@@ -1,11 +1,11 @@
 .export_vars.txt
 .vscode
 checkpoints
-data
+fold1/
+fold2/
 outputs
 wandb/
 ffmpeg
-LemonFM
 # output dir
 output
 instant_test_output

@@ -2,16 +2,15 @@
 from typing import Tuple
 
 import torch
-from torch import nn
-from torch.nn import functional as F
-
 from detectron2.config import configurable
 from detectron2.data import MetadataCatalog
 from detectron2.modeling import META_ARCH_REGISTRY, build_backbone, build_sem_seg_head
 from detectron2.modeling.backbone import Backbone
 from detectron2.modeling.postprocessing import sem_seg_postprocess
-from detectron2.structures import Boxes, ImageList, Instances, BitMasks
+from detectron2.structures import BitMasks, Boxes, ImageList, Instances
 from detectron2.utils.memory import retry_if_cuda_oom
+from torch import nn
+from torch.nn import functional as F
 
 from .modeling.criterion import SetCriterion
 from .modeling.matcher import HungarianMatcher
@@ -36,8 +35,8 @@ class MaskFormer(nn.Module):
         metadata,
         size_divisibility: int,
         sem_seg_postprocess_before_inference: bool,
-        pixel_mean: Tuple[float],
-        pixel_std: Tuple[float],
+        pixel_mean: tuple[float],
+        pixel_std: tuple[float],
         # inference
         semantic_on: bool,
         panoptic_on: bool,
@@ -144,23 +143,23 @@ class MaskFormer(nn.Module):
             "sem_seg_head": sem_seg_head,
             "criterion": criterion,
             "num_queries": cfg.MODEL.MASK_FORMER.NUM_OBJECT_QUERIES,
-            "object_mask_threshold": cfg.MODEL.MASK_FORMER.TEST.OBJECT_MASK_THRESHOLD,
-            "overlap_threshold": cfg.MODEL.MASK_FORMER.TEST.OVERLAP_THRESHOLD,
+            "object_mask_threshold": cfg.MODEL.MASK_FORMER.VAL.OBJECT_MASK_THRESHOLD,
+            "overlap_threshold": cfg.MODEL.MASK_FORMER.VAL.OVERLAP_THRESHOLD,
             "metadata": MetadataCatalog.get(cfg.DATASETS.TRAIN[0]),
             "size_divisibility": cfg.MODEL.MASK_FORMER.SIZE_DIVISIBILITY,
             "sem_seg_postprocess_before_inference": (
-                cfg.MODEL.MASK_FORMER.TEST.SEM_SEG_POSTPROCESSING_BEFORE_INFERENCE
-                or cfg.MODEL.MASK_FORMER.TEST.PANOPTIC_ON
-                or cfg.MODEL.MASK_FORMER.TEST.INSTANCE_ON
+                cfg.MODEL.MASK_FORMER.VAL.SEM_SEG_POSTPROCESSING_BEFORE_INFERENCE
+                or cfg.MODEL.MASK_FORMER.VAL.PANOPTIC_ON
+                or cfg.MODEL.MASK_FORMER.VAL.INSTANCE_ON
             ),
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
             # inference
-            "semantic_on": cfg.MODEL.MASK_FORMER.TEST.SEMANTIC_ON,
-            "instance_on": cfg.MODEL.MASK_FORMER.TEST.INSTANCE_ON,
-            "panoptic_on": cfg.MODEL.MASK_FORMER.TEST.PANOPTIC_ON,
-            "regions_on": cfg.MODEL.MASK_FORMER.TEST.REGIONS_ON,
-            "test_topk_per_image": cfg.TEST.DETECTIONS_PER_IMAGE,
+            "semantic_on": cfg.MODEL.MASK_FORMER.VAL.SEMANTIC_ON,
+            "instance_on": cfg.MODEL.MASK_FORMER.VAL.INSTANCE_ON,
+            "panoptic_on": cfg.MODEL.MASK_FORMER.VAL.PANOPTIC_ON,
+            "regions_on": cfg.MODEL.MASK_FORMER.VAL.REGIONS_ON,
+            "test_topk_per_image": cfg.VAL.DETECTIONS_PER_IMAGE,
         }
 
     @property
@@ -178,7 +177,9 @@ class MaskFormer(nn.Module):
                    * Other information that's included in the original dicts, such as:
                      "height", "width" (int): the output resolution of the model (may be different
                      from input resolution), used in inference.
-        Returns:
+
+        Returns
+        -------
             list[dict]:
                 each dict has the results for one image. The dict contains the following keys:
 
@@ -193,7 +194,7 @@ class MaskFormer(nn.Module):
                     segments_info (list[dict]): Describe each segment in `panoptic_seg`.
                         Each dict contains keys "id", "category_id", "isthing".
         """
-        if type(batched_inputs[0])==dict:
+        if type(batched_inputs[0]) == dict:
             images = [x["image"].to(self.device) for x in batched_inputs]
         else:
             images = [x for x in batched_inputs]
@@ -202,12 +203,12 @@ class MaskFormer(nn.Module):
 
         features = self.backbone(images.tensor)
         outputs = self.sem_seg_head(features)
-        
+
         if self.training:
             # mask classification target
             if "instances" in batched_inputs[0]:
                 gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
-                targets = self.prepare_targets(gt_instances, images)#, gt_names)
+                targets = self.prepare_targets(gt_instances, images)  # , gt_names)
             else:
                 targets = None
 
@@ -221,72 +222,85 @@ class MaskFormer(nn.Module):
                     # remove this loss if not specified in `weight_dict`
                     losses.pop(k)
             return losses
-        else:
-            mask_cls_results = outputs["pred_logits"]
-            mask_pred_results = outputs["pred_masks"]
-            mask_embd_results = outputs["mask_embeds"]
-            decod_out_results = outputs["decoder_outputs"]
-            # upsample masks
-            mask_pred_results = F.interpolate(
-                mask_pred_results,
-                size=(images.tensor.shape[-2], images.tensor.shape[-1]),
-                mode="bilinear",
-                align_corners=False,
-            )
+        mask_cls_results = outputs["pred_logits"]
+        mask_pred_results = outputs["pred_masks"]
+        mask_embd_results = outputs["mask_embeds"]
+        decod_out_results = outputs["decoder_outputs"]
+        # upsample masks
+        mask_pred_results = F.interpolate(
+            mask_pred_results,
+            size=(images.tensor.shape[-2], images.tensor.shape[-1]),
+            mode="bilinear",
+            align_corners=False,
+        )
 
-            del outputs
+        del outputs
 
-            processed_results = []
-            additions = []
-            for mask_cls_result, mask_pred_result, mask_embd, decod_out, image_size in zip(
-                mask_cls_results, mask_pred_results, mask_embd_results, decod_out_results, images.image_sizes
-            ):
-                height = image_size[0]
-                width = image_size[1]
-                # additions.append({})
+        processed_results = []
+        additions = []
+        for mask_cls_result, mask_pred_result, mask_embd, decod_out, image_size in zip(
+            mask_cls_results,
+            mask_pred_results,
+            mask_embd_results,
+            decod_out_results,
+            images.image_sizes,
+        ):
+            height = image_size[0]
+            width = image_size[1]
+            # additions.append({})
 
-                if self.sem_seg_postprocess_before_inference:
-                    mask_pred_result = retry_if_cuda_oom(sem_seg_postprocess)(
-                        mask_pred_result, image_size, height, width
+            if self.sem_seg_postprocess_before_inference:
+                mask_pred_result = retry_if_cuda_oom(sem_seg_postprocess)(
+                    mask_pred_result, image_size, height, width
+                )
+                mask_cls_result = mask_cls_result.to(mask_pred_result)
+
+            if self.regions_on:
+                regions = retry_if_cuda_oom(self.regions_inference)(
+                    mask_cls_result, mask_pred_result, decod_out
+                )
+                processed_results.append(regions)
+            else:
+                processed_results.append({})
+
+                # semantic segmentation inference
+                if self.semantic_on:
+                    r = retry_if_cuda_oom(self.semantic_inference)(
+                        mask_cls_result, mask_pred_result
                     )
-                    mask_cls_result = mask_cls_result.to(mask_pred_result)
-                
-                if self.regions_on:
-                    regions = retry_if_cuda_oom(self.regions_inference)(mask_cls_result, mask_pred_result, decod_out)
-                    processed_results.append(regions)
-                else:
-                    processed_results.append({})
+                    if not self.sem_seg_postprocess_before_inference:
+                        r = retry_if_cuda_oom(sem_seg_postprocess)(r, image_size, height, width)
+                    processed_results[-1]["sem_seg"] = r
 
-                    # semantic segmentation inference
-                    if self.semantic_on:
-                        r = retry_if_cuda_oom(self.semantic_inference)(mask_cls_result, mask_pred_result)
-                        if not self.sem_seg_postprocess_before_inference:
-                            r = retry_if_cuda_oom(sem_seg_postprocess)(r, image_size, height, width)
-                        processed_results[-1]["sem_seg"] = r
+                # panoptic segmentation inference
+                if self.panoptic_on:
+                    panoptic_r = retry_if_cuda_oom(self.panoptic_inference)(
+                        mask_cls_result, mask_pred_result
+                    )
+                    processed_results[-1]["panoptic_seg"] = panoptic_r
 
-                    # panoptic segmentation inference
-                    if self.panoptic_on:
-                        panoptic_r = retry_if_cuda_oom(self.panoptic_inference)(mask_cls_result, mask_pred_result)
-                        processed_results[-1]["panoptic_seg"] = panoptic_r
-                    
-                    # instance segmentation inference
-                    if self.instance_on:
-                        instance_r = retry_if_cuda_oom(self.instance_inference)(mask_cls_result, mask_pred_result, mask_embd, decod_out)
-                        processed_results[-1]["instances"] = instance_r
+                # instance segmentation inference
+                if self.instance_on:
+                    instance_r = retry_if_cuda_oom(self.instance_inference)(
+                        mask_cls_result, mask_pred_result, mask_embd, decod_out
+                    )
+                    processed_results[-1]["instances"] = instance_r
 
-            return processed_results
+        return processed_results
 
-    def prepare_targets(self, targets, images):#, names):
+    def prepare_targets(self, targets, images):  # , names):
         h_pad, w_pad = images.tensor.shape[-2:]
         new_targets = []
-        for tid,targets_per_image in enumerate(targets):
+        for tid, targets_per_image in enumerate(targets):
             # pad gt
             gt_masks = targets_per_image.gt_masks
-            padded_masks = torch.zeros((gt_masks.shape[0], h_pad, w_pad), dtype=gt_masks.dtype, device=gt_masks.device)
+            padded_masks = torch.zeros(
+                (gt_masks.shape[0], h_pad, w_pad), dtype=gt_masks.dtype, device=gt_masks.device
+            )
             padded_masks[:, : gt_masks.shape[1], : gt_masks.shape[2]] = gt_masks
             new_targets.append(
                 {
-                    #"image_id": names[tid],
+                    # "image_id": names[tid],
                     "labels": targets_per_image.gt_classes,
                     "masks": padded_masks,
                 }
@@ -321,41 +335,39 @@ class MaskFormer(nn.Module):
         if cur_masks.shape[0] == 0:
             # We didn't detect any mask :(
             return panoptic_seg, segments_info
-        else:
-            # take argmax
-            cur_mask_ids = cur_prob_masks.argmax(0)
-            stuff_memory_list = {}
-            for k in range(cur_classes.shape[0]):
-                pred_class = cur_classes[k].item()
-                isthing = pred_class in self.metadata.thing_dataset_id_to_contiguous_id.values()
-                mask_area = (cur_mask_ids == k).sum().item()
-                original_area = (cur_masks[k] >= 0.5).sum().item()
-                mask = (cur_mask_ids == k) & (cur_masks[k] >= 0.5)
+        # take argmax
+        cur_mask_ids = cur_prob_masks.argmax(0)
+        stuff_memory_list = {}
+        for k in range(cur_classes.shape[0]):
+            pred_class = cur_classes[k].item()
+            isthing = pred_class in self.metadata.thing_dataset_id_to_contiguous_id.values()
+            mask_area = (cur_mask_ids == k).sum().item()
+            original_area = (cur_masks[k] >= 0.5).sum().item()
+            mask = (cur_mask_ids == k) & (cur_masks[k] >= 0.5)
 
-                if mask_area > 0 and original_area > 0 and mask.sum().item() > 0:
-                    if mask_area / original_area < self.overlap_threshold:
+            if mask_area > 0 and original_area > 0 and mask.sum().item() > 0:
+                if mask_area / original_area < self.overlap_threshold:
+                    continue
+
+                # merge stuff regions
+                if not isthing:
+                    if int(pred_class) in stuff_memory_list:
+                        panoptic_seg[mask] = stuff_memory_list[int(pred_class)]
                         continue
+                    stuff_memory_list[int(pred_class)] = current_segment_id + 1
 
-                    # merge stuff regions
-                    if not isthing:
-                        if int(pred_class) in stuff_memory_list.keys():
-                            panoptic_seg[mask] = stuff_memory_list[int(pred_class)]
-                            continue
-                        else:
-                            stuff_memory_list[int(pred_class)] = current_segment_id + 1
+                current_segment_id += 1
+                panoptic_seg[mask] = current_segment_id
 
-                    current_segment_id += 1
-                    panoptic_seg[mask] = current_segment_id
+                segments_info.append(
+                    {
+                        "id": current_segment_id,
+                        "isthing": bool(isthing),
+                        "category_id": int(pred_class),
+                    }
+                )
 
-                    segments_info.append(
-                        {
-                            "id": current_segment_id,
-                            "isthing": bool(isthing),
-                            "category_id": int(pred_class),
-                        }
-                    )
-
-            return panoptic_seg, segments_info
+        return panoptic_seg, segments_info
 
     def instance_inference(self, mask_cls, mask_pred, mask_embd, decod_out):
         # mask_pred is already processed to have the same shape as original input
@@ -363,9 +375,16 @@ class MaskFormer(nn.Module):
 
         # [Q, K]
         scores = F.softmax(mask_cls, dim=-1)[:, :-1]
-        labels = torch.arange(self.sem_seg_head.num_classes, device=self.device).unsqueeze(0).repeat(self.num_queries, 1).flatten(0, 1)
+        labels = (
+            torch.arange(self.sem_seg_head.num_classes, device=self.device)
+            .unsqueeze(0)
+            .repeat(self.num_queries, 1)
+            .flatten(0, 1)
+        )
         # scores_per_image, topk_indices = scores.flatten(0, 1).topk(self.num_queries, sorted=False)
-        scores_per_image, topk_indices = scores.flatten(0, 1).topk(self.test_topk_per_image, sorted=False)
+        scores_per_image, topk_indices = scores.flatten(0, 1).topk(
+            self.test_topk_per_image, sorted=False
+        )
         labels_per_image = labels[topk_indices]
 
         topk_indices = topk_indices // self.sem_seg_head.num_classes
@@ -393,15 +412,17 @@ class MaskFormer(nn.Module):
         result.pred_boxes = BitMasks(mask_pred > 0).get_bounding_boxes()
 
         # calculate average mask prob
-        mask_scores_per_image = (mask_pred.sigmoid().flatten(1) * result.pred_masks.flatten(1)).sum(1) / (result.pred_masks.flatten(1).sum(1) + 1e-6)
-        score_dist *= mask_scores_per_image.repeat(self.sem_seg_head.num_classes,1).permute(1,0)
+        mask_scores_per_image = (mask_pred.sigmoid().flatten(1) * result.pred_masks.flatten(1)).sum(
+            1
+        ) / (result.pred_masks.flatten(1).sum(1) + 1e-6)
+        score_dist *= mask_scores_per_image.repeat(self.sem_seg_head.num_classes, 1).permute(1, 0)
         result.score_dist = score_dist
         result.scores = scores_per_image * mask_scores_per_image
         result.mask_embd = mask_embd
         result.decod_out = decod_out
         result.pred_classes = labels_per_image
         return result
-    
+
     def regions_inference(self, mask_cls, mask_pred, decod_out):
 
         # [Q, K]
@@ -413,7 +434,7 @@ class MaskFormer(nn.Module):
 
         _, topk_indices = scores.max(1)[0].topk(self.test_topk_per_image, sorted=False)
         # mask_pred = mask_pred.unsqueeze(1).repeat(1, self.sem_seg_head.num_classes, 1).flatten(0, 1)
-        mask_pred = (mask_pred[topk_indices] >0).detach()
+        mask_pred = (mask_pred[topk_indices] > 0).detach()
         decod_out = decod_out[topk_indices].detach()
 
         # pred_masks = (mask_pred > 0).float()

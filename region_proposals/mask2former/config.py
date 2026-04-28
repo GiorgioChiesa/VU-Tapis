@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) Facebook, Inc. and its affiliates.
 from detectron2.config import CfgNode as CN
 
@@ -51,14 +50,14 @@ def add_maskformer2_config(cfg):
     cfg.MODEL.MASK_FORMER.ENFORCE_INPUT_PROJ = False
 
     # mask_former inference config
-    cfg.MODEL.MASK_FORMER.TEST = CN()
-    cfg.MODEL.MASK_FORMER.TEST.SEMANTIC_ON = True
-    cfg.MODEL.MASK_FORMER.TEST.INSTANCE_ON = False
-    cfg.MODEL.MASK_FORMER.TEST.PANOPTIC_ON = False
-    cfg.MODEL.MASK_FORMER.TEST.REGIONS_ON = False
-    cfg.MODEL.MASK_FORMER.TEST.OBJECT_MASK_THRESHOLD = 0.0
-    cfg.MODEL.MASK_FORMER.TEST.OVERLAP_THRESHOLD = 0.0
-    cfg.MODEL.MASK_FORMER.TEST.SEM_SEG_POSTPROCESSING_BEFORE_INFERENCE = False
+    cfg.MODEL.MASK_FORMER.VAL = CN()
+    cfg.MODEL.MASK_FORMER.VAL.SEMANTIC_ON = True
+    cfg.MODEL.MASK_FORMER.VAL.INSTANCE_ON = False
+    cfg.MODEL.MASK_FORMER.VAL.PANOPTIC_ON = False
+    cfg.MODEL.MASK_FORMER.VAL.REGIONS_ON = False
+    cfg.MODEL.MASK_FORMER.VAL.OBJECT_MASK_THRESHOLD = 0.0
+    cfg.MODEL.MASK_FORMER.VAL.OVERLAP_THRESHOLD = 0.0
+    cfg.MODEL.MASK_FORMER.VAL.SEM_SEG_POSTPROCESSING_BEFORE_INFERENCE = False
 
     # Sometimes `backbone.size_divisibility` is set to 0 for some backbone (e.g. ResNet)
     # you can use this config to override
@@ -114,6 +113,6 @@ def add_maskformer2_config(cfg):
     # the original paper.
     cfg.MODEL.MASK_FORMER.IMPORTANCE_SAMPLE_RATIO = 0.75
 
-    # cfg.TEST.DETECTIONS_PER_IMAGE = 200
-    
+    # cfg.VAL.DETECTIONS_PER_IMAGE = 200
+
     cfg.DATASETS.DATA_PATH = ""

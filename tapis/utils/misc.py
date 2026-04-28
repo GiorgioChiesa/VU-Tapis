@@ -4,9 +4,10 @@
 import json
 import logging
 import math
-import numpy as np
 import os
 from datetime import datetime
+
+import numpy as np
 import psutil
 import torch
 from fvcore.nn.activation_count import activation_count
@@ -14,10 +15,10 @@ from fvcore.nn.flop_count import flop_count
 from matplotlib import pyplot as plt
 from torch import nn
 
-import tapis.utils.logging as logging
 import tapis.utils.multiprocessing as mpu
-from tapis.models.batchnorm_helper import SubBatchNorm3d
 from tapis.datasets.utils import pack_pathway_output
+from tapis.models.batchnorm_helper import SubBatchNorm3d
+from tapis.utils import logging
 
 logger = logging.get_logger(__name__)
 
@@ -30,7 +31,7 @@ def check_nan_losses(loss):
     """
     if math.isnan(loss):
         # breakpoint()
-        raise RuntimeError("ERROR: Got NaN losses {}".format(datetime.now()))
+        raise RuntimeError(f"ERROR: Got NaN losses {datetime.now()}")
 
 
 def params_count(model, ignore_bn=False):
@@ -41,13 +42,13 @@ def params_count(model, ignore_bn=False):
     """
     if not ignore_bn:
         return np.sum([p.numel() for p in model.parameters()]).item()
-    else:
-        count = 0
-        for m in model.modules():
-            if not isinstance(m, nn.BatchNorm3d):
-                for p in m.parameters(recurse=False):
-                    count += p.numel()
+    count = 0
+    for m in model.modules():
+        if not isinstance(m, nn.BatchNorm3d):
+            for p in m.parameters(recurse=False):
+                count += p.numel()
     return count
+
 
 def trainable_params_count(model, ignore_bn=False):
     """
@@ -57,12 +58,11 @@ def trainable_params_count(model, ignore_bn=False):
     """
     if not ignore_bn:
         return np.sum([p.numel() for p in model.parameters() if p.requires_grad]).item()
-    else:
-        count = 0
-        for m in model.modules():
-            if not isinstance(m, nn.BatchNorm3d):
-                for p in m.parameters(recurse=False):
-                    count += p.numel() if p.requires_grad else 0
+    count = 0
+    for m in model.modules():
+        if not isinstance(m, nn.BatchNorm3d):
+            for p in m.parameters(recurse=False):
+                count += p.numel() if p.requires_grad else 0
     return count
 
 
@@ -74,19 +74,21 @@ def gpu_mem_usage():
         mem_usage_bytes = torch.cuda.max_memory_allocated()
     else:
         mem_usage_bytes = 0
-    return mem_usage_bytes / 1024 ** 3
+    return mem_usage_bytes / 1024**3
 
 
 def cpu_mem_usage():
     """
     Compute the system memory (RAM) usage for the current device (GB).
-    Returns:
+
+    Returns
+    -------
         usage (float): used memory (GB).
         total (float): total memory (GB).
     """
     vram = psutil.virtual_memory()
-    usage = (vram.total - vram.available) / 1024 ** 3
-    total = vram.total / 1024 ** 3
+    usage = (vram.total - vram.available) / 1024**3
+    total = vram.total / 1024**3
 
     return usage, total
 
@@ -101,35 +103,44 @@ def _get_model_analysis_input(cfg, use_input_frames):
         use_train_input (bool): if True, return the input for training. Otherwise,
             return the input for testing.
 
-    Returns:
+    Returns
+    -------
         inputs: the input for model analysis.
     """
     rgb_dimension = 3
     if use_input_frames:
         input_tensors = torch.rand(
-                        rgb_dimension,
-                        cfg.DATA.NUM_FRAMES,
-                        cfg.DATA.TRAIN_CROP_SIZE,
-                        cfg.DATA.TRAIN_CROP_SIZE_LARGE,
+            rgb_dimension,
+            cfg.DATA.NUM_FRAMES,
+            cfg.DATA.TRAIN_CROP_SIZE,
+            cfg.DATA.TRAIN_CROP_SIZE_LARGE,
         )
         input_tensors = pack_pathway_output(cfg, input_tensors)
         input_tensors = [input.unsqueeze(0) for input in input_tensors]
         if cfg.NUM_GPUS:
             input_tensors = [input.cuda(non_blocking=True) for input in input_tensors]
     else:
-        final_dim = int(cfg.MVIT.EMBED_DIM * math.prod([dim_mul[-1] for dim_mul in cfg.MVIT.DIM_MUL]))
+        final_dim = int(
+            cfg.MVIT.EMBED_DIM * math.prod([dim_mul[-1] for dim_mul in cfg.MVIT.DIM_MUL])
+        )
         time_resolution = cfg.DATA.NUM_FRAMES // cfg.MVIT.PATCH_STRIDE[0]
-        h_resolution = (cfg.DATA.TEST_CROP_SIZE // cfg.MVIT.PATCH_STRIDE[1]) // math.prod([q_pool[-1] for q_pool in cfg.MVIT.POOL_Q_STRIDE])
-        w_resolution = (cfg.DATA.TEST_CROP_SIZE_LARGE // cfg.MVIT.PATCH_STRIDE[2]) // math.prod([q_pool[-1] for q_pool in cfg.MVIT.POOL_Q_STRIDE])
-        
-        input_tensors = torch.rand(1, time_resolution*h_resolution*w_resolution, final_dim)
-        
+        h_resolution = (cfg.DATA.VAL_CROP_SIZE // cfg.MVIT.PATCH_STRIDE[1]) // math.prod(
+            [q_pool[-1] for q_pool in cfg.MVIT.POOL_Q_STRIDE]
+        )
+        w_resolution = (cfg.DATA.VAL_CROP_SIZE_LARGE // cfg.MVIT.PATCH_STRIDE[2]) // math.prod(
+            [q_pool[-1] for q_pool in cfg.MVIT.POOL_Q_STRIDE]
+        )
+
+        input_tensors = torch.rand(1, time_resolution * h_resolution * w_resolution, final_dim)
+
         if cfg.NUM_GPUS:
             input_tensors = input_tensors.cuda(non_blocking=True)
 
     # If detection is enabled, count flops for max region proposal.
     if cfg.REGIONS.ENABLE:
-        max_boxes = cfg.DATA.MAX_BBOXES * 2 if cfg.ENDOVIS_DATASET.INCLUDE_GT else cfg.DATA.MAX_BBOXES
+        max_boxes = (
+            cfg.DATA.MAX_BBOXES * 2 if cfg.ENDOVIS_DATASET.INCLUDE_GT else cfg.DATA.MAX_BBOXES
+        )
         features = np.random.rand(1, max_boxes, cfg.FEATURES.DIM_FEATURES)
         features = torch.tensor(features).float()
         bbox_mask = torch.ones(features.shape[:-1]).bool()
@@ -137,11 +148,18 @@ def _get_model_analysis_input(cfg, use_input_frames):
             features = features.cuda()
             bbox_mask = bbox_mask.cuda()
         if cfg.FEATURES.USE_RPN and use_input_frames:
-            ratio = cfg.DATA.TEST_CROP_SIZE_LARGE/cfg.DATA.TEST_CROP_SIZE
-            images = torch.tensor(np.random.rand(1, 3, cfg.FEATURES.RPN_CFG.INPUT.IMAGE_SIZE, round(ratio*cfg.FEATURES.RPN_CFG.INPUT.IMAGE_SIZE))).float()
+            ratio = cfg.DATA.VAL_CROP_SIZE_LARGE / cfg.DATA.VAL_CROP_SIZE
+            images = torch.tensor(
+                np.random.rand(
+                    1,
+                    3,
+                    cfg.FEATURES.RPN_CFG.INPUT.IMAGE_SIZE,
+                    round(ratio * cfg.FEATURES.RPN_CFG.INPUT.IMAGE_SIZE),
+                )
+            ).float()
             bboxes = torch.tensor(np.zeros((1, max_boxes, 4)))
-            bboxes[:,:,1] = cfg.DATA.TEST_CROP_SIZE
-            bboxes[:,:,3] = cfg.DATA.TEST_CROP_SIZE_LARGE
+            bboxes[:, :, 1] = cfg.DATA.VAL_CROP_SIZE
+            bboxes[:, :, 3] = cfg.DATA.VAL_CROP_SIZE_LARGE
             if cfg.NUM_GPUS:
                 images = images.cuda()
                 bboxes = bboxes.cuda()
@@ -165,13 +183,14 @@ def get_model_stats(model, cfg, mode, use_train_input):
         use_train_input (bool): if True, compute statistics for training. Otherwise,
             compute statistics for testing.
 
-    Returns:
+    Returns
+    -------
         float: the total number of count of the given model.
     """
     assert mode in [
         "flop",
         "activation",
-    ], "'{}' not supported for model analysis".format(mode)
+    ], f"'{mode}' not supported for model analysis"
     if mode == "flop":
         model_stats_fun = flop_count
     elif mode == "activation":
@@ -183,7 +202,7 @@ def get_model_stats(model, cfg, mode, use_train_input):
     model.eval()
     inputs = _get_model_analysis_input(cfg, use_train_input)
     count_dict, *_ = model_stats_fun(model, inputs)
-        
+
     count = sum(count_dict.values())
     model.train(model_mode)
     return count
@@ -200,19 +219,13 @@ def log_model_info(model, cfg, use_train_input=True):
         use_train_input (bool): if True, log info for training. Otherwise,
             log info for testing.
     """
-    logger.info("Model:\n{}".format(model))
-    logger.info("Params: {:,}".format(params_count(model)))
-    logger.info("Trainable Params: {:,}".format(trainable_params_count(model)))
-    logger.info("Mem: {:,} MB".format(gpu_mem_usage()))
+    logger.info(f"Model:\n{model}")
+    logger.info(f"Params: {params_count(model):,}")
+    logger.info(f"Trainable Params: {trainable_params_count(model):,}")
+    logger.info(f"Mem: {gpu_mem_usage():,} MB")
+    logger.info("Flops: {:,} G".format(get_model_stats(model, cfg, "flop", use_train_input)))
     logger.info(
-        "Flops: {:,} G".format(
-            get_model_stats(model, cfg, "flop", use_train_input)
-        )
-    )
-    logger.info(
-        "Activations: {:,} M".format(
-            get_model_stats(model, cfg, "activation", use_train_input)
-        )
+        "Activations: {:,} M".format(get_model_stats(model, cfg, "activation", use_train_input))
     )
     logger.info("nvidia-smi")
     os.system("nvidia-smi")
@@ -229,15 +242,13 @@ def is_eval_epoch(cfg, cur_epoch, multigrid_schedule):
     """
     if cur_epoch + 1 == cfg.SOLVER.MAX_EPOCH:
         return True
-    if not cfg.TEST.ENABLE:
+    if not cfg.VAL.ENABLE:
         return False
     if multigrid_schedule is not None:
         prev_epoch = 0
         for s in multigrid_schedule:
             if cur_epoch < s[-1]:
-                period = max(
-                    (s[-1] - prev_epoch) // cfg.MULTIGRID.EVAL_FREQ + 1, 1
-                )
+                period = max((s[-1] - prev_epoch) // cfg.MULTIGRID.EVAL_FREQ + 1, 1)
                 return (s[-1] - 1 - cur_epoch) % period == 0
             prev_epoch = s[-1]
 
@@ -290,7 +301,9 @@ def aggregate_sub_bn_stats(module):
     Recursively find all SubBN modules and aggregate sub-BN stats.
     Args:
         module (nn.Module)
-    Returns:
+
+    Returns
+    -------
         count (int): number of SubBN module found.
     """
     count = 0
@@ -332,6 +345,7 @@ def launch_job(cfg, init_method, func, daemon=False):
         )
     else:
         func(cfg=cfg)
+
 
 def flatten_dict(d, parent_key="", sep="_"):
     items = {}

@@ -8,9 +8,9 @@ from copy import deepcopy
 from functools import partial
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.preprocessing import label_binarize
+from torch import nn
 from torch.nn.init import trunc_normal_
 
 import tapis.utils.weight_init_helper as init_helper
@@ -142,7 +142,7 @@ class FuseFastToSlow(nn.Module):
             norm_module (nn.Module): nn.Module for the normalization layer. The
                 default is nn.BatchNorm3d.
         """
-        super(FuseFastToSlow, self).__init__()
+        super().__init__()
         self.conv_f2s = nn.Conv3d(
             dim_in,
             dim_in * fusion_conv_channel_ratio,
@@ -184,7 +184,7 @@ class SlowFast(nn.Module):
             cfg (CfgNode): model building configs, details are in the
                 comments of the config file.
         """
-        super(SlowFast, self).__init__()
+        super().__init__()
         self.norm_module = get_norm(cfg)
         # Extra heads for each task
         self.tasks = cfg.TASKS.TASKS
@@ -205,10 +205,10 @@ class SlowFast(nn.Module):
             cfg (CfgNode): model building configs, details are in the
                 comments of the config file.
         """
-        assert cfg.MODEL.ARCH in _POOL1.keys()
+        assert cfg.MODEL.ARCH in _POOL1
         pool_size = _POOL1[cfg.MODEL.ARCH]
         assert len({len(pool_size), self.num_pathways}) == 1
-        assert cfg.RESNET.DEPTH in _MODEL_STAGE_DEPTH.keys()
+        assert cfg.RESNET.DEPTH in _MODEL_STAGE_DEPTH
 
         (d2, d3, d4, d5) = _MODEL_STAGE_DEPTH[cfg.RESNET.DEPTH]
 
@@ -267,7 +267,7 @@ class SlowFast(nn.Module):
             pool = nn.MaxPool3d(
                 kernel_size=pool_size[pathway], stride=pool_size[pathway], padding=[0, 0, 0]
             )
-            self.add_module("pathway{}_pool".format(pathway), pool)
+            self.add_module(f"pathway{pathway}_pool", pool)
 
         self.s3 = resnet_helper.ResStage(
             dim_in=[
@@ -382,7 +382,7 @@ class SlowFast(nn.Module):
                     dropout_rate=cfg.MODEL.DROPOUT_RATE,
                     act_func=self.act_fun[idx],
                 )
-            self.add_module("extra_heads_{}".format(task), extra_head)
+            self.add_module(f"extra_heads_{task}", extra_head)
 
     def forward(self, x, bboxes=None, features=None, boxes_mask=None, **kwargs):
         out = {k: [] for k in self.tasks}
@@ -391,7 +391,7 @@ class SlowFast(nn.Module):
         x = self.s2(x)
         x = self.s2_fuse(x)
         for pathway in range(self.num_pathways):
-            pool = getattr(self, "pathway{}_pool".format(pathway))
+            pool = getattr(self, f"pathway{pathway}_pool")
             x[pathway] = pool(x[pathway])
         x = self.s3(x)
         x = self.s3_fuse(x)
@@ -400,7 +400,7 @@ class SlowFast(nn.Module):
         x = self.s5(x)
 
         for task in self.tasks:
-            extra_head = getattr(self, "extra_heads_{}".format(task))
+            extra_head = getattr(self, f"extra_heads_{task}")
 
             out[task] = extra_head(
                 inputs=x, bboxes=bboxes, features=features, boxes_mask=boxes_mask
@@ -424,7 +424,7 @@ class MViT(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         # Get parameters.
-        assert cfg.DATA.TRAIN_CROP_SIZE == cfg.DATA.TEST_CROP_SIZE
+        assert cfg.DATA.TRAIN_CROP_SIZE == cfg.DATA.VAL_CROP_SIZE
         self.cfg = cfg
         pool_first = cfg.MVIT.POOL_FIRST
         # Prepare input.
@@ -444,7 +444,7 @@ class MViT(nn.Module):
         self.act_fun = deepcopy(cfg.TASKS.HEAD_ACT)
         self.regions = cfg.REGIONS.ENABLE
         self.use_rpn = cfg.FEATURES.USE_RPN
-        self.precalc_test = cfg.FEATURES.PRECALCULATE_TEST
+        self.precalc_test = cfg.FEATURES.PRECALCULATE_VAL
         self.recogn = cfg.TASKS.PRESENCE_RECOGNITION
         self._frame_tasks = {
             task for task in cfg.TASKS.TASKS if task not in cfg.ENDOVIS_DATASET.REGION_TASKS
@@ -679,7 +679,7 @@ class MViT(nn.Module):
                         cls_embed=False,
                         recognition=True,
                     )
-                    self.add_module("extra_heads_{}_presence".format(task), recog_head)
+                    self.add_module(f"extra_heads_{task}_presence", recog_head)
             else:
                 extra_head = head_helper.TransformerBasicHead(
                     embed_dim,
@@ -690,7 +690,7 @@ class MViT(nn.Module):
                     recognition=False,
                 )
 
-            self.add_module("extra_heads_{}".format(task), extra_head)
+            self.add_module(f"extra_heads_{task}", extra_head)
 
         if self.use_abs_pos:
             if self.sep_pos_embed:
@@ -902,7 +902,7 @@ class MViT(nn.Module):
 
         # TAPIS head classification
         for task in self.tasks:
-            extra_head = getattr(self, "extra_heads_{}".format(task))
+            extra_head = getattr(self, f"extra_heads_{task}")
             if task in self._frame_tasks and self.multiple_cls_embeds:
                 cls_idx = list(self._frame_tasks).index(task)
             else:
@@ -913,7 +913,7 @@ class MViT(nn.Module):
             )
 
             if self.recogn and task in self.recog_tasks:
-                out[f"{task}_presence"] = getattr(self, "extra_heads_{}_presence".format(task))(
+                out[f"{task}_presence"] = getattr(self, f"extra_heads_{task}_presence")(
                     x=x, features=features, boxes_mask=boxes_mask
                 )
 
@@ -943,7 +943,7 @@ class LEMON(nn.Module):
                 dropout_rate=cfg.MODEL.DROPOUT_RATE,
                 act_func=self.act_fun[idx],
             )
-            self.add_module("extra_heads_{}".format(task), extra_head)
+            self.add_module(f"extra_heads_{task}", extra_head)
 
     def forward(self, batch_frames, **kwargs):
         # Input must be [B,C=3,H=224,W=224]
@@ -957,7 +957,7 @@ class LEMON(nn.Module):
         out = {"cls_tokens": features}
         # TAPIS head classification
         for task in self.tasks:
-            extra_head = getattr(self, "extra_heads_{}".format(task))
+            extra_head = getattr(self, f"extra_heads_{task}")
             out[task] = extra_head(inputs=features, cls_idx=0)
         return out
 
@@ -973,13 +973,9 @@ class LEMON(nn.Module):
         for param in model.backbone.parameters():
             param.requires_grad = False
 
+        print(f"Total parameters in backbone: {sum(p.numel() for p in model.parameters()):,}")
         print(
-            "Total parameters in backbone: {:,}".format(sum(p.numel() for p in model.parameters()))
-        )
-        print(
-            "Learnable parameters: {:,}".format(
-                sum(p.numel() for p in model.parameters() if p.requires_grad)
-            )
+            f"Learnable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}"
         )
 
 
@@ -1009,7 +1005,7 @@ class VideoLEMON(LEMON):
         # return super().forward(input)
 
 
-from .memory import MemoryTokenizer, LightweightMemoryEncoder, MemoryAugmentedClassifier, MemoryBank
+from .memory import LightweightMemoryEncoder, MemoryAugmentedClassifier, MemoryBank, MemoryTokenizer
 
 
 @MODEL_REGISTRY.register()
@@ -1075,7 +1071,7 @@ class TAPISWithMemory(nn.Module):
 
         gt = kwargs.get("gt", [None] * current_embedding.size(0))
 
-        logit_tasks = {task: None for task in self.tasks}
+        logit_tasks = dict.fromkeys(self.tasks)
         for b, image_name in enumerate(image_names):
             # 3. Leggi dalla Memory Bank e costruisci i token
             mem_tokens_raw = self.memory_bank.get_list(video_id=image_name)

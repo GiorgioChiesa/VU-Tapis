@@ -10,10 +10,10 @@ TRAIN:
   CHECKPOINT_EPOCH_RESET: True
   FREEZE_ENCODER: False
   MIXED_PRECISION: True   # aggiungere questa riga
-TEST:
+VAL:
   ENABLE: True
   DATASET: orsi
-  BATCH_SIZE: 64 #24
+  BATCH_SIZE: 20 #24
 DATA:
   NUM_FRAMES: 16
   SAMPLING_RATE: 1
@@ -21,8 +21,8 @@ DATA:
   TRAIN_JITTER_SCALES: [256, 320]
   TRAIN_CROP_SIZE: 224
   TRAIN_CROP_SIZE_LARGE: 224
-  TEST_CROP_SIZE: 224
-  TEST_CROP_SIZE_LARGE: 224
+  VAL_CROP_SIZE: 224
+  VAL_CROP_SIZE_LARGE: 224
   INPUT_CHANNEL_NUM: [3]
   JUST_CENTER: True
 MVIT:
@@ -109,6 +109,6 @@ ENDOVIS_DATASET:
   USE_PREDS: False
   EXCLUDE_EVENT_NAMES: ["Idle", "Lymphadenectomy_L", "Lymphadenectomy_R", "Out_of_body", "Back_inside_body ","Final_reinforcing_suture" ,"Inside_abdomen", "Test_image_start", "Remove_gauze","Remove_hemostatic_agens", "Unsuccesful_clip_placement","Hemostatic_metal_clip_placement","Aiding_suture_stitch","Aiding_suture_clip_placement","3D_model", "Fat_removal", "Instrument_swap:_insertion", "Test_image_stop", "Incision_of_the_fascia_-_right"," Remove_needle_bladder_stretch_stitch", "Lift_right_seminal_vesicle", "Lift_left_seminal_vesicle", "Stitch_in_DVC_after_apical_dissection","Needle_removal_DVC_ligation", "Stitch_in_urethra", "Tie_suture", "Threads_removal","Vessel_loop_removal", "Camera_stop","Camera_out_of_body","Hemolock_clip_removal","Hemolock_clip_on_bladder_pedicle_attached_to_prostate"]
   TRAIN_GT_BOX_JSON: [all_merged.json]
-  TEST_GT_BOX_JSON: [all_merged.json]
+  VAL_GT_BOX_JSON: [all_merged.json]
   ORSI_ROOT_DIR: /data/orsi_tensors
   ADD_IDLE: 10

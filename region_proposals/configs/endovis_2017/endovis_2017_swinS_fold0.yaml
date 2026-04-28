@@ -17,4 +17,4 @@ MODEL:
 DATASETS:
   DATA_PATH: ""
   TRAIN: ("endovis-2017_train_fold0",)
-  TEST: ("endovis-2017_val_fold0",)
+  VAL: ("endovis-2017_val_fold0",)

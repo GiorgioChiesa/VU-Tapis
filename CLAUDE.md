@@ -7,7 +7,7 @@ This document outlines the standard, end-to-end workflow for training the TAPIS 
 The standard execution command for a long-term training run is:
 ```bash
 python -B tools/run_net.py --cfg configs/Orsi/TAPIS/TAPIS_LONG.yaml \
-    TRAIN.ENABLE True TEST.ENABLE True OUTPUT_DIR outputs/orsi/LONG/run1
+    TRAIN.ENABLE True VAL.ENABLE True OUTPUT_DIR outputs/orsi/LONG/run1
 ```
 
 ## ⚙️ Training Workflow (`tools/train_net.py`)

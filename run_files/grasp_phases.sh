@@ -4,8 +4,8 @@ export $(grep -v '^#' .secret/.export_vars.txt | xargs)
 NAME="adam-lr00000125"
 # Experiment setup
 TRAIN_FOLD="train" # or fold1, train
-TEST_FOLD="test" # or fold2, test
-EXP_PREFIX=$NAME # costumize
+VAL_FOLD="val" # or fold2, val
+EXP_PREFIX=$NAME # custom
 TASK="PHASES"
 ARCH="TAPIS"
 
@@ -19,7 +19,7 @@ OUTPUT_DIR="/scratch/Video_Understanding/GraSP/TAPIS/outputs/"$DATASET"/"$TASK"/
 FRAME_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frames"
 FRAME_LIST="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frame_lists"
 ANNOT_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations"
-COCO_ANN_PATH="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations/grasp_long-term_"$TEST_FOLD".json"
+COCO_ANN_PATH="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations/grasp_long-term_"$VAL_FOLD".json"
 CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_models/fold1/"$TASK".pyth"
 
 #-------------------------
@@ -27,10 +27,6 @@ CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_
 
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/tapis:$PYTHONPATH
 export PYTHONPATH=/home/chiesa/scratch/Video_Understanding/GraSP/TAPIS/region_proposals:$PYTHONPATH
-
-# export $(cut -f1 .secret/.export_vars.txt)
-# echo "Using WANDB_API_KEY: $WANDB_API"
-# wandb login --relogin --key $WANDB_API
 
 mkdir -p $OUTPUT_DIR
 
@@ -45,8 +41,8 @@ OUTPUT_DIR $OUTPUT_DIR \
 ENDOVIS_DATASET.FRAME_DIR $FRAME_DIR \
 ENDOVIS_DATASET.FRAME_LIST_DIR $FRAME_LIST \
 ENDOVIS_DATASET.TRAIN_LISTS $TRAIN_FOLD".csv" \
-ENDOVIS_DATASET.TEST_LISTS $TEST_FOLD".csv" \
+ENDOVIS_DATASET.VAL_LISTS $VAL_FOLD".csv" \
 ENDOVIS_DATASET.ANNOTATION_DIR $ANNOT_DIR \
 ENDOVIS_DATASET.TRAIN_GT_BOX_JSON "grasp_short-term_"$TRAIN_FOLD"_polygon.json" \
-ENDOVIS_DATASET.TEST_GT_BOX_JSON "grasp_short-term_"$TEST_FOLD"_polygon.json" \
-ENDOVIS_DATASET.TEST_COCO_ANNS $COCO_ANN_PATH 
+ENDOVIS_DATASET.VAL_GT_BOX_JSON "grasp_short-term_"$VAL_FOLD"_polygon.json" \
+ENDOVIS_DATASET.VAL_COCO_ANNS $COCO_ANN_PATH

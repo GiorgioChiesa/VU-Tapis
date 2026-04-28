@@ -44,10 +44,10 @@ class SurgeryMeter(object):
         mode (str): `train`, `val`, or `test` mode.
         """
         self.cfg = cfg
-        self.dataset_name = cfg.TEST.DATASET
+        self.dataset_name = cfg.VAL.DATASET
         self.parallel = cfg.NUM_GPUS > 1
         # if self.parallel:
-        self.join_funct = DATASET_REGISTRY.get(self.dataset_name.capitalize())(cfg,'test',False).frame_num_joining
+        self.join_funct = DATASET_REGISTRY.get(self.dataset_name.capitalize())(cfg,'val',False).frame_num_joining
         self.eval_train = cfg.TRAIN.EVAL_TRAIN
         self.regions = cfg.REGIONS.ENABLE
 
@@ -64,7 +64,7 @@ class SurgeryMeter(object):
                     self.tasks += pres_tasks
                     self.metrics += ["mAP"]*len(pres_tasks)
         
-        self.generate_masks = not cfg.FEATURES.PRECALCULATE_TEST
+        self.generate_masks = not cfg.FEATURES.PRECALCULATE_VAL
 
         self.all_classes = cfg.TASKS.NUM_CLASSES
         self.lr = None
@@ -78,10 +78,10 @@ class SurgeryMeter(object):
         self.full_map = {}
         self.all_boxes,  self.all_detect_names, self.all_names = [], [], []
         self.overall_iters = overall_iters
-        self.groundtruth = cfg.ENDOVIS_DATASET.TEST_COCO_ANNS
+        self.groundtruth = cfg.ENDOVIS_DATASET.VAL_COCO_ANNS
         self.segmentation = cfg.REGIONS.ENABLE and cfg.REGIONS.LEVEL=='segmentation'
         self.all_labels = {k: [] for k in self.tasks}
-        data = load_json(cfg.ENDOVIS_DATASET.TEST_COCO_ANNS)
+        data = load_json(cfg.ENDOVIS_DATASET.VAL_COCO_ANNS)
         self.class_dict = {task: data[f'{task}_categories'] for task in self.tasks}
         try: 
             for task, dist_file in zip(self.tasks, cfg.TASKS.WEIGHT_LOSS_BY_CLASS):
@@ -103,7 +103,7 @@ class SurgeryMeter(object):
             self.mask_path = None
             
         if self.segmentation and not self.generate_masks:
-            with open(os.path.join(cfg.ENDOVIS_DATASET.ANNOTATION_DIR,cfg.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON)) as f:
+            with open(os.path.join(cfg.ENDOVIS_DATASET.ANNOTATION_DIR,cfg.ENDOVIS_DATASET.VAL_PREDICT_BOX_JSON)) as f:
                 self.region_proposals = json.load(f)['annotations']
             final_proposals = {}
             for rp in self.region_proposals:
@@ -159,7 +159,7 @@ class SurgeryMeter(object):
                 "dt_net": self.net_timer.seconds(),
                 "mode": self.mode,
             }
-        elif self.mode == "test":
+        elif self.mode == "val":
             stats = {
                 "_type": "{}_iter".format(self.mode),
                 "cur_iter": "{}".format(cur_iter + 1),
@@ -222,7 +222,7 @@ class SurgeryMeter(object):
             lr (float): learning rate.
             labels (dict): labels per task (optional, for confusion matrix logging).
         """
-        if self.eval_train or self.mode in ["val", "test"] or (labels is not None and preds is not None):
+        if self.eval_train or self.mode == "val" or (labels is not None and preds is not None):
             
             for task in self.tasks:
                 if isinstance(preds[task], torch.Tensor):
@@ -323,7 +323,7 @@ class SurgeryMeter(object):
         Args:
             cur_epoch (int): the number of current epoch.
         """
-        if self.mode in ["val", "test"]:
+        if self.mode == "val":
             metrics_val, mean_map, out_files = self.finalize_metrics(cur_epoch +1, log=False, mode=self.mode)
             stats = {
                 "_type": "{}_epoch".format(self.mode),

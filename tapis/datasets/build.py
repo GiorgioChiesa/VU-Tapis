@@ -20,7 +20,7 @@ def build_dataset(dataset_name, cfg, split):
         cfg (CfgNode): configs. Details can be found in
             slowfast/config/defaults.py
         split (str): the split of the data loader. Options include `train`,
-            `val`, and `test`.
+            and `val`.
     Returns:
         Dataset: a constructed dataset specified by dataset_name.
     """

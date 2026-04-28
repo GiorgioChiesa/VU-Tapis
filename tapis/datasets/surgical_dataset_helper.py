@@ -3,34 +3,39 @@
 
 import gc
 import json
-import os
-from re import split
-import torch
 import logging
+import os
 from collections import defaultdict
+from re import split
+
+import torch
+
 from tapis.utils.env import pathmgr
 
 logger = logging.getLogger(__name__)
 
-def load_features_boxes(cfg,split):
+
+def load_features_boxes(cfg, split):
     """
     Load boxes features from region proposal model.
 
     Args:
         cfg (CfgNode): config.
 
-    Returns:
+    Returns
+    -------
         features (tensor): a tensor of faster weights.
     """
-    
-    if split=='train':
-        features = torch.load(cfg.FEATURES.TRAIN_FEATURES_PATH) 
+    if split == "train":
+        features = torch.load(cfg.FEATURES.TRAIN_FEATURES_PATH)
     else:
-        features = torch.load(cfg.FEATURES.TEST_FEATURES_PATH) 
-    features = {feat['file_name'] : feat['features'] for feat in features}
-    
-    for file,boxes in features.items():
-        assert all(len(feats)==cfg.FEATURES.DIM_FEATURES for feats in boxes.values()), f'Incorrect feature length in image{file}. Excpected size {cfg.FEATURES.DIM_FEATURES}'
+        features = torch.load(cfg.FEATURES.VAL_FEATURES_PATH)
+    features = {feat["file_name"]: feat["features"] for feat in features}
+
+    for file, boxes in features.items():
+        assert all(len(feats) == cfg.FEATURES.DIM_FEATURES for feats in boxes.values()), (
+            f"Incorrect feature length in image{file}. Excpected size {cfg.FEATURES.DIM_FEATURES}"
+        )
     return features
 
 
@@ -42,18 +47,25 @@ def load_image_lists(cfg, is_train):
         cfg (CfgNode): config.
         is_train (bool): if it is training dataset or not.
 
-    Returns:
+    Returns
+    -------
         image_paths (list[list]): a list of items. Each item (also a list)
             corresponds to one video and contains the paths of images for
             this video.
         video_idx_to_name (list): a list which stores video names.
     """
     if is_train:
-        list_filenames = [os.path.join(cfg.ENDOVIS_DATASET.FRAME_LIST_DIR,train_file) for train_file in cfg.ENDOVIS_DATASET.TRAIN_LISTS]
+        list_filenames = [
+            os.path.join(cfg.ENDOVIS_DATASET.FRAME_LIST_DIR, train_file)
+            for train_file in cfg.ENDOVIS_DATASET.TRAIN_LISTS
+        ]
     else:
-        list_filenames = [os.path.join(cfg.ENDOVIS_DATASET.FRAME_LIST_DIR, test_file) for test_file in cfg.ENDOVIS_DATASET.TEST_LISTS]
+        list_filenames = [
+            os.path.join(cfg.ENDOVIS_DATASET.FRAME_LIST_DIR, test_file)
+            for test_file in cfg.ENDOVIS_DATASET.VAL_LISTS
+        ]
     # list_filenames = [
-    #     os.path.join(cfg.ENDOVIS_DATASET.FRAME_LIST_DIR, cfg.ENDOVIS_DATASET.TRAIN_LISTS if is_train else cfg.ENDOVIS_DATASET.TEST_LISTS)
+    #     os.path.join(cfg.ENDOVIS_DATASET.FRAME_LIST_DIR, cfg.ENDOVIS_DATASET.TRAIN_LISTS if is_train else cfg.ENDOVIS_DATASET.VAL_LISTS)
     # ]
     image_paths = defaultdict(list)
     video_name_to_idx = {}
@@ -73,7 +85,7 @@ def load_image_lists(cfg, is_train):
                     video_idx_to_name.append(video_name)
 
                 data_key = video_name_to_idx[video_name]
-                image_paths[data_key].append(os.path.join(cfg.ENDOVIS_DATASET.FRAME_DIR,row[3]))
+                image_paths[data_key].append(os.path.join(cfg.ENDOVIS_DATASET.FRAME_DIR, row[3]))
 
     image_paths = [image_paths[i] for i in range(len(image_paths))]
     logger.info("Finished loading image paths from: %s" % ", ".join(list_filenames))
@@ -87,32 +99,49 @@ def load_boxes_and_labels(cfg, mode):
 
     Args:
         cfg (CfgNode): config.
-        mode (str): 'train', 'val', or 'test' mode.
-    Returns:
+        mode (str): 'train' or 'val' mode.
+
+    Returns
+    -------
         all_boxes (dict): a dict which maps from `video_name` and
             `frame_sec` to a list of `box`. Each `box` is a
             {`bbox`:<box_coord>, *`box_labels`:<label> where `box_coord` is the
             coordinates of box and 'box_labels` are the corresponding
             labels for the box.
     """
-
-    if mode=='train':
+    if mode == "train":
         if cfg.ENDOVIS_DATASET.INCLUDE_GT or not cfg.ENDOVIS_DATASET.USE_PREDS:
-            gt_lists =[cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON] if isinstance(cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON, str) else cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON
+            gt_lists = (
+                [cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON]
+                if isinstance(cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON, str)
+                else cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON
+            )
         else:
             gt_lists = []
         if cfg.ENDOVIS_DATASET.USE_PREDS:
-            pred_lists = [cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON] if isinstance(cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON, str) else cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON
+            pred_lists = (
+                [cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON]
+                if isinstance(cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON, str)
+                else cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON
+            )
         else:
             pred_lists = []
         # gt_lists =[cfg.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON] if cfg.ENDOVIS_DATASET.INCLUDE_GT or \
         #                                                     not cfg.ENDOVIS_DATASET.USE_PREDS else []
         # pred_lists = [cfg.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON] if cfg.ENDOVIS_DATASET.USE_PREDS else []
     elif cfg.ENDOVIS_DATASET.USE_PREDS:
-        gt_lists =[]
-        pred_lists = [cfg.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON] if isinstance(cfg.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON, str) else cfg.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON
+        gt_lists = []
+        pred_lists = (
+            [cfg.ENDOVIS_DATASET.VAL_PREDICT_BOX_JSON]
+            if isinstance(cfg.ENDOVIS_DATASET.VAL_PREDICT_BOX_JSON, str)
+            else cfg.ENDOVIS_DATASET.VAL_PREDICT_BOX_JSON
+        )
     else:
-        gt_lists = [cfg.ENDOVIS_DATASET.TEST_GT_BOX_JSON] if isinstance(cfg.ENDOVIS_DATASET.TEST_GT_BOX_JSON, str) else cfg.ENDOVIS_DATASET.TEST_GT_BOX_JSON
+        gt_lists = (
+            [cfg.ENDOVIS_DATASET.VAL_GT_BOX_JSON]
+            if isinstance(cfg.ENDOVIS_DATASET.VAL_GT_BOX_JSON, str)
+            else cfg.ENDOVIS_DATASET.VAL_GT_BOX_JSON
+        )
         pred_lists = []
 
     ann_filenames = [
@@ -127,15 +156,16 @@ def load_boxes_and_labels(cfg, mode):
         ann_is_gt_box=ann_is_gt_box,
         detect_thresh=detect_thresh,
         cfg=cfg,
-        split=mode
+        split=mode,
     )
-    
+
     logger.info("Finished loading annotations from: %s" % ", ".join(ann_filenames))
-    logger.info("Detection threshold: {}".format(detect_thresh))
+    logger.info(f"Detection threshold: {detect_thresh}")
     logger.info("Number of annotations: %d" % count)
     logger.info("Number of unique annotations: %d" % count_unqiue)
 
     return all_boxes
+
 
 def parse_bboxes_file(ann_filenames, ann_is_gt_box, detect_thresh, cfg, split):
     """
@@ -148,46 +178,59 @@ def parse_bboxes_file(ann_filenames, ann_is_gt_box, detect_thresh, cfg, split):
         boxes_sample_rate (int): sample rate for test bounding boxes. Get 1 every `boxes_sample_rate`.
     """
     count = 0
-    filter = split=='train' and cfg.TRAIN.FILTER_EMPTY
+    filter = split == "train" and cfg.TRAIN.FILTER_EMPTY
     annotated_frames_dict = {}
-    complete_frames = {} # 
+    complete_frames = {}
     id2frame = {}
     for filename, is_gt_box in zip(ann_filenames, ann_is_gt_box):
         with pathmgr.open(filename, "r") as f:
             data = json.load(f)
-        for image in data['images']:
-            id2frame[image['id']] = (image['video_name'], image['frame_num'], image['width'], image['height'])
-            if image['video_name'] not in annotated_frames_dict:
-                annotated_frames_dict[image['video_name']] = {image['frame_num']:[]}
-                complete_frames[image['video_name']] = {image['frame_num']: True}
-            elif image['frame_num'] not in annotated_frames_dict[image['video_name']]:
-                annotated_frames_dict[image['video_name']][image['frame_num']] = []
-                complete_frames[image['video_name']][image['frame_num']] = True
+        for image in data["images"]:
+            id2frame[image["id"]] = (
+                image["video_name"],
+                image["frame_num"],
+                image["width"],
+                image["height"],
+            )
+            if image["video_name"] not in annotated_frames_dict:
+                annotated_frames_dict[image["video_name"]] = {image["frame_num"]: []}
+                complete_frames[image["video_name"]] = {image["frame_num"]: True}
+            elif image["frame_num"] not in annotated_frames_dict[image["video_name"]]:
+                annotated_frames_dict[image["video_name"]][image["frame_num"]] = []
+                complete_frames[image["video_name"]][image["frame_num"]] = True
             elif not is_gt_box:
-                logger.warning('Thres seem to be a repeated video name or frame number, better check if this is valid and comment this line if so.')
+                logger.warning(
+                    "Thres seem to be a repeated video name or frame number, better check if this is valid and comment this line if so."
+                )
                 breakpoint()
-        
-        for annotation in data['annotations']:
-            if verify_annots(annotation,cfg,filter):
-                video_name, frame_num, width, height = id2frame[annotation['image_id']]
-                labels = {task:annotation[task] for task in cfg.TASKS.TASKS}
-                labels['is_gt'] = is_gt_box
+
+        for annotation in data["annotations"]:
+            if verify_annots(annotation, cfg, filter):
+                video_name, frame_num, width, height = id2frame[annotation["image_id"]]
+                labels = {task: annotation[task] for task in cfg.TASKS.TASKS}
+                labels["is_gt"] = is_gt_box
 
                 if cfg.REGIONS.ENABLE:
                     if not is_gt_box:
-                        assert 'score' in annotation, f'No score in prediction with id {annotation["id"]}'
-                        if annotation['score']<detect_thresh:
+                        assert "score" in annotation, (
+                            f"No score in prediction with id {annotation['id']}"
+                        )
+                        if annotation["score"] < detect_thresh:
                             continue
 
-                    x1,y1,w,h = annotation['bbox']
-                    bbox = [x1,y1,x1+w,y1+h]
+                    x1, y1, w, h = annotation["bbox"]
+                    bbox = [x1, y1, x1 + w, y1 + h]
 
-                    labels['bbox'] = bbox
-                    #TODO: REMOVE when all done
+                    labels["bbox"] = bbox
+                    # TODO: REMOVE when all done
                     try:
-                        assert bbox not in [item['bbox'] for item in annotated_frames_dict[video_name][frame_num]], f'bbox {bbox} is reapeted in frame {frame_num} of video {video_name}'
+                        assert bbox not in [
+                            item["bbox"] for item in annotated_frames_dict[video_name][frame_num]
+                        ], f"bbox {bbox} is reapeted in frame {frame_num} of video {video_name}"
                     except AssertionError:
-                        logger.warning(f'Repeated bounding box in dataset, check if this is ok and comment this line if so.')
+                        logger.warning(
+                            "Repeated bounding box in dataset, check if this is ok and comment this line if so."
+                        )
                         if cfg.ENDOVIS_DATASET.INCLUDE_GT:
                             pass
                         else:
@@ -196,48 +239,60 @@ def parse_bboxes_file(ann_filenames, ann_is_gt_box, detect_thresh, cfg, split):
                 annotated_frames_dict[video_name][frame_num].append(labels)
                 count += 1
             else:
-                video_name, frame_num, width, height = id2frame[annotation['image_id']]
+                video_name, frame_num, width, height = id2frame[annotation["image_id"]]
                 complete_frames[video_name][frame_num] = False
-        
+
     count_unique = 0
     all_labels = {}
     # Filter keyframes without complete annotations for all tasks
     for video_name in annotated_frames_dict:
-        all_labels[video_name]={}
+        all_labels[video_name] = {}
         for frame in annotated_frames_dict[video_name]:
-            if len(annotated_frames_dict[video_name][frame]) and \
-                (complete_frames[video_name][frame] or not cfg.REGIONS.FILTER_INCOMPLETE):
+            if len(annotated_frames_dict[video_name][frame]) and (
+                complete_frames[video_name][frame] or not cfg.REGIONS.FILTER_INCOMPLETE
+            ):
                 all_labels[video_name][frame] = annotated_frames_dict[video_name][frame]
                 count_unique += len(annotated_frames_dict[video_name][frame])
-    
+
     del complete_frames
-    assert count and count_unique, f"There are no annotations for this list of tasks: {cfg.TASKS.TASKS}"
-    
+    assert count and count_unique, (
+        f"There are no annotations for this list of tasks: {cfg.TASKS.TASKS}"
+    )
+
     data = None
     annotated_frames_dict = None
     gc.collect()
 
     return all_labels, count, count_unique
 
-def verify_annots(annotation,cfg,filter):
+
+def verify_annots(annotation, cfg, filter):
     """
-        Verify that all annotations vage correct integer values and have labels for all desired tasks
-        and have bounding boxes or segmentations for localized tasks
+    Verify that all annotations vage correct integer values and have labels for all desired tasks
+    and have bounding boxes or segmentations for localized tasks
     """
     if filter:
-        tasks = all(task in annotation and (annotation[task]>-1 if type(annotation[task]) is int else min(annotation[task])>-1) for task in cfg.TASKS.TASKS)
+        tasks = all(
+            task in annotation
+            and (
+                annotation[task] > -1
+                if type(annotation[task]) is int
+                else min(annotation[task]) > -1
+            )
+            for task in cfg.TASKS.TASKS
+        )
     else:
         tasks = all(task in annotation for task in cfg.TASKS.TASKS)
     if not cfg.REGIONS.ENABLE:
         return tasks
-    elif cfg.REGIONS.LEVEL == 'detection':
-        return tasks and ('bbox' in annotation)
-    elif cfg.REGIONS.LEVEL == 'segmentation':
-        return tasks and ('segmentation' in annotation) and ('bbox' in annotation)
-    else:
-        raise NotImplementedError(f'{cfg.REGIONS.LEVEL} level not supported')
+    if cfg.REGIONS.LEVEL == "detection":
+        return tasks and ("bbox" in annotation)
+    if cfg.REGIONS.LEVEL == "segmentation":
+        return tasks and ("segmentation" in annotation) and ("bbox" in annotation)
+    raise NotImplementedError(f"{cfg.REGIONS.LEVEL} level not supported")
 
-def get_keyframe_data(boxes_and_labels,keyframe_mapping):
+
+def get_keyframe_data(boxes_and_labels, keyframe_mapping):
     """
     Getting keyframe indices, boxes and labels in the dataset.
 
@@ -245,26 +300,27 @@ def get_keyframe_data(boxes_and_labels,keyframe_mapping):
         boxes_and_labels (list[dict]): a list which maps from video_idx to a dict.
             Each dict `frame_sec` to a list of boxes and corresponding labels.
 
-    Returns:
+    Returns
+    -------
         keyframe_indices (list): a list of indices of the keyframes.
         keyframe_boxes_and_labels (list[list[list]]): a list of list which maps from
             video_idx and sec_idx to a list of boxes and corresponding labels.
     """
-
     keyframe_indices = []
     keyframe_boxes_and_labels = []
     count = 0
     for video_idx in range(len(boxes_and_labels)):
         keyframe_boxes_and_labels.append([])
-        for sec_idx,sec in enumerate(boxes_and_labels[video_idx]):
-            keyframe_indices.append((video_idx, sec_idx, sec, keyframe_mapping(video_idx, sec_idx, sec)))
-            keyframe_boxes_and_labels[video_idx].append(
-                boxes_and_labels[video_idx][sec]
+        for sec_idx, sec in enumerate(boxes_and_labels[video_idx]):
+            keyframe_indices.append(
+                (video_idx, sec_idx, sec, keyframe_mapping(video_idx, sec_idx, sec))
             )
+            keyframe_boxes_and_labels[video_idx].append(boxes_and_labels[video_idx][sec])
             count += 1
     logger.info("%d keyframes used." % count)
 
     return keyframe_indices, keyframe_boxes_and_labels
+
 
 def get_num_boxes_used(keyframe_indices, keyframe_boxes_and_labels):
     """
@@ -275,10 +331,10 @@ def get_num_boxes_used(keyframe_indices, keyframe_boxes_and_labels):
         keyframe_boxes_and_labels (list[list[list]]): a list of list which maps from
             video_idx and sec_idx to a list of boxes and corresponding labels.
 
-    Returns:
+    Returns
+    -------
         count (int): total number of used boxes.
     """
-
     count = 0
     for video_idx, sec_idx, _, _ in keyframe_indices:
         count += len(keyframe_boxes_and_labels[video_idx][sec_idx])

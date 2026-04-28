@@ -168,35 +168,35 @@ _C.MULTIGRID.DEFAULT_S = 0
 
 
 # ---------------------------------------------------------------------------- #
-# Testing options
+# Validation options
 # ---------------------------------------------------------------------------- #
-_C.TEST = CfgNode()
+_C.VAL = CfgNode()
 
-# If True test the model, else skip the testing.
-_C.TEST.ENABLE = True
+# If True validate the model during training, else skip the validation.
+_C.VAL.ENABLE = True
 
-# Dataset for testing.
-_C.TEST.DATASET = "psi_ava"
+# Dataset for validation.
+_C.VAL.DATASET = "psi_ava"
 
 # Total mini-batch size
-_C.TEST.BATCH_SIZE = 8
+_C.VAL.BATCH_SIZE = 8
 
 # Path to the checkpoint to load the initial weight.
-_C.TEST.CHECKPOINT_FILE_PATH = ""
+_C.VAL.CHECKPOINT_FILE_PATH = ""
 
 # Number of clips to sample from a video uniformly for aggregating the
 # prediction results.
-_C.TEST.NUM_ENSEMBLE_VIEWS = 10
+_C.VAL.NUM_ENSEMBLE_VIEWS = 10
 
 # Number of crops to sample from a frame spatially for aggregating the
 # prediction results.
-_C.TEST.NUM_SPATIAL_CROPS = 3
+_C.VAL.NUM_SPATIAL_CROPS = 3
 
 # Checkpoint types include `caffe2` or `pytorch`.
-_C.TEST.CHECKPOINT_TYPE = "pytorch"
+_C.VAL.CHECKPOINT_TYPE = "pytorch"
 
 # Path to saving prediction results file.
-_C.TEST.SAVE_RESULTS_PATH = ""
+_C.VAL.SAVE_RESULTS_PATH = ""
 
 
 # -----------------------------------------------------------------------------
@@ -635,10 +635,10 @@ _C.DATA.TRAIN_CROP_SIZE = 224
 _C.DATA.TRAIN_CROP_SIZE_LARGE = 224
 
 # The spatial crop size for testing.
-_C.DATA.TEST_CROP_SIZE = 224
+_C.DATA.VAL_CROP_SIZE = 224
 
 # The spatial crop size for testing.
-_C.DATA.TEST_CROP_SIZE_LARGE = 224
+_C.DATA.VAL_CROP_SIZE_LARGE = 224
 
 # Input videos may has different fps, convert it to the target video fps before
 # frame sampling.
@@ -837,15 +837,15 @@ _C.ENDOVIS_DATASET.ANNOTATION_DIR = ""
 # Filenames of training samples list files.
 _C.ENDOVIS_DATASET.TRAIN_LISTS = ["train.csv"]
 
-# Filenames of test samples list files.
-_C.ENDOVIS_DATASET.TEST_LISTS = ["val.csv"]
+# Filenames of validation samples list files.
+_C.ENDOVIS_DATASET.VAL_LISTS = ["val.csv"]
 
 # Filenames of box list files for training. Note that we assume files which
 # contains predicted boxes will have a suffix "predicted_boxes" in the
 # filename.
 _C.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON = ["train_coco_anns.json"]
 
-_C.ENDOVIS_DATASET.TEST_GT_BOX_JSON = ["val_coco_anns.json"]
+_C.ENDOVIS_DATASET.VAL_GT_BOX_JSON = ["val_coco_anns.json"]
 
 # Orsi-specific dataset options
 _C.ENDOVIS_DATASET.ORSI_ROOT_DIR = "/data/orsi_tensors"
@@ -858,8 +858,8 @@ _C.ENDOVIS_DATASET.ADD_IDLE = 0
 # Filenames of box list files for train.
 _C.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON = ["train_coco_preds.json"]
 
-# Filenames of box list files for test.
-_C.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON = ["val_coco_preds.json"]
+# Filenames of box list files for validation.
+_C.ENDOVIS_DATASET.VAL_PREDICT_BOX_JSON = ["val_coco_preds.json"]
 
 # This option controls the score threshold for the predicted boxes to use.
 _C.ENDOVIS_DATASET.DETECTION_SCORE_THRESH = 0.0
@@ -875,8 +875,8 @@ _C.ENDOVIS_DATASET.TRAIN_USE_COLOR_AUGMENTATION = False
 # method (otherwise combine with color jitter method).
 _C.ENDOVIS_DATASET.TRAIN_PCA_JITTER_ONLY = True
 
-# Whether to do horizontal flipping during test.
-_C.ENDOVIS_DATASET.TEST_FORCE_FLIP = False
+# Whether to do horizontal flipping during validation.
+_C.ENDOVIS_DATASET.VAL_FORCE_FLIP = False
 
 # The name of the file to the ava groundtruth.
 _C.ENDOVIS_DATASET.GROUNDTRUTH_FILE = ""
@@ -884,8 +884,8 @@ _C.ENDOVIS_DATASET.GROUNDTRUTH_FILE = ""
 # Backend to process image, includes `pytorch` and `cv2`.
 _C.ENDOVIS_DATASET.IMG_PROC_BACKEND = "cv2"
 
-# Test annotation file of groundtruth in coco
-_C.ENDOVIS_DATASET.TEST_COCO_ANNS = ""
+# Validation annotation file of groundtruth in coco
+_C.ENDOVIS_DATASET.VAL_COCO_ANNS = ""
 
 # Supported Tasks
 _C.ENDOVIS_DATASET.TASKS = ["phases", "steps", "instruments", "actions"]
@@ -973,7 +973,7 @@ _C.FEATURES.MODEL = "detr"
 _C.FEATURES.TRAIN_FEATURES_PATH = ""
 
 # Path to .pth file with the detected validation boxes features
-_C.FEATURES.TEST_FEATURES_PATH = ""
+_C.FEATURES.VAL_FEATURES_PATH = ""
 
 # Use a Region Proposal Network to calculate region features on the fly instead of loading precalculated featrues
 _C.FEATURES.USE_RPN = False
@@ -985,7 +985,7 @@ _C.FEATURES.RPN_CFG = CfgNode()
 _C.FEATURES.RPN_CFG_PATH = ""
 
 # Use a precaulculated regions for test instead of RPN
-_C.FEATURES.PRECALCULATE_TEST = True
+_C.FEATURES.PRECALCULATE_VAL = True
 
 # Path to Mask2Former pretrained weights
 _C.FEATURES.RPN_CHECKPOINT = ""
@@ -1018,7 +1018,9 @@ def assert_and_infer_cfg(cfg):
     # GPU assertion
     cfg.NUM_GPUS = len(cfg.GPUIDS)
     cfg.NUM_SHARDS = cfg.NUM_GPUS
-    import os, torch
+    import os
+
+    import torch
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(cfg.GPUIDS)[1:-1].replace(" ", "")
     assert torch.cuda.is_available(), "Cuda is not available"
@@ -1029,9 +1031,9 @@ def assert_and_infer_cfg(cfg):
     assert cfg.TRAIN.CHECKPOINT_TYPE in ["pytorch", "caffe2"]
     assert cfg.NUM_GPUS == 0 or cfg.TRAIN.BATCH_SIZE % cfg.NUM_GPUS == 0
 
-    # TEST assertions.
-    assert cfg.TEST.CHECKPOINT_TYPE in ["pytorch", "caffe2"]
-    assert cfg.NUM_GPUS == 0 or cfg.TEST.BATCH_SIZE % cfg.NUM_GPUS == 0
+    # VAL assertions.
+    assert cfg.VAL.CHECKPOINT_TYPE in ["pytorch", "caffe2"]
+    assert cfg.NUM_GPUS == 0 or cfg.VAL.BATCH_SIZE % cfg.NUM_GPUS == 0
 
     # RESNET assertions.
     assert cfg.RESNET.NUM_GROUPS > 0

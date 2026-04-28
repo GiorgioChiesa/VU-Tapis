@@ -3,8 +3,8 @@
 
 NAME="Finetune_All" # Experiment setup
 TRAIN_FOLD="train" # or fold1, train
-TEST_FOLD="test" # or fold2, test
-EXP_PREFIX=$NAME # costumize
+VAL_FOLD="val" # or fold2, val
+EXP_PREFIX=$NAME # custom
 TASK="ALL"
 ARCH="TAPIS"
 
@@ -18,9 +18,9 @@ OUTPUT_DIR="/scratch/Video_Understanding/GraSP/TAPIS/outputs/"$DATASET"/"$TASK"/
 FRAME_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frames"
 FRAME_LIST="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frame_lists"
 ANNOT_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations"
-COCO_ANN_PATH="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations/grasp_short-term_"$TEST_FOLD".json"
+COCO_ANN_PATH="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations/grasp_short-term_"$VAL_FOLD".json"
 FF_TRAIN="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/features/"$TRAIN_FOLD"_train_region_features.pth" 
-FF_TEST="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/features/"$TEST_FOLD"_val_region_features.pth"
+FF_VAL="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/features/"$VAL_FOLD"_val_region_features.pth"
 CHECKPOINT="" # "/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_models/"$TRAIN_FOLD"/SHORT.pyth"
 RPN_CHECKPOINT="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/pretrained_models/"$TRAIN_FOLD"/SEGMENTATION_BASELINE/swinl.pth"
 RPN_CONFIG="/scratch/Video_Understanding/GraSP/TAPIS/region_proposals/configs/grasp/GraSP_SwinL_regions.yaml"
@@ -40,21 +40,21 @@ WANDB_ENABLE True \
 TRAIN.CHECKPOINT_FILE_PATH $CHECKPOINT \
 TRAIN.CHECKPOINT_EPOCH_RESET True \
 TRAIN.BATCH_SIZE 8 \
-TEST.BATCH_SIZE 16 \
+VAL.BATCH_SIZE 16 \
 ENDOVIS_DATASET.FRAME_DIR $FRAME_DIR \
 ENDOVIS_DATASET.FRAME_LIST_DIR $FRAME_LIST \
 ENDOVIS_DATASET.TRAIN_LISTS $TRAIN_FOLD".csv" \
-ENDOVIS_DATASET.TEST_LISTS $TEST_FOLD".csv" \
+ENDOVIS_DATASET.VAL_LISTS $VAL_FOLD".csv" \
 ENDOVIS_DATASET.ANNOTATION_DIR $ANNOT_DIR \
-ENDOVIS_DATASET.TEST_COCO_ANNS $COCO_ANN_PATH \
+ENDOVIS_DATASET.VAL_COCO_ANNS $COCO_ANN_PATH \
 ENDOVIS_DATASET.TRAIN_GT_BOX_JSON "grasp_short-term_"$TRAIN_FOLD".json" \
 ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON $TRAIN_FOLD"_train_preds.json" \
-ENDOVIS_DATASET.TEST_GT_BOX_JSON "grasp_short-term_"$TEST_FOLD".json" \
-ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON $TEST_FOLD"_val_preds.json" \
+ENDOVIS_DATASET.VAL_GT_BOX_JSON "grasp_short-term_"$VAL_FOLD".json" \
+ENDOVIS_DATASET.VAL_PREDICT_BOX_JSON $VAL_FOLD"_val_preds.json" \
 FEATURES.TRAIN_FEATURES_PATH $FF_TRAIN \
-FEATURES.TEST_FEATURES_PATH $FF_TEST \
+FEATURES.VAL_FEATURES_PATH $FF_VAL \
 OUTPUT_DIR $OUTPUT_DIR \
 FEATURES.USE_RPN True \
 FEATURES.RPN_CFG_PATH $RPN_CONFIG \
 FEATURES.RPN_CHECKPOINT $RPN_CHECKPOINT \
-FEATURES.PRECALCULATE_TEST True # Switch to false to avoid using precalculated regions for inference
+FEATURES.PRECALCULATE_VAL True # Switch to false to avoid using precalculated regions for inference

@@ -90,8 +90,8 @@ def load_config(args):
         cfg.OUTPUT_DIR = args.output_dir
     # if "[" in str(cfg.ENDOVIS_DATASET.TRAIN_LISTS) and "]" in str(cfg.ENDOVIS_DATASET.TRAIN_LISTS):
     #     cfg.ENDOVIS_DATASET.TRAIN_LISTS = eval(cfg.ENDOVIS_DATASET.TRAIN_LISTS)
-    # if "[" in str(cfg.ENDOVIS_DATASET.TEST_LISTS) and "]" in str(cfg.ENDOVIS_DATASET.TEST_LISTS):
-    #     cfg.ENDOVIS_DATASET.TEST_LISTS = eval(cfg.ENDOVIS_DATASET.TEST_LISTS)
+    # if "[" in str(cfg.ENDOVIS_DATASET.VAL_LISTS) and "]" in str(cfg.ENDOVIS_DATASET.VAL_LISTS):
+    #     cfg.ENDOVIS_DATASET.VAL_LISTS = eval(cfg.ENDOVIS_DATASET.VAL_LISTS)
 
     # Create the checkpoint dir.
     cu.make_checkpoint_dir(cfg.OUTPUT_DIR)

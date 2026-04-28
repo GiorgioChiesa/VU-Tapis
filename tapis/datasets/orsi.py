@@ -23,8 +23,9 @@ from copy import deepcopy
 
 import numpy as np
 import pandas as pd
-import torch
 import regex as re
+import torch
+
 from tapis.datasets import cv2_transform
 
 from . import utils as utils
@@ -88,8 +89,8 @@ class Orsi(torch.utils.data.Dataset):
             self._pca_eigval = cfg.DATA.TRAIN_PCA_EIGVAL
             self._pca_eigvec = cfg.DATA.TRAIN_PCA_EIGVEC
         else:
-            self._crop_size = (cfg.DATA.TEST_CROP_SIZE, cfg.DATA.TEST_CROP_SIZE_LARGE)
-            self._test_force_flip = cfg.ENDOVIS_DATASET.TEST_FORCE_FLIP
+            self._crop_size = (cfg.DATA.VAL_CROP_SIZE, cfg.DATA.VAL_CROP_SIZE_LARGE)
+            self._test_force_flip = cfg.ENDOVIS_DATASET.VAL_FORCE_FLIP
             self.aspect_ratio_th = cfg.ENDOVIS_DATASET.ASPECT_RATION_TH
 
         # paths
@@ -188,9 +189,7 @@ class Orsi(torch.utils.data.Dataset):
         if self._split == "train":
             list_files = self.cfg.ENDOVIS_DATASET.TRAIN_LISTS
         elif self._split == "val":
-            list_files = self.cfg.ENDOVIS_DATASET.TEST_LISTS
-        elif self._split == "test":
-            list_files = self.cfg.ENDOVIS_DATASET.TEST_LISTS
+            list_files = self.cfg.ENDOVIS_DATASET.VAL_LISTS
         else:
             raise ValueError(f"Unsupported split {self._split} for Orsi dataset")
 
@@ -202,8 +201,7 @@ class Orsi(torch.utils.data.Dataset):
             base = os.path.basename(f)
             if base.endswith(".csv"):
                 patient = base[:-4]
-                if patient.endswith("_all_label"):
-                    patient = patient[: -len("_all_label")]
+                patient = patient.removesuffix("_all_label")
                 patients.append(patient)
             else:
                 patients.append(base)
@@ -271,8 +269,6 @@ class Orsi(torch.utils.data.Dataset):
 
         saving = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
         saving.to_csv(os.path.join(self.cfg.OUTPUT_DIR, f"{self._split}_data.csv"), index=False)
-
-        return
 
     def collapse_event_dfs(self):
         """
@@ -391,7 +387,7 @@ class Orsi(torch.utils.data.Dataset):
 
         all_patient_names = self.dfs["patient_name"].unique()
         name_to_id = dict(
-            zip(all_patient_names, (int(re.findall("(\d+)", i)[0]) for i in all_patient_names))
+            zip(all_patient_names, (int(re.findall(r"(\d+)", i)[0]) for i in all_patient_names))
         )
 
         idle_seconds_needed = 30
@@ -479,7 +475,7 @@ class Orsi(torch.utils.data.Dataset):
         best_event = None
         best_phase = None
 
-        for delta in range(0, max(center_idx, n - center_idx - 1) + 1):
+        for delta in range(max(center_idx, n - center_idx - 1) + 1):
             checks = []
             if center_idx - delta >= 0:
                 checks.append(center_idx - delta)
@@ -561,9 +557,9 @@ class Orsi(torch.utils.data.Dataset):
             )
 
             ori_aspect_ratio = width / height
-            crop_aspect_ratio = self.cfg.DATA.TEST_CROP_SIZE_LARGE / self.cfg.DATA.TEST_CROP_SIZE
+            crop_aspect_ratio = self.cfg.DATA.VAL_CROP_SIZE_LARGE / self.cfg.DATA.VAL_CROP_SIZE
             assert image is None or ori_aspect_ratio - crop_aspect_ratio < self.aspect_ratio_th, (
-                f"Test aspect ratio difference is too large for inference with RPN"
+                "Test aspect ratio difference is too large for inference with RPN"
             )
 
             if not self.cfg.DATA.JUST_CENTER and self._test_force_flip:
@@ -575,7 +571,7 @@ class Orsi(torch.utils.data.Dataset):
                 if image is not None:
                     image = imgs.pop()
         else:
-            raise NotImplementedError("Unsupported split mode {}".format(self._split))
+            raise NotImplementedError(f"Unsupported split mode {self._split}")
 
         imgs = [cv2_transform.HWC2CHW(img) for img in imgs]
         imgs = [img / 255.0 for img in imgs]
@@ -654,11 +650,11 @@ class Orsi(torch.utils.data.Dataset):
 
         for task in self._frame_tasks:
             if task == "steps":
-                all_labels[task] = clip.get(f"event_id", -1)
-                extra_data[f"{task}_name"] = clip.get(f"event_name", "unknown")
+                all_labels[task] = clip.get("event_id", -1)
+                extra_data[f"{task}_name"] = clip.get("event_name", "unknown")
             elif task == "phases":
-                all_labels[task] = clip.get(f"phase_id", -1)
-                extra_data[f"{task}_name"] = clip.get(f"phase_name", "unknown")
+                all_labels[task] = clip.get("phase_id", -1)
+                extra_data[f"{task}_name"] = clip.get("phase_name", "unknown")
             else:
                 all_labels[task] = clip.get(f"{task}_id", -1)
                 extra_data[f"{task}_name"] = clip.get(f"{task}_name", "unknown")
@@ -673,14 +669,11 @@ class Orsi(torch.utils.data.Dataset):
             video_name = self._video_idx_to_name[video_idx]
             if video_name in self.fps_videos:
                 return sec
-            elif video_name == "CASE014":
-                complete_name = "{}/{}.{}".format(
-                    video_name, str(sec).zfill(self.zero_fill), self.image_type
-                )
+            if video_name == "CASE014":
+                complete_name = f"{video_name}/{str(sec).zfill(self.zero_fill)}.{self.image_type}"
                 complete_path = os.path.join(self.cfg.ENDOVIS_DATASET.FRAME_DIR, complete_name)
                 return self._image_paths[video_idx].index(complete_path)
-            else:
-                return round((sec * 30) / 45)
+            return round((sec * 30) / 45)
         except:
             breakpoint()
 
@@ -699,14 +692,17 @@ if __name__ == "__main__":
     import argparse
 
     from fvcore.common.config import CfgNode
-    from tapis.config.defaults import get_cfg as _get_cfg
+
     from tapis.config.defaults import assert_and_infer_cfg
+    from tapis.config.defaults import get_cfg as _get_cfg
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--cfg", type=str, required=True, help="Path to config file")
-    parser.add_argument("--split", type=str, default="train", help="Dataset split (train/val/test)")
+    parser.add_argument("--split", type=str, default="train", help="Dataset split (train/val)")
     parser.add_argument("--train_lists", type=str, default="", help="Train lists (comma-separated)")
-    parser.add_argument("--test_lists", type=str, default="", help="Test lists (comma-separated)")
+    parser.add_argument(
+        "--val_lists", type=str, default="", help="Validation lists (comma-separated)"
+    )
     parser.add_argument(
         "--opts", nargs=argparse.REMAINDER, default=[], help="Override config options"
     )
@@ -715,11 +711,11 @@ if __name__ == "__main__":
     cfg = get_cfg()
     cfg.merge_from_file(args.cfg)
 
-    # Override train/test lists if provided on command line
+    # Override train/val lists if provided on command line
     if args.train_lists:
         cfg.ENDOVIS_DATASET.TRAIN_LISTS = args.train_lists.split(",")
-    if args.test_lists:
-        cfg.ENDOVIS_DATASET.TEST_LISTS = args.test_lists.split(",")
+    if args.val_lists:
+        cfg.ENDOVIS_DATASET.VAL_LISTS = args.val_lists.split(",")
 
     if args.opts:
         cfg.merge_from_list(args.opts)

@@ -134,7 +134,7 @@ $ sh run_files/grasp_<actions/instruments/phases/steps/long-term/short-term_rpn>
 
 ### Training TAPIS
 
-You can easily modify the bash scripts to train our models. Just set ```TRAIN.ENABLE True``` on the desired script to enable training, and set ```TEST.ENABLE False``` to avoid testing before training. You might also want to modify ```TRAIN.CHECKPOINT_FILE_PATH``` to the model weights you want to use as initialization. You can modify the [config files](https://github.com/BCV-Uniandes/GraSP/tree/main/TAPIS/configs/GraSP) or the [bash scripts](https://github.com/BCV-Uniandes/GraSP/tree/main/TAPIS/run_files) to alter the architecture design, training schedule, video input design, etc. We provide documentation for each hyperparameter in the [defaults script](https://github.com/BCV-Uniandes/GraSP/blob/main/TAPIS/tapis/config/defaults.py).
+You can easily modify the bash scripts to train our models. Just set ```TRAIN.ENABLE True``` on the desired script to enable training, and set ```VAL.ENABLE False``` to avoid testing before training. You might also want to modify ```TRAIN.CHECKPOINT_FILE_PATH``` to the model weights you want to use as initialization. You can modify the [config files](https://github.com/BCV-Uniandes/GraSP/tree/main/TAPIS/configs/GraSP) or the [bash scripts](https://github.com/BCV-Uniandes/GraSP/tree/main/TAPIS/run_files) to alter the architecture design, training schedule, video input design, etc. We provide documentation for each hyperparameter in the [defaults script](https://github.com/BCV-Uniandes/GraSP/blob/main/TAPIS/tapis/config/defaults.py).
 
 ### Evaluation metrics
 

@@ -4,14 +4,16 @@
 """Functions that handle saving and loading of checkpoints."""
 
 import copy
-import numpy as np
 import os
 import pickle
 from collections import OrderedDict
+
+import numpy as np
 import torch
 
 import tapis.utils.distributed as du
-import tapis.utils.logging as logging
+from tapis.utils import logging
+
 from .c2_model_loading import get_name_convert_func
 from .env import checkpoint_pathmgr as pathmgr
 
@@ -50,7 +52,7 @@ def get_path_to_checkpoint(path_to_job, epoch):
         path_to_job (string): the path to the folder of the current job.
         epoch (int): the number of epoch for the checkpoint.
     """
-    name = "checkpoint_epoch_{:05d}.pyth".format(epoch)
+    name = f"checkpoint_epoch_{epoch:05d}.pyth"
     return os.path.join(get_checkpoint_dir(path_to_job), name)
 
 
@@ -60,11 +62,10 @@ def get_last_checkpoint(path_to_job):
     Args:
         path_to_job (string): the path to the folder of the current job.
     """
-
     d = get_checkpoint_dir(path_to_job)
     names = pathmgr.ls(d) if pathmgr.exists(d) else []
     names = [f for f in names if "checkpoint" in f]
-    assert len(names), "No checkpoints found in '{}'.".format(d)
+    assert names, f"No checkpoints found in '{d}'."
     # Sort the checkpoints by epoch.
     name = sorted(names)[-1]
     return os.path.join(d, name)
@@ -95,9 +96,7 @@ def is_checkpoint_epoch(cfg, cur_epoch, multigrid_schedule=None):
         prev_epoch = 0
         for s in multigrid_schedule:
             if cur_epoch < s[-1]:
-                period = max(
-                    (s[-1] - prev_epoch) // cfg.MULTIGRID.EVAL_FREQ + 1, 1
-                )
+                period = max((s[-1] - prev_epoch) // cfg.MULTIGRID.EVAL_FREQ + 1, 1)
                 return (s[-1] - 1 - cur_epoch) % period == 0
             prev_epoch = s[-1]
 
@@ -116,7 +115,7 @@ def save_checkpoint(path_to_job, model, optimizer, epoch, cfg, scaler=None, sche
     """
     # Save checkpoints only from the master process.
     if not du.is_master_proc(cfg.NUM_GPUS * cfg.NUM_SHARDS):
-        return
+        return None
     # Ensure that the checkpoint dir exists.
     pathmgr.mkdirs(get_checkpoint_dir(path_to_job))
     # Omit the DDP wrapper in the multi-gpu setting.
@@ -140,6 +139,7 @@ def save_checkpoint(path_to_job, model, optimizer, epoch, cfg, scaler=None, sche
         torch.save(checkpoint, f)
     return path_to_checkpoint
 
+
 def save_best_checkpoint(path_to_job, model, optimizer, task, cfg, scaler=None):
     """
     Save a checkpoint.
@@ -152,7 +152,7 @@ def save_best_checkpoint(path_to_job, model, optimizer, task, cfg, scaler=None):
     """
     # Save checkpoints only from the master process.
     if not du.is_master_proc(cfg.NUM_GPUS * cfg.NUM_SHARDS):
-        return
+        return None
     # Ensure that the checkpoint dir exists.
     pathmgr.mkdirs(get_checkpoint_dir(path_to_job))
     # Omit the DDP wrapper in the multi-gpu setting.
@@ -168,12 +168,13 @@ def save_best_checkpoint(path_to_job, model, optimizer, task, cfg, scaler=None):
     if scaler is not None:
         checkpoint["scaler_state"] = scaler.state_dict()
     # Write the checkpoint.
-    if task != 'last':
-        task = 'best_'+task
-    path_to_checkpoint = os.path.join(path_to_job, f'checkpoint_{task}.pyth')
+    if task != "last":
+        task = "best_" + task
+    path_to_checkpoint = os.path.join(path_to_job, f"checkpoint_{task}.pyth")
     with pathmgr.open(path_to_checkpoint, "wb") as f:
         torch.save(checkpoint, f)
     return path_to_checkpoint
+
 
 def inflate_weight(state_dict_2d, state_dict_3d):
     """
@@ -184,7 +185,9 @@ def inflate_weight(state_dict_2d, state_dict_3d):
     Args:
         state_dict_2d (OrderedDict): a dict of parameters from a 2D model.
         state_dict_3d (OrderedDict): a dict of parameters from a 3D model.
-    Returns:
+
+    Returns
+    -------
         state_dict_inflated (OrderedDict): a dict of inflated parameters.
     """
     state_dict_inflated = OrderedDict()
@@ -193,23 +196,15 @@ def inflate_weight(state_dict_2d, state_dict_3d):
         v3d = state_dict_3d[k]
         # Inflate the weight of 2D conv to 3D conv.
         if len(v2d.shape) == 4 and len(v3d.shape) == 5:
-            logger.info(
-                "Inflate {}: {} -> {}: {}".format(k, v2d.shape, k, v3d.shape)
-            )
+            logger.info(f"Inflate {k}: {v2d.shape} -> {k}: {v3d.shape}")
             # Dimension need to be match.
             assert v2d.shape[-2:] == v3d.shape[-2:]
             assert v2d.shape[:2] == v3d.shape[:2]
-            v3d = (
-                v2d.unsqueeze(2).repeat(1, 1, v3d.shape[2], 1, 1) / v3d.shape[2]
-            )
+            v3d = v2d.unsqueeze(2).repeat(1, 1, v3d.shape[2], 1, 1) / v3d.shape[2]
         elif v2d.shape == v3d.shape:
             v3d = v2d
         else:
-            logger.info(
-                "Unexpected {}: {} -|> {}: {}".format(
-                    k, v2d.shape, k, v3d.shape
-                )
-            )
+            logger.info(f"Unexpected {k}: {v2d.shape} -|> {k}: {v3d.shape}")
         state_dict_inflated[k] = v3d.clone()
     return state_dict_inflated
 
@@ -243,13 +238,13 @@ def load_checkpoint(
         epoch_reset (bool): if True, reset #train iterations from the checkpoint.
         clear_name_pattern (string): if given, this (sub)string will be cleared
             from a layer name if it can be matched.
-    Returns:
+
+    Returns
+    -------
         (int): the number of training epoch of the checkpoint.
     """
-    assert pathmgr.exists(
-        path_to_checkpoint
-    ), "Checkpoint '{}' not found".format(path_to_checkpoint)
-    logger.info("Loading network weights from {}.".format(path_to_checkpoint))
+    assert pathmgr.exists(path_to_checkpoint), f"Checkpoint '{path_to_checkpoint}' not found"
+    logger.info(f"Loading network weights from {path_to_checkpoint}.")
 
     # Account for the DDP wrapper in the multi-gpu setting.
     ms = model.module if data_parallel else model
@@ -267,9 +262,7 @@ def load_checkpoint(
 
                 # expand shape dims if they differ (eg for converting linear to conv params)
                 if len(c2_blob_shape) < len(model_blob_shape):
-                    c2_blob_shape += (1,) * (
-                        len(model_blob_shape) - len(c2_blob_shape)
-                    )
+                    c2_blob_shape += (1,) * (len(model_blob_shape) - len(c2_blob_shape))
                     caffe2_checkpoint["blobs"][key] = np.reshape(
                         caffe2_checkpoint["blobs"][key], c2_blob_shape
                     )
@@ -291,68 +284,45 @@ def load_checkpoint(
                         caffe2_checkpoint["blobs"][key]
                     ).clone()
                     logger.info(
-                        "{}: {} => {}: {}".format(
-                            key,
-                            c2_blob_shape,
-                            converted_key,
-                            tuple(model_blob_shape),
-                        )
+                        f"{key}: {c2_blob_shape} => {converted_key}: {tuple(model_blob_shape)}"
                     )
                 else:
-                    logger.warn(
-                        "!! {}: {} does not match {}: {}".format(
-                            key,
-                            c2_blob_shape,
-                            converted_key,
-                            tuple(model_blob_shape),
-                        )
+                    logger.warning(
+                        f"!! {key}: {c2_blob_shape} does not match {converted_key}: {tuple(model_blob_shape)}"
                     )
-            else:
-                if not any(
-                    prefix in key for prefix in ["momentum", "lr", "model_iter"]
-                ):
-                    logger.warn(
-                        "!! {}: can not be converted, got {}".format(
-                            key, converted_key
-                        )
-                    )
+            elif not any(prefix in key for prefix in ["momentum", "lr", "model_iter"]):
+                logger.warning(f"!! {key}: can not be converted, got {converted_key}")
         diff = set(ms.state_dict()) - set(state_dict)
         diff = {d for d in diff if "num_batches_tracked" not in d}
         if len(diff) > 0:
-            logger.warn("Not loaded {}".format(diff))
-        
+            logger.warning(f"Not loaded {diff}")
+
         if len(rpn_checkpoint):
             rpn = torch.load(rpn_checkpoint, map_location="cpu")
             if model in rpn:
-                rpn = rpn['model']
-            for k,v in rpn.items():
-                state_dict[f'rpn.rpn.{k}'] = v
+                rpn = rpn["model"]
+            for k, v in rpn.items():
+                state_dict[f"rpn.rpn.{k}"] = v
         ms.load_state_dict(state_dict, strict=False)
         epoch = -1
     else:
         # Load the checkpoint on CPU to avoid GPU mem spike.
         with pathmgr.open(path_to_checkpoint, "rb") as f:
             checkpoint = torch.load(f, map_location="cpu")
-        
+
         if len(rpn_checkpoint):
             rpn = torch.load(rpn_checkpoint, map_location="cpu")
             if model in rpn:
-                rpn = rpn['model']
-            for k,v in rpn.items():
-                checkpoint['model_state'][f'rpn.rpn.{k}'] = v
-            
-        model_state_dict_3d = (
-            model.module.state_dict() if data_parallel else model.state_dict()
-        )
-        
-        checkpoint["model_state"] = normal_to_sub_bn(
-            checkpoint["model_state"], model_state_dict_3d
-        )
+                rpn = rpn["model"]
+            for k, v in rpn.items():
+                checkpoint["model_state"][f"rpn.rpn.{k}"] = v
+
+        model_state_dict_3d = model.module.state_dict() if data_parallel else model.state_dict()
+
+        checkpoint["model_state"] = normal_to_sub_bn(checkpoint["model_state"], model_state_dict_3d)
         if inflation:
             # Try to inflate the model.
-            inflated_model_dict = inflate_weight(
-                checkpoint["model_state"], model_state_dict_3d
-            )
+            inflated_model_dict = inflate_weight(checkpoint["model_state"], model_state_dict_3d)
             ms.load_state_dict(inflated_model_dict, strict=False)
         else:
             if clear_name_pattern:
@@ -361,14 +331,10 @@ def load_checkpoint(
                     for k in checkpoint["model_state"]:
                         if item in k:
                             k_re = k.replace(item, "")
-                            model_state_dict_new[k_re] = checkpoint[
-                                "model_state"
-                            ][k]
-                            logger.info("renaming: {} -> {}".format(k, k_re))
+                            model_state_dict_new[k_re] = checkpoint["model_state"][k]
+                            logger.info(f"renaming: {k} -> {k_re}")
                         else:
-                            model_state_dict_new[k] = checkpoint["model_state"][
-                                k
-                            ]
+                            model_state_dict_new[k] = checkpoint["model_state"][k]
                     checkpoint["model_state"] = model_state_dict_new
             pre_train_dict = checkpoint["model_state"]
             model_dict = ms.state_dict()
@@ -379,16 +345,13 @@ def load_checkpoint(
                 if k in model_dict and v.size() == model_dict[k].size()
             }
             # Weights that do not have match from the pre-trained model.
-            not_load_layers = [
-                k
-                for k in model_dict.keys()
-                if k not in pre_train_dict_match.keys()
-            ] + [k for k in pre_train_dict_match.keys()
-                 if k not in model_dict]
+            not_load_layers = [k for k in model_dict.keys() if k not in pre_train_dict_match] + [
+                k for k in pre_train_dict_match if k not in model_dict
+            ]
             # Log weights that are not loaded with the pre-trained weights.
             if not_load_layers:
                 for k in not_load_layers:
-                    logger.info("Network weights {} not loaded.".format(k))
+                    logger.info(f"Network weights {k} not loaded.")
             # Load pre-trained weights.
             ms.load_state_dict(pre_train_dict_match, strict=False)
 
@@ -401,17 +364,17 @@ def load_checkpoint(
                 if optimizer and "optimizer_state" in checkpoint.keys():
                     optimizer.load_state_dict(checkpoint["optimizer_state"])
             except Exception as e:
-                logger.error("Error occurred while loading optimizer state: {}".format(e))
+                logger.error(f"Error occurred while loading optimizer state: {e}")
             try:
                 if scaler and "scaler_state" in checkpoint.keys():
                     scaler.load_state_dict(checkpoint["scaler_state"])
             except Exception as e:
-                logger.error("Error occurred while loading scaler state: {}".format(e))
+                logger.error(f"Error occurred while loading scaler state: {e}")
             try:
                 if scheduler and "scheduler_state" in checkpoint.keys():
                     scheduler.load_state_dict(checkpoint["scheduler_state"])
             except Exception as e:
-                logger.error("Error occurred while loading scheduler state: {}".format(e))
+                logger.error(f"Error occurred while loading scheduler state: {e}")
 
         else:
             epoch = -1
@@ -429,7 +392,9 @@ def sub_to_normal_bn(sd):
     Args:
         sd (OrderedDict): a dict of parameters whitch might contain Sub-BN
         parameters.
-    Returns:
+
+    Returns
+    -------
         new_sd (OrderedDict): a dict with Sub-BN parameters reshaped to
         normal parameters.
     """
@@ -465,7 +430,9 @@ def c2_normal_to_sub_bn(key, model_keys):
     Args:
         key (OrderedDict): source dict of parameters.
         mdoel_key (OrderedDict): target dict of parameters.
-    Returns:
+
+    Returns
+    -------
         new_sd (OrderedDict): converted dict of parameters.
     """
     if "bn.running_" in key:
@@ -485,7 +452,9 @@ def normal_to_sub_bn(checkpoint_sd, model_sd):
     Args:
         checkpoint_sd (OrderedDict): source dict of parameters.
         model_sd (OrderedDict): target dict of parameters.
-    Returns:
+
+    Returns
+    -------
         new_sd (OrderedDict): converted dict of parameters.
     """
     for key in model_sd:
@@ -495,14 +464,14 @@ def normal_to_sub_bn(checkpoint_sd, model_sd):
                 bn_key = key.replace("bn.split_bn.", "bn.bn.")
                 checkpoint_sd[key] = checkpoint_sd.pop(load_key)
                 checkpoint_sd[bn_key] = checkpoint_sd[key]
-    
+
     checkpoint_sd_iter = checkpoint_sd.copy()
     for key in checkpoint_sd_iter:
         if key not in model_sd:
             if "encoder." in key:
                 load_key = key.replace("encoder.", "")
                 checkpoint_sd[load_key] = checkpoint_sd.pop(key)
-    
+
     for key in model_sd:
         if key in checkpoint_sd:
             model_blob_shape = model_sd[key].shape
@@ -516,14 +485,9 @@ def normal_to_sub_bn(checkpoint_sd, model_sd):
             ):
                 before_shape = checkpoint_sd[key].shape
                 checkpoint_sd[key] = torch.cat(
-                    [checkpoint_sd[key]]
-                    * (model_blob_shape[0] // c2_blob_shape[0])
+                    [checkpoint_sd[key]] * (model_blob_shape[0] // c2_blob_shape[0])
                 )
-                logger.info(
-                    "{} {} -> {}".format(
-                        key, before_shape, checkpoint_sd[key].shape
-                    )
-                )
+                logger.info(f"{key} {before_shape} -> {checkpoint_sd[key].shape}")
     return checkpoint_sd
 
 
@@ -532,23 +496,23 @@ def load_test_checkpoint(cfg, model):
     Loading checkpoint logic for testing.
     """
     # Load a checkpoint to test if applicable.
-    if cfg.TEST.CHECKPOINT_FILE_PATH != "":
+    if cfg.VAL.CHECKPOINT_FILE_PATH != "":
         # If no checkpoint found in MODEL_VIS.CHECKPOINT_FILE_PATH or in the current
         # checkpoint folder, try to load checkpoint from
-        # TEST.CHECKPOINT_FILE_PATH and test it.
+        # VAL.CHECKPOINT_FILE_PATH and test it.
         load_checkpoint(
-            cfg.TEST.CHECKPOINT_FILE_PATH,
+            cfg.VAL.CHECKPOINT_FILE_PATH,
             model,
             cfg.NUM_GPUS > 1,
             None,
             inflation=False,
-            convert_from_caffe2=cfg.TEST.CHECKPOINT_TYPE == "caffe2",
+            convert_from_caffe2=cfg.VAL.CHECKPOINT_TYPE == "caffe2",
         )
     elif has_checkpoint(cfg.OUTPUT_DIR):
         last_checkpoint = get_last_checkpoint(cfg.OUTPUT_DIR)
         load_checkpoint(last_checkpoint, model, cfg.NUM_GPUS > 1)
     elif cfg.TRAIN.CHECKPOINT_FILE_PATH != "":
-        # If no checkpoint found in TEST.CHECKPOINT_FILE_PATH or in the current
+        # If no checkpoint found in VAL.CHECKPOINT_FILE_PATH or in the current
         # checkpoint folder, try to load checkpoint from
         # TRAIN.CHECKPOINT_FILE_PATH and test it.
         load_checkpoint(
@@ -571,7 +535,7 @@ def load_train_checkpoint(cfg, model, optimizer, scaler=None):
     """
     if cfg.TRAIN.AUTO_RESUME and has_checkpoint(cfg.OUTPUT_DIR):
         last_checkpoint = get_last_checkpoint(cfg.OUTPUT_DIR)
-        logger.info("Load from last checkpoint, {}.".format(last_checkpoint))
+        logger.info(f"Load from last checkpoint, {last_checkpoint}.")
         checkpoint_epoch = load_checkpoint(
             last_checkpoint, model, cfg.NUM_GPUS > 1, optimizer, scaler=scaler
         )
@@ -595,4 +559,3 @@ def load_train_checkpoint(cfg, model, optimizer, scaler=None):
         start_epoch = 0
 
     return start_epoch
-

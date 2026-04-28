@@ -51,7 +51,7 @@ def main():
         cfg.FEATURES.RPN_CFG = rpn_cfg
 
     # Perform training.
-    if cfg.TRAIN.ENABLE or cfg.TEST.ENABLE:
+    if cfg.TRAIN.ENABLE or cfg.VAL.ENABLE:
         launch_job(cfg=cfg, init_method=args.init_method, func=train)
 
 

@@ -20,21 +20,19 @@ import shutil
 
 import matplotlib.pyplot as plt
 import numpy as np
-import tapis.models.losses as losses
 import tapis.models.optimizer as optim
 import tapis.utils.checkpoint as cu
 import tapis.utils.distributed as du
-import tapis.utils.logging as logging
-import tapis.utils.misc as misc
 import torch
 import torch.backends.cudnn
-import torch.backends.cudnn as cudnn
 import wandb
 from pyinstrument import Profiler
 from sklearn.metrics import confusion_matrix
 from tapis.datasets import loader
-from tapis.models import build_model
+from tapis.models import build_model, losses
+from tapis.utils import logging, misc
 from tapis.utils.meters import EpochTimer, SurgeryMeter
+from torch.backends import cudnn
 from tqdm import tqdm
 
 logger = logging.get_logger(__name__)
@@ -49,7 +47,7 @@ def wandgb_log(stats):
             stats = {f"{stats['mode']}/{k}": v for k, v in stats.items()}
             wanbrun.log(stats)
             return
-        if stats["mode"].lower() in ["test", "val"]:
+        if stats["mode"].lower() == "val":
             cur_epoch = int(stats["cur_epoch"])
             stat = {}
             for tasks in tasks_map:
@@ -83,7 +81,7 @@ def log_confusion_matrix_wandb(meter, task, mode, epoch, mean_map, name_wandb, c
         labels (list): Lista con le etichette vere per ogni campione.
                        Formato: [class_idx, class_idx, ...]
         task (str): Nome del task.
-        mode (str): Modalità di training ('train', 'val', 'test').
+        mode (str): Modalità di training ('train', 'val').
         epoch (int): Numero dell'epoca corrente.
         cfg: Configurazione del modello.
     """
@@ -401,7 +399,6 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
         cfg (CfgNode): configs. Details can be found in
             slowfast/config/defaults.py
     """
-
     # Evaluation mode enabled. The running stats would not be updated.
     model.eval()
     val_meter.iter_tic()
@@ -443,9 +440,9 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
                 current_video = None
 
                 try:
-                    if isinstance(image_names, (list, tuple)) and len(image_names) > 0:
-                        current_video = str(image_names[0]).split("/")[0]
-                    elif isinstance(image_names, torch.Tensor) and image_names.numel() > 0:
+                    if (isinstance(image_names, (list, tuple)) and len(image_names) > 0) or (
+                        isinstance(image_names, torch.Tensor) and image_names.numel() > 0
+                    ):
                         current_video = str(image_names[0]).split("/")[0]
                 except Exception:
                     current_video = None
@@ -521,7 +518,6 @@ def train(cfg):
         cfg (CfgNode): configs. Details can be found in
             slowfast/config/defaults.py
     """
-
     profiler = Profiler()
     profiler.start()
     # Set up environment.
@@ -562,7 +558,7 @@ def train(cfg):
         if du.is_master_proc() and cfg.LOG_MODEL_INFO:
             misc.log_model_info(model, cfg, use_train_input=True)
             for task in cfg.TASKS.TASKS:
-                head = getattr(model, "extra_heads_{}".format(task))
+                head = getattr(model, f"extra_heads_{task}")
                 misc.log_model_info(head, cfg, use_train_input=False)
     except Exception as e:
         logger.info(f"Error while trying to calculate model parameters and FLOPs:\n{e}")
@@ -586,9 +582,9 @@ def train(cfg):
     train_meter = SurgeryMeter(len(train_loader), cfg, mode="train")
     val_meter = SurgeryMeter(len(val_loader), cfg, mode="val")
 
-    # Perform final test
-    if cfg.TEST.ENABLE:
-        logger.info("Evaluating epoch: {}".format(start_epoch))
+    # Perform final validation
+    if cfg.VAL.ENABLE:
+        logger.info(f"Evaluating epoch: {start_epoch}")
         map_task, mean_map, out_files, _ = eval_epoch(
             val_loader, model, val_meter, start_epoch - 1, cfg
         )
@@ -597,11 +593,11 @@ def train(cfg):
             return
     elif cfg.TRAIN.ENABLE:
         # Perform the training loop.
-        logger.info("Start epoch: {}".format(start_epoch + 1))
+        logger.info(f"Start epoch: {start_epoch + 1}")
 
     # Stats for saving checkpoint:
     complete_tasks = cfg.TASKS.TASKS
-    best_task_map = {task: 0 for task in complete_tasks}
+    best_task_map = dict.fromkeys(complete_tasks, 0)
     best_mean_map = 0
     epoch_timer = EpochTimer()
 
@@ -644,7 +640,7 @@ def train(cfg):
 
         if not cfg.MODEL.KEEP_ALL_CHECKPOINTS:
             del_fil = os.path.join(
-                cfg.OUTPUT_DIR, "checkpoints", "checkpoint_epoch_{0:05d}.pyth".format(cur_epoch - 1)
+                cfg.OUTPUT_DIR, "checkpoints", f"checkpoint_epoch_{cur_epoch - 1:05d}.pyth"
             )
             if os.path.exists(del_fil):
                 os.remove(del_fil)
@@ -664,7 +660,7 @@ def train(cfg):
                 # Save best results
                 if mean_map > best_mean_map:
                     best_mean_map = mean_map
-                    logger.info("Best mean map at epoch {}".format(cur_epoch))
+                    logger.info(f"Best mean map at epoch {cur_epoch}")
                     cu.save_best_checkpoint(
                         cfg.OUTPUT_DIR,
                         model,
@@ -681,7 +677,7 @@ def train(cfg):
                 for task in complete_tasks:
                     if list(map_task[task].values())[0] > best_task_map[task]:
                         best_task_map[task] = list(map_task[task].values())[0]
-                        logger.info("Best {} map at epoch {}".format(task, cur_epoch))
+                        logger.info(f"Best {task} map at epoch {cur_epoch}")
                         file = out_files[task].split("/")[-1]
                         copy_path = os.path.join(best_preds_path, file.replace("epoch", "best"))
                         shutil.copyfile(out_files[task], copy_path)
@@ -720,26 +716,25 @@ def train(cfg):
 
 print(f"Current working directory: {os.getcwd()}")
 
+import warnings
+
 from tapis.config.defaults import assert_and_infer_cfg
 from tapis.utils.misc import launch_job
 from tapis.utils.parser import load_config, parse_args
-
 from train_net import train
-import warnings
 
 warnings.filterwarnings("ignore")
 
 
 def main():
     """
-    Main function to spawn the train and test process.
+    Main function to spawn the train and validation process.
     """
-
     args = parse_args()
     cfg = load_config(args)
     cfg = assert_and_infer_cfg(cfg)
 
-    print("Working on gpu: {}".format(cfg.GPUIDS))
+    print(f"Working on gpu: {cfg.GPUIDS}")
 
     if cfg.FEATURES.USE_RPN:
         from detectron2.config import get_cfg
@@ -754,7 +749,7 @@ def main():
         cfg.FEATURES.RPN_CFG = rpn_cfg
 
     # Perform training.
-    if cfg.TRAIN.ENABLE or cfg.TEST.ENABLE:
+    if cfg.TRAIN.ENABLE or cfg.VAL.ENABLE:
         launch_job(cfg=cfg, init_method=args.init_method, func=train)
 
 

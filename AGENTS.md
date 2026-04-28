@@ -11,7 +11,7 @@ bash run_files/orsi_steps.sh
 
 # Direct execution
 python -B tools/run_net.py --cfg configs/Orsi/TAPIS/TAPIS_LONG.yaml \
-    TRAIN.ENABLE True TEST.ENABLE True OUTPUT_DIR outputs/orsi/LONG/run1
+    TRAIN.ENABLE True VAL.ENABLE True OUTPUT_DIR outputs/orsi/LONG/run1
 ```
 
 ## Execution Flow
@@ -28,9 +28,9 @@ run_files/*.sh → tools/run_net.py → tools/train_net.py:train() (525)
 
 ### Patient Splits (lines 19-54)
 - **Train**: 43 patients (dynamic via n_train=43)
-- **Test**: 7 patients (dynamic via n_test=7)
-- **Val**: 0 patients (n_val=0)
-- Note: Splits generated from all_patients array, not from hardcoded TRAIN_FOLDS/TEST_FOLDS at top
+- **Val**: 7 patients (dynamic via n_val=7)
+- **Test**: 0 patients (n_test=0)
+- Note: Splits generated from all_patients array, uses VAL_FOLDS/VAL_FOLDS_STR (not TEST)
 
 ### Key Config Lines (75-98)
 - PYTHONPATH must include `tapis` and `region_proposals` (lines 75-76)
@@ -90,7 +90,7 @@ DATA.NUM_FRAMES: 16          # Actual clip length = NUM_FRAMES * SAMPLING_RATE
 DATA.SAMPLING_RATE: 1
 TRAIN.ACCUM_STEPS: 1         # Effective batch = BATCH * ACCUM
 TRAIN.BATCH_SIZE: 16
-TEST.BATCH_SIZE: 64           # Override via command line for OOM
+VAL.BATCH_SIZE: 64             # Override via command line for OOM
 SOLVER.BASE_LR: 0.0001
 SOLVER.MAX_EPOCH: 50
 SOLVER.MAX_ITER: 10000
@@ -104,7 +104,7 @@ ENDOVIS_DATASET.ADD_IDLE: 10
 ENDOVIS_DATASET.ORSI_ROOT_DIR: /data/orsi_tensors
 ```
 
-Override YAML defaults via command line: `python -B tools/run_net.py --cfg <yaml> TRAIN.BATCH_SIZE 12 TEST.BATCH_SIZE 24`
+Override YAML defaults via command line: `python -B tools/run_net.py --cfg <yaml> TRAIN.BATCH_SIZE 12 VAL.BATCH_SIZE 24`
 
 
 ## Output Locations
@@ -120,7 +120,7 @@ outputs/{DATASET}/{TASK}/{NAME}/totale/
 
 ## Common Issues & Fixes
 
-1. **CUDA OOM**: Reduce `TEST.BATCH_SIZE` (64→24 or lower)
+1. **CUDA OOM**: Reduce `VAL.BATCH_SIZE` (64→24 or lower)
 2. **Missing data**: Verify `/data/orsi_tensors` and `/data/coco` exist
 3. **GPU unavailable**: Check `nvidia-smi`
 4. **PYTHONPATH errors**: Ensure `tapis/` and `region_proposals/` are in PYTHONPATH (done in run_files/*.sh)

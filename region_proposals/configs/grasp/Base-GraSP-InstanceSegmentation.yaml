@@ -50,7 +50,7 @@ MODEL:
     TRAIN_NUM_POINTS: 12544
     OVERSAMPLE_RATIO: 3.0
     IMPORTANCE_SAMPLE_RATIO: 0.75
-    TEST:
+    VAL:
       SEMANTIC_ON: False
       INSTANCE_ON: True
       PANOPTIC_ON: False
@@ -59,7 +59,7 @@ MODEL:
 DATASETS:
   DATA_PATH: ""
   TRAIN: ("grasp_train",)
-  TEST: ("grasp_test",)
+  VAL: ("grasp_test",)
 SOLVER:
   IMS_PER_BATCH: 6
   BASE_LR: 0.0001
@@ -83,7 +83,7 @@ INPUT:
   MAX_SCALE: 2.0
   FORMAT: "RGB"
   DATASET_MAPPER_NAME: "coco_instance_lsj"
-TEST:
+VAL:
   EVAL_PERIOD: 2000
 DATALOADER:
   FILTER_EMPTY_ANNOTATIONS: True

@@ -4,31 +4,31 @@ MaskFormer Training Script.
 
 This script is a simplified version of the training script in detectron2/tools.
 """
+
 import copy
 import itertools
 import logging
 import os
-from collections import OrderedDict
 import sys
+from collections import OrderedDict
 from typing import Any, Dict, List, Set
 
 import torch
+
 check_Tapis_path = os.path.dirname(os.path.dirname(__file__))
 if check_Tapis_path not in sys.path:
     sys.path.insert(0, check_Tapis_path)
     print(f"Added {check_Tapis_path} to sys.path")
 print(f"Current working directory: {os.getcwd()}")
 
-import detectron2.utils.comm as comm
+import json
+
+# Region Features Saving
+from coco_evaluation_features import COCOEvaluator
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import MetadataCatalog, build_detection_train_loader
-from detectron2.engine import (
-    DefaultTrainer,
-    default_argument_parser,
-    default_setup,
-    launch,
-)
+from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch
 from detectron2.evaluation import (
     CityscapesInstanceEvaluator,
     CityscapesSemSegEvaluator,
@@ -38,10 +38,9 @@ from detectron2.evaluation import (
     SemSegEvaluator,
     verify_results,
 )
-# Region Features Saving
-from coco_evaluation_features import COCOEvaluator
 from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
 from detectron2.solver.build import maybe_add_gradient_clipping
+from detectron2.utils import comm
 from detectron2.utils.logger import setup_logger
 
 # MaskFormer
@@ -58,59 +57,107 @@ from mask2former import (
 
 # Register new dataset for instance segmentation with its COCO JSON
 from mask2former.data.datasets.register_coco_dataset import register_coco_instances
-import json
+
 
 def register_surgical_dataset(cfg):
-    dataset_name = cfg.DATASETS.TRAIN[0].split('_')[0]
+    dataset_name = cfg.DATASETS.TRAIN[0].split("_")[0]
     dataset_path = cfg.DATASETS.DATA_PATH
-    
+
     # Register GraSP
-    if dataset_name == 'grasp':
-        cats_data = sorted(json.load(open(os.path.join(dataset_path, 'annotations', 'grasp_short-term_train_polygon.json')))['categories'], key = lambda x: x['id'])
-        metadata = {'thing_dataset_id_to_contiguous_id': {cat['id']:c_id for c_id,cat in enumerate(cats_data)},
-                    'thing_classes': [cat['name'] for cat in cats_data],}
-        
-        for split in ['train','test','fold1','fold2']:
-            json_file = os.path.join(dataset_path, 'annotations', f'grasp_short-term_{split}_polygon.json')
-            image_root = os.path.join(dataset_path, 'frames')
-            register_coco_instances(f'grasp_{split}', metadata, json_file, image_root)
-    
+    if dataset_name == "grasp":
+        cats_data = sorted(
+            json.load(
+                open(
+                    os.path.join(dataset_path, "annotations", "grasp_short-term_train_polygon.json")
+                )
+            )["categories"],
+            key=lambda x: x["id"],
+        )
+        metadata = {
+            "thing_dataset_id_to_contiguous_id": {
+                cat["id"]: c_id for c_id, cat in enumerate(cats_data)
+            },
+            "thing_classes": [cat["name"] for cat in cats_data],
+        }
+
+        for split in ["train", "test", "fold1", "fold2"]:
+            json_file = os.path.join(
+                dataset_path, "annotations", f"grasp_short-term_{split}_polygon.json"
+            )
+            image_root = os.path.join(dataset_path, "frames")
+            register_coco_instances(f"grasp_{split}", metadata, json_file, image_root)
+
     # Register GraSP Generic
-    elif dataset_name == 'grasp-generic':
-        cats_data = sorted(json.load(open(os.path.join(dataset_path, 'annotations', 'grasp_short-term_generic_fold1_polygon.json')))['categories'], key = lambda x: x['id'])
-        metadata = {'thing_dataset_id_to_contiguous_id': {cat['id']:c_id for c_id,cat in enumerate(cats_data)},
-                    'thing_classes': [cat['name'] for cat in cats_data],}
-        
-        for split in ['fold1','fold2']:
-            json_file = os.path.join(dataset_path, 'annotations', f'grasp_short-term_generic_{split}_polygon.json')
-            image_root = os.path.join(dataset_path, 'frames')
-            register_coco_instances(f'grasp-generic_{split}', metadata, json_file, image_root)
-    
+    elif dataset_name == "grasp-generic":
+        cats_data = sorted(
+            json.load(
+                open(
+                    os.path.join(
+                        dataset_path, "annotations", "grasp_short-term_generic_fold1_polygon.json"
+                    )
+                )
+            )["categories"],
+            key=lambda x: x["id"],
+        )
+        metadata = {
+            "thing_dataset_id_to_contiguous_id": {
+                cat["id"]: c_id for c_id, cat in enumerate(cats_data)
+            },
+            "thing_classes": [cat["name"] for cat in cats_data],
+        }
+
+        for split in ["fold1", "fold2"]:
+            json_file = os.path.join(
+                dataset_path, "annotations", f"grasp_short-term_generic_{split}_polygon.json"
+            )
+            image_root = os.path.join(dataset_path, "frames")
+            register_coco_instances(f"grasp-generic_{split}", metadata, json_file, image_root)
+
     # Register Endovis 2017
-    elif dataset_name == 'endovis-2017':
-        cats_data = sorted(json.load(open(os.path.join(dataset_path, 'annotations', 'Fold0', 'train.json')))['categories'], key = lambda x: x['id'])
-        metadata = {'thing_dataset_id_to_contiguous_id':{cat['id']:c_id for c_id,cat in enumerate(cats_data)},
-                    'thing_classes':[cat['name'] for cat in cats_data],}
-        
+    elif dataset_name == "endovis-2017":
+        cats_data = sorted(
+            json.load(open(os.path.join(dataset_path, "annotations", "Fold0", "train.json")))[
+                "categories"
+            ],
+            key=lambda x: x["id"],
+        )
+        metadata = {
+            "thing_dataset_id_to_contiguous_id": {
+                cat["id"]: c_id for c_id, cat in enumerate(cats_data)
+            },
+            "thing_classes": [cat["name"] for cat in cats_data],
+        }
+
         for fold in range(4):
-            for split in ['train','val']:
-                json_file = os.path.join(dataset_path, 'annotations', f'Fold{fold}', f'{split}.json')
-                image_root = os.path.join(dataset_path, 'images')
-                register_coco_instances(f'endovis-2017_{split}_fold{fold}', metadata, json_file, image_root)
-    
+            for split in ["train", "val"]:
+                json_file = os.path.join(
+                    dataset_path, "annotations", f"Fold{fold}", f"{split}.json"
+                )
+                image_root = os.path.join(dataset_path, "images")
+                register_coco_instances(
+                    f"endovis-2017_{split}_fold{fold}", metadata, json_file, image_root
+                )
+
     # Register Endovis 2018
-    elif dataset_name == 'endovis-2018':
-        cats_data = sorted(json.load(open(os.path.join(dataset_path, 'annotations', 'train.json')))['categories'], key = lambda x: x['id'])
-        metadata = {'thing_dataset_id_to_contiguous_id':{cat['id']:c_id for c_id,cat in enumerate(cats_data)},
-                    'thing_classes':[cat['name'] for cat in cats_data],}
-        
-        for split in ['train','val']:
-            json_file = os.path.join(dataset_path, 'annotations', f'{split}.json')
+    elif dataset_name == "endovis-2018":
+        cats_data = sorted(
+            json.load(open(os.path.join(dataset_path, "annotations", "train.json")))["categories"],
+            key=lambda x: x["id"],
+        )
+        metadata = {
+            "thing_dataset_id_to_contiguous_id": {
+                cat["id"]: c_id for c_id, cat in enumerate(cats_data)
+            },
+            "thing_classes": [cat["name"] for cat in cats_data],
+        }
+
+        for split in ["train", "val"]:
+            json_file = os.path.join(dataset_path, "annotations", f"{split}.json")
             image_root = os.path.join(dataset_path, split)
-            register_coco_instances(f'endovis-2018_{split}', metadata, json_file, image_root)
-    
+            register_coco_instances(f"endovis-2018_{split}", metadata, json_file, image_root)
+
     else:
-        print(f'Unrecognized surgical dataset {dataset_name}')
+        print(f"Unrecognized surgical dataset {dataset_name}")
 
 
 class Trainer(DefaultTrainer):
@@ -151,53 +198,61 @@ class Trainer(DefaultTrainer):
             "cityscapes_panoptic_seg",
             "mapillary_vistas_panoptic_seg",
         ]:
-            if cfg.MODEL.MASK_FORMER.TEST.PANOPTIC_ON:
+            if cfg.MODEL.MASK_FORMER.VAL.PANOPTIC_ON:
                 evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
         # COCO
-        if evaluator_type == "coco_panoptic_seg" and cfg.MODEL.MASK_FORMER.TEST.INSTANCE_ON:
+        if evaluator_type == "coco_panoptic_seg" and cfg.MODEL.MASK_FORMER.VAL.INSTANCE_ON:
             evaluator_list.append(COCOEvaluator(dataset_name, output_dir=output_folder))
-        if evaluator_type == "coco_panoptic_seg" and cfg.MODEL.MASK_FORMER.TEST.SEMANTIC_ON:
-            evaluator_list.append(SemSegEvaluator(dataset_name, distributed=True, output_dir=output_folder))
+        if evaluator_type == "coco_panoptic_seg" and cfg.MODEL.MASK_FORMER.VAL.SEMANTIC_ON:
+            evaluator_list.append(
+                SemSegEvaluator(dataset_name, distributed=True, output_dir=output_folder)
+            )
         # Mapillary Vistas
-        if evaluator_type == "mapillary_vistas_panoptic_seg" and cfg.MODEL.MASK_FORMER.TEST.INSTANCE_ON:
+        if (
+            evaluator_type == "mapillary_vistas_panoptic_seg"
+            and cfg.MODEL.MASK_FORMER.VAL.INSTANCE_ON
+        ):
             evaluator_list.append(InstanceSegEvaluator(dataset_name, output_dir=output_folder))
-        if evaluator_type == "mapillary_vistas_panoptic_seg" and cfg.MODEL.MASK_FORMER.TEST.SEMANTIC_ON:
-            evaluator_list.append(SemSegEvaluator(dataset_name, distributed=True, output_dir=output_folder))
+        if (
+            evaluator_type == "mapillary_vistas_panoptic_seg"
+            and cfg.MODEL.MASK_FORMER.VAL.SEMANTIC_ON
+        ):
+            evaluator_list.append(
+                SemSegEvaluator(dataset_name, distributed=True, output_dir=output_folder)
+            )
         # Cityscapes
         if evaluator_type == "cityscapes_instance":
-            assert (
-                torch.cuda.device_count() > comm.get_rank()
-            ), "CityscapesEvaluator currently do not work with multiple machines."
+            assert torch.cuda.device_count() > comm.get_rank(), (
+                "CityscapesEvaluator currently do not work with multiple machines."
+            )
             return CityscapesInstanceEvaluator(dataset_name)
         if evaluator_type == "cityscapes_sem_seg":
-            assert (
-                torch.cuda.device_count() > comm.get_rank()
-            ), "CityscapesEvaluator currently do not work with multiple machines."
+            assert torch.cuda.device_count() > comm.get_rank(), (
+                "CityscapesEvaluator currently do not work with multiple machines."
+            )
             return CityscapesSemSegEvaluator(dataset_name)
         if evaluator_type == "cityscapes_panoptic_seg":
-            if cfg.MODEL.MASK_FORMER.TEST.SEMANTIC_ON:
-                assert (
-                    torch.cuda.device_count() > comm.get_rank()
-                ), "CityscapesEvaluator currently do not work with multiple machines."
+            if cfg.MODEL.MASK_FORMER.VAL.SEMANTIC_ON:
+                assert torch.cuda.device_count() > comm.get_rank(), (
+                    "CityscapesEvaluator currently do not work with multiple machines."
+                )
                 evaluator_list.append(CityscapesSemSegEvaluator(dataset_name))
-            if cfg.MODEL.MASK_FORMER.TEST.INSTANCE_ON:
-                assert (
-                    torch.cuda.device_count() > comm.get_rank()
-                ), "CityscapesEvaluator currently do not work with multiple machines."
+            if cfg.MODEL.MASK_FORMER.VAL.INSTANCE_ON:
+                assert torch.cuda.device_count() > comm.get_rank(), (
+                    "CityscapesEvaluator currently do not work with multiple machines."
+                )
                 evaluator_list.append(CityscapesInstanceEvaluator(dataset_name))
         # ADE20K
-        if evaluator_type == "ade20k_panoptic_seg" and cfg.MODEL.MASK_FORMER.TEST.INSTANCE_ON:
+        if evaluator_type == "ade20k_panoptic_seg" and cfg.MODEL.MASK_FORMER.VAL.INSTANCE_ON:
             evaluator_list.append(InstanceSegEvaluator(dataset_name, output_dir=output_folder))
         # LVIS
         if evaluator_type == "lvis":
             return LVISEvaluator(dataset_name, output_dir=output_folder)
         if len(evaluator_list) == 0:
             raise NotImplementedError(
-                "no Evaluator for the dataset {} with the type {}".format(
-                    dataset_name, evaluator_type
-                )
+                f"no Evaluator for the dataset {dataset_name} with the type {evaluator_type}"
             )
-        elif len(evaluator_list) == 1:
+        if len(evaluator_list) == 1:
             return evaluator_list[0]
         return DatasetEvaluators(evaluator_list)
 
@@ -208,24 +263,23 @@ class Trainer(DefaultTrainer):
             mapper = MaskFormerSemanticDatasetMapper(cfg, True)
             return build_detection_train_loader(cfg, mapper=mapper)
         # Panoptic segmentation dataset mapper
-        elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_panoptic":
+        if cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_panoptic":
             mapper = MaskFormerPanopticDatasetMapper(cfg, True)
             return build_detection_train_loader(cfg, mapper=mapper)
         # Instance segmentation dataset mapper
-        elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_instance":
+        if cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_instance":
             mapper = MaskFormerInstanceDatasetMapper(cfg, True)
             return build_detection_train_loader(cfg, mapper=mapper)
         # coco instance segmentation lsj new baseline
-        elif cfg.INPUT.DATASET_MAPPER_NAME == "coco_instance_lsj":
+        if cfg.INPUT.DATASET_MAPPER_NAME == "coco_instance_lsj":
             mapper = COCOInstanceNewBaselineDatasetMapper(cfg, True)
             return build_detection_train_loader(cfg, mapper=mapper)
         # coco panoptic segmentation lsj new baseline
-        elif cfg.INPUT.DATASET_MAPPER_NAME == "coco_panoptic_lsj":
+        if cfg.INPUT.DATASET_MAPPER_NAME == "coco_panoptic_lsj":
             mapper = COCOPanopticNewBaselineDatasetMapper(cfg, True)
             return build_detection_train_loader(cfg, mapper=mapper)
-        else:
-            mapper = None
-            return build_detection_train_loader(cfg, mapper=mapper)
+        mapper = None
+        return build_detection_train_loader(cfg, mapper=mapper)
 
     @classmethod
     def build_lr_scheduler(cls, cfg, optimizer):
@@ -258,8 +312,8 @@ class Trainer(DefaultTrainer):
             torch.nn.LocalResponseNorm,
         )
 
-        params: List[Dict[str, Any]] = []
-        memo: Set[torch.nn.parameter.Parameter] = set()
+        params: list[dict[str, Any]] = []
+        memo: set[torch.nn.parameter.Parameter] = set()
         for module_name, module in model.named_modules():
             for module_param_name, value in module.named_parameters(recurse=False):
                 if not value.requires_grad:
@@ -326,7 +380,7 @@ class Trainer(DefaultTrainer):
             cls.build_evaluator(
                 cfg, name, output_folder=os.path.join(cfg.OUTPUT_DIR, "inference_TTA")
             )
-            for name in cfg.DATASETS.TEST
+            for name in cfg.DATASETS.VAL
         ]
         res = cls.test(cfg, model, evaluators)
         res = OrderedDict({k + "_TTA": v for k, v in res.items()})
@@ -361,7 +415,7 @@ def main(args):
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
         res = Trainer.test(cfg, model)
-        if cfg.TEST.AUG.ENABLED:
+        if cfg.VAL.AUG.ENABLED:
             res.update(Trainer.test_with_TTA(cfg, model))
         if comm.is_main_process():
             verify_results(cfg, res)

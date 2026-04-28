@@ -190,6 +190,8 @@ class Orsi(torch.utils.data.Dataset):
             list_files = self.cfg.ENDOVIS_DATASET.TRAIN_LISTS
         elif self._split == "val":
             list_files = self.cfg.ENDOVIS_DATASET.VAL_LISTS
+        elif self._split == "test":
+            list_files = self.cfg.ENDOVIS_DATASET.TEST_LISTS
         else:
             raise ValueError(f"Unsupported split {self._split} for Orsi dataset")
 
@@ -475,7 +477,7 @@ class Orsi(torch.utils.data.Dataset):
         best_event = None
         best_phase = None
 
-        for delta in range(max(center_idx, n - center_idx - 1) + 1):
+        for delta in range(0, max(center_idx, n - center_idx - 1) + 1):
             checks = []
             if center_idx - delta >= 0:
                 checks.append(center_idx - delta)
@@ -714,8 +716,8 @@ if __name__ == "__main__":
     # Override train/val lists if provided on command line
     if args.train_lists:
         cfg.ENDOVIS_DATASET.TRAIN_LISTS = args.train_lists.split(",")
-    if args.val_lists:
-        cfg.ENDOVIS_DATASET.VAL_LISTS = args.val_lists.split(",")
+    if args.test_lists:
+        cfg.ENDOVIS_DATASET.TEST_LISTS = args.test_lists.split(",")
 
     if args.opts:
         cfg.merge_from_list(args.opts)

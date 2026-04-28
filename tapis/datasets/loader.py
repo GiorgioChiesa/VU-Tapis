@@ -14,6 +14,7 @@ from torch.utils.data.sampler import RandomSampler
 from . import utils as utils
 from .build import build_dataset
 
+
 def detection_collate(batch):
     """
     Collate function for detection task. Concatanate bboxes, labels and
@@ -25,7 +26,7 @@ def detection_collate(batch):
         (tuple): collated detection data batch.
     """
     images, all_labels, extra_data, image_names = zip(*batch)
-    image_names = image_names if type(image_names[0])==str else torch.tensor(image_names)
+    image_names = image_names if type(image_names[0]) == str else torch.tensor(image_names)
 
     images = default_collate(images)
 
@@ -36,7 +37,7 @@ def detection_collate(batch):
         if key == "boxes_mask":
             collated_extra_data[key] = default_collate(data).bool()
         elif key == "ori_boxes":
-            idxs = list(itertools.chain(*[[d_id]*len(d) for d_id,d in enumerate(data)]))
+            idxs = list(itertools.chain(*[[d_id] * len(d) for d_id, d in enumerate(data)]))
             data = list(itertools.chain(*data))
             collated_extra_data[key] = torch.tensor(data).float()
             collated_extra_data["ori_boxes_idxs"] = torch.tensor(idxs)
@@ -44,22 +45,22 @@ def detection_collate(batch):
             collated_extra_data[key] = torch.nested.nested_tensor(data).float()
         else:
             collated_extra_data[key] = default_collate(data)
-    
+
     collated_labels = {}
     for key in all_labels[0]:
         data = [d[key] for d in all_labels]
 
-        #TODO: These are just security checks, REMOVE when all done
-        assert all(type(data[0]) == type(d) for d in data), f'Inconsistent data type {data}'
-        
-        if isinstance(data[0],list):
+        # TODO: These are just security checks, REMOVE when all done
+        assert all(type(data[0]) == type(d) for d in data), f"Inconsistent data type {data}"
+
+        if isinstance(data[0], list):
             data = list(itertools.chain(*data))
         else:
             collated_labels[key] = default_collate(data).float()
             continue
-            #TODO: These are just security checks, REMOVE when all done
+            # TODO: These are just security checks, REMOVE when all done
             # assert isinstance(data[0],int) or isinstance(data[0],np.ndarray), f'Type {type(data[0])} not supported'
-            
+
         collated_labels[key] = torch.tensor(data).float()
 
     return images, collated_labels, collated_extra_data, image_names
@@ -74,7 +75,7 @@ def construct_loader(cfg, split, is_precise_bn=False):
         split (str): the split of the data loader. Options include `train`,
             `val`, and `test`.
     """
-    assert split in ["train", "val"]
+    assert split in ["train", "val", "test"]
     if split in ["train"]:
         dataset_name = cfg.TRAIN.DATASET
         batch_size = int(cfg.TRAIN.BATCH_SIZE / max(1, cfg.NUM_GPUS))
@@ -83,6 +84,11 @@ def construct_loader(cfg, split, is_precise_bn=False):
     elif split in ["val"]:
         dataset_name = cfg.VAL.DATASET
         batch_size = int(cfg.VAL.BATCH_SIZE / max(1, cfg.NUM_GPUS))
+        shuffle = False
+        drop_last = False
+    elif split in ["test"]:
+        dataset_name = cfg.TEST.DATASET
+        batch_size = int(cfg.TEST.BATCH_SIZE / max(1, cfg.NUM_GPUS))
         shuffle = False
         drop_last = False
 
@@ -98,8 +104,8 @@ def construct_loader(cfg, split, is_precise_bn=False):
             drop_last=drop_last,
             collate_fn=detection_collate,
             worker_init_fn=utils.loader_worker_init_fn(dataset),
-            prefetch_factor=4,       # aggiungere
-            persistent_workers=True, # aggiungere: evita di ricreare i worker ogni epoca
+            prefetch_factor=4,  # aggiungere
+            persistent_workers=True,  # aggiungere: evita di ricreare i worker ogni epoca
         )
     else:
         # Create a sampler for multi-process training
@@ -117,9 +123,8 @@ def construct_loader(cfg, split, is_precise_bn=False):
             drop_last=drop_last,
             collate_fn=collate_func,
             worker_init_fn=utils.loader_worker_init_fn(dataset),
-            prefetch_factor=4,       # aggiungere
-            persistent_workers=True, # aggiungere: evita di ricreare i worker ogni epoca
-
+            prefetch_factor=4,  # aggiungere
+            persistent_workers=True,  # aggiungere: evita di ricreare i worker ogni epoca
         )
     return loader
 
@@ -131,23 +136,16 @@ def shuffle_dataset(loader, cur_epoch):
         loader (loader): data loader to perform shuffle.
         cur_epoch (int): number of the current epoch.
     """
-    if (
-        loader._dataset_kind
-        == torch.utils.data.dataloader._DatasetKind.Iterable
-    ):
+    if loader._dataset_kind == torch.utils.data.dataloader._DatasetKind.Iterable:
         if hasattr(loader.dataset, "sampler"):
             sampler = loader.dataset.sampler
         else:
-            raise RuntimeError(
-                "Unknown sampler for IterableDataset when shuffling dataset"
-            )
+            raise RuntimeError("Unknown sampler for IterableDataset when shuffling dataset")
     else:
-        sampler = (
-            loader.sampler
-        )
-    assert isinstance(
-        sampler, (RandomSampler, DistributedSampler)
-    ), "Sampler type '{}' not supported".format(type(sampler))
+        sampler = loader.sampler
+    assert isinstance(sampler, (RandomSampler, DistributedSampler)), (
+        "Sampler type '{}' not supported".format(type(sampler))
+    )
     # RandomSampler handles shuffling automatically
     if isinstance(sampler, DistributedSampler):
         # DistributedSampler shuffles data based on epoch

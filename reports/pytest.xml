@@ -1,1 +1,6 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="0" time="7.418" timestamp="2026-04-27T16:16:40.947697+00:00" hostname="eeef4b19bb87" /></testsuites>
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="6.802" timestamp="2026-04-28T14:37:45.832688+00:00" hostname="eeef4b19bb87"><testcase classname="" name="LemonFM.model_loader" time="0.000"><error message="collection failure">import file mismatch:
+imported module 'model_loader' has this __file__ attribute:
+  /workspaces/thesis_giorgiochiesa/src/VU-Tapis/LemonFM/LEMON_curation_models/model_loader.py
+which is not the same as the test file we want to collect:
+  /workspaces/thesis_giorgiochiesa/src/VU-Tapis/LemonFM/model_loader.py
+HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules</error></testcase></testsuite></testsuites>

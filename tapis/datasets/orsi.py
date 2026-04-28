@@ -8,7 +8,12 @@ from pathlib import Path
 _repo_root = Path(__file__).parent.parent.parent
 if __name__ == "__main__":
     os.chdir(str(_repo_root))
-for _p in [str(_repo_root), str(_repo_root / "tapis"), str(_repo_root / "region_proposals"), str(_repo_root / "detectron2")]:
+for _p in [
+    str(_repo_root),
+    str(_repo_root / "tapis"),
+    str(_repo_root / "region_proposals"),
+    str(_repo_root / "detectron2"),
+]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -19,7 +24,7 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 import torch
-
+import regex as re
 from tapis.datasets import cv2_transform
 
 from . import utils as utils
@@ -238,20 +243,31 @@ class Orsi(torch.utils.data.Dataset):
             dfs.append(df)
 
         self.dfs = pd.concat(dfs, ignore_index=True)
-        if self.exclude_event_names:  # TODO: pensare se filtrare solo nel train !!!
+
+        if self.exclude_event_names:
+            exclude = self.exclude_event_names
+            if getattr(self.cfg.ENDOVIS_DATASET, "ADD_IDLE", 0) > 0:
+                exclude.discard("idle")
             self.filtered_dfs = self.dfs[
-                ~self.dfs["event_name"]
-                .str.strip()
-                .str.lower()
-                .str.replace(" ", "_")
-                .isin(self.exclude_event_names)
+                ~self.dfs["event_name"].str.strip().str.lower().str.replace(" ", "_").isin(exclude)
             ].reset_index(drop=True)
         else:
             self.filtered_dfs = self.dfs.copy()
 
-        self.collapse_event_dfs()
+        if getattr(self.cfg.ENDOVIS_DATASET, "ADD_IDLE", 0) > 0:
+            self.filtered_dfs = self.filtered_dfs[
+                self.filtered_dfs["event_name"].str.strip().str.lower() != "idle"
+            ].reset_index(drop=True)
 
         self._add_idle_frames()
+
+        print(f"DEBUG: After _add_idle_frames - filtered_dfs has {len(self.filtered_dfs)} rows")
+        idle_check = self.filtered_dfs[
+            self.filtered_dfs["event_name"].str.strip().str.lower() == "idle"
+        ]
+        print(f"DEBUG: Idle in filtered_dfs: {len(idle_check)}")
+
+        self.collapse_event_dfs()
 
         saving = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
         saving.to_csv(os.path.join(self.cfg.OUTPUT_DIR, f"{self._split}_data.csv"), index=False)
@@ -267,6 +283,8 @@ class Orsi(torch.utils.data.Dataset):
         - Hemolock_clip_on_right_pedicle -> Metal_clip_on_right_pedicle
         - Hemolock_clip_on_left_pedicle -> Metal_clip_on_left_pedicle
         - Events with 'left'/'right' in name are collapsed to the same event
+        - Insert_gauze -> Insert_hemostatic_agens
+        - Cutting_the_needles -> Removing_needles
           (e.g., 'Clip_on_left_pedicle' and 'Clip_on_right_pedicle' become the same)
         """
         dfs = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
@@ -277,6 +295,7 @@ class Orsi(torch.utils.data.Dataset):
             "hemolock_clip_on_right_pedicle": "metal_clip_on_right_pedicle",
             "hemolock_clip_on_left_pedicle": "metal_clip_on_left_pedicle",
             "insert_gauze": "insert_hemostatic_agens",
+            "cutting_the_needles": "removing_needles",
         }
 
         # Get unique events from the dataframe
@@ -364,27 +383,42 @@ class Orsi(torch.utils.data.Dataset):
         num_idle_frames = getattr(self.cfg.ENDOVIS_DATASET, "ADD_IDLE", 0)
         if num_idle_frames <= 0:
             return
+        print(f"Adding up to {num_idle_frames} Idle frames per patient to {self._split} dataset")
+
+        patient_names = self._list_patient_ids()
+        if not patient_names:
+            return
+
+        all_patient_names = self.dfs["patient_name"].unique()
+        name_to_id = dict(
+            zip(all_patient_names, (int(re.findall("(\d+)", i)[0]) for i in all_patient_names))
+        )
 
         idle_seconds_needed = 30
         idle_frames = []
-
         selected_frame_ids = set()
 
-        for patient in self._list_patient_ids():
-            patient_df = self.dfs[self.dfs["patient_id"] == patient].copy()
+        for patient_name in patient_names:
+            patient_id = name_to_id.get(patient_name)
+            if patient_id is None:
+                continue
+            patient_df = self.dfs[self.dfs["patient_id"] == patient_id].copy()
             if len(patient_df) == 0:
                 continue
 
             patient_df = patient_df.sort_values("frame_id").reset_index(drop=True)
-
-            idle_rows = patient_df[patient_df["event_name"].str.strip().str.lower() == "idle"]
+            idle_rows = (
+                patient_df[patient_df["event_name"].str.strip().str.lower() == "idle"]
+                .sample(frac=1, random_state=1)
+                .reset_index(drop=True)
+            )
 
             if idle_rows.empty:
                 continue
 
-            non_idle_events = self.filtered_dfs[self.filtered_dfs["patient_id"] == patient][
-                "frame_id"
-            ].values
+            non_idle_events = patient_df[
+                patient_df["event_name"].str.strip().str.lower() != "idle"
+            ]["frame_id"].values
 
             valid_idle_rows = []
             for _, row in idle_rows.iterrows():
@@ -398,34 +432,36 @@ class Orsi(torch.utils.data.Dataset):
 
                 if not too_close:
                     valid_idle_rows.append(row.to_dict())
+                if len(valid_idle_rows) >= num_idle_frames:
+                    break
 
             if not valid_idle_rows:
                 continue
 
-            total_frames = len(patient_df)
-            num_bins = min(num_idle_frames, len(valid_idle_rows))
-            bin_size = total_frames / max(num_bins, 1)
+            # total_frames = len(patient_df)
+            # num_bins = min(num_idle_frames, len(valid_idle_rows))
+            # bin_size = total_frames / max(num_bins, 1)
 
-            patient_selected = []
-            for bin_idx in range(num_bins):
-                start_frame = int(bin_idx * bin_size)
-                end_frame = int((bin_idx + 1) * bin_size)
+            # patient_selected = []
+            # for bin_idx in range(num_bins):
+            #     start_frame = int(bin_idx * bin_size)
+            #     end_frame = int((bin_idx + 1) * bin_size)
 
-                candidates = [
-                    r
-                    for r in valid_idle_rows
-                    if r["patient_id"] == patient
-                    and start_frame <= r["frame_id"] < end_frame
-                    and r["frame_id"] not in selected_frame_ids
-                ]
+            #     candidates = [
+            #         r
+            #         for r in valid_idle_rows
+            #         if r["patient_id"] == patient_id
+            #         and start_frame <= r["frame_id"] < end_frame
+            #         and r["frame_id"] not in selected_frame_ids
+            #     ]
 
-                if candidates:
-                    bin_center = (start_frame + end_frame) / 2
-                    best_candidate = min(candidates, key=lambda r: abs(r["frame_id"] - bin_center))
-                    patient_selected.append(best_candidate)
-                    selected_frame_ids.add(best_candidate["frame_id"])
+            #     if candidates:
+            #         bin_center = (start_frame + end_frame) / 2
+            #         best_candidate = min(candidates, key=lambda r: abs(r["frame_id"] - bin_center))
+            #         patient_selected.append(best_candidate)
+            #         selected_frame_ids.add(best_candidate["frame_id"])
 
-            idle_frames.extend(patient_selected)
+            idle_frames.extend(valid_idle_rows)
 
         if idle_frames:
             idle_df = pd.DataFrame(idle_frames)
@@ -662,8 +698,9 @@ class Orsi(torch.utils.data.Dataset):
 if __name__ == "__main__":
     import argparse
 
-    from fvcore.config import get_cfg
-    from tapas.config.defaults import assert_and_infer_cfg
+    from fvcore.common.config import CfgNode
+    from tapis.config.defaults import get_cfg as _get_cfg
+    from tapis.config.defaults import assert_and_infer_cfg
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--cfg", type=str, required=True, help="Path to config file")
@@ -677,13 +714,13 @@ if __name__ == "__main__":
 
     cfg = get_cfg()
     cfg.merge_from_file(args.cfg)
-    
+
     # Override train/test lists if provided on command line
     if args.train_lists:
         cfg.ENDOVIS_DATASET.TRAIN_LISTS = args.train_lists.split(",")
     if args.test_lists:
         cfg.ENDOVIS_DATASET.TEST_LISTS = args.test_lists.split(",")
-    
+
     if args.opts:
         cfg.merge_from_list(args.opts)
     cfg = assert_and_infer_cfg(cfg)

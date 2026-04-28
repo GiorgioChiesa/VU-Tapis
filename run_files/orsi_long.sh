@@ -56,7 +56,7 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="150-Idle"
+NAME="Idlex10"
 GPUIDS="1"
 
 DATASET="orsi"

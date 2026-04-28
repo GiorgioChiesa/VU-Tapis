@@ -17,95 +17,110 @@ python -B tools/run_net.py --cfg configs/Orsi/TAPIS/TAPIS_LONG.yaml \
 ## Execution Flow
 
 ```
-run_files/*.sh → tools/run_net.py → train_net.py:train() (525)
+run_files/*.sh → tools/run_net.py → tools/train_net.py:train() (525)
   ├── build_model()        # tapis/models/build.py
-  ├── construct_loader()   # tapis/datasets/loader.py
-  ├── train_epoch()        # train_net.py:163
-  └── eval_epoch()         # train_net.py:400
+  ├── construct_loader()  # tapis/datasets/loader.py
+  ├── train_epoch()       # tools/train_net.py:163
+  └── eval_epoch()        # tools/train_net.py:393
 ```
 
-## Architecture Layers
+## Run Script: orsi_long.sh
 
-| Layer | Entry Point | Description |
-|-------|-------------|-------------|
-| Shell | `run_files/*.sh` | Generates patient splits, configures paths |
-| Main | `tools/run_net.py` | Parses args, loads config, calls train |
-| Training | `tools/train_net.py` | train() (525), train_epoch() (163), eval_epoch() (400) |
-| Model | `tapis/models/build.py` | MODEL_REGISTRY.get(name)(cfg) |
-| Dataset | `tapis/datasets/build.py` | DATASET_REGISTRY.get(name)(cfg, split) |
-| Loader | `tapis/datasets/loader.py` | construct_loader(cfg, split) |
+### Patient Splits (lines 19-54)
+- **Train**: 43 patients (dynamic via n_train=43)
+- **Test**: 7 patients (dynamic via n_test=7)
+- **Val**: 0 patients (n_val=0)
+- Note: Splits generated from all_patients array, not from hardcoded TRAIN_FOLDS/TEST_FOLDS at top
+
+### Key Config Lines (75-98)
+- PYTHONPATH must include `tapis` and `region_proposals` (lines 75-76)
+- GPU device: configurable via `GPUIDS` (default: 1)
+- Data paths: `FRAME_DIR=/data/orsi_tensors`, `FRAME_LIST=/data/coco`
+
+
+## Training & Validation
+
+### tools/train_net.py:train() (lines 525-639)
+- Distributed training init: `du.init_distributed_training(cfg)`
+- Random seed set from `cfg.RNG_SEED`
+- Model: `build_model(cfg)`, optional `TRAIN.FREEZE_ENCODER`
+- Optimizer: `optim.construct_optimizer(model, cfg)` (Adam or SGD)
+- Mixed precision: `torch.cuda.amp.GradScaler(enabled=cfg.TRAIN.MIXED_PRECISION)`
+- Checkpoint: Resume via `cu.load_train_checkpoint()`
+
+### tools/train_net.py:eval_epoch() (lines 393-489)
+- Model eval mode: `model.eval()`
+- Memory bank reset between videos (lines 442-455)
+- Per-task predictions: steps, phases
+- Metrics: mAP calculation via `SurgeryMeter`
+
+
+## Dataset (tapis/datasets/orsi.py)
+
+### Data Paths
+- Frames: `{ORSI_ROOT_DIR}/{patient}/Video_1fps/*.pt`
+- Labels: `{patient}/Label/{patient}_all_labels.csv`
+- CSV columns: patient_id, patient_name, frame_id, frame_path, second, event_id, event_name, phase_id, phase_name
+
+### ADD_IDLE Feature (lines 382-468)
+- Config: `ENDOVIS_DATASET.ADD_IDLE` (default: 10 in TAPIS_LONG.yaml)
+- Selects Idle frames evenly distributed across patient videos
+- Filters out Idle within 30 frames of non-Idle events
+- Patient mapping: Uses `patient_name` (string "RARP01") mapped to `patient_id` (int) via regex extraction (line 394)
+
+### Output CSV (line 273)
+- Saves to: `OUTPUT_DIR/{split}_data.csv`
+- Contains dataframe after filtering, collapse, and add_idle processing
+
 
 ## Config Files
 
 | Config | Task | Classes |
 |--------|------|---------|
-| `TAPIS_STEPS.yaml` | Steps | 32 |
-| `TAPIS_PHASES.yaml` | Phases | 14 |
-| `TAPIS_LONG.yaml` | Steps + Phases | 32 + 14 |
-| `TAPIS_SHORT.yaml` | Short-term | - |
-| `TAPIS_ACTIONS.yaml` | Actions | - |
-| `TAPIS_INSTRUMENTS.yaml` | Instruments | - |
+| `TAPIS_STEPS.yaml` | Steps | 33 |
+| `TAPIS_PHASES.yaml` | Phases | 15 |
+| `TAPIS_LONG.yaml` | Steps + Phases | 33 + 15 |
 
-## Data Paths (Local Setup)
+NUM_CLASSES includes background class.
 
-```bash
-FRAME_DIR="/data/orsi_tensors"
-FRAME_LIST="/data/coco"
-ANNOT_DIR="/data/coco"
-COCO_ANN_PATH="/data/coco/all_merged.json"
-CHECKPOINT="data/pretrained_models/fold1/LONG.pyth"
-```
-
-## Environment Setup
-
-```bash
-export PYTHONPATH=$TAPIS_DIR/tapis:$PYTHONPATH
-export PYTHONPATH=$TAPIS_DIR/region_proposals:$PYTHONPATH
-export CUDA_VISIBLE_DEVICES=0  # Check GPU availability first
-```
-
-## Key Configs
+## Key Configs (configs/Orsi/TAPIS/TAPIS_LONG.yaml)
 
 ```yaml
-DATA.NUM_FRAMES: 16          # LONG task uses 32 frames (NUM_FRAMES * SAMPLING_RATE)
-DATA.SAMPLING_RATE: 1        # Increase to 2 for longer temporal context
-TRAIN.ACCUM_STEPS: 10        # Effective batch = BATCH_SIZE * ACCUM_STEPS
-TRAIN.BATCH_SIZE: 12         # Adjust based on GPU memory
-TEST.BATCH_SIZE: 24          # May need reduction to avoid OOM
-SOLVER.BASE_LR: 0.0001       # STEPS uses 5e-5
+DATA.NUM_FRAMES: 16          # Actual clip length = NUM_FRAMES * SAMPLING_RATE
+DATA.SAMPLING_RATE: 1
+TRAIN.ACCUM_STEPS: 1         # Effective batch = BATCH * ACCUM
+TRAIN.BATCH_SIZE: 16
+TEST.BATCH_SIZE: 64           # Override via command line for OOM
+SOLVER.BASE_LR: 0.0001
 SOLVER.MAX_EPOCH: 50
-SOLVER.EARLY_STOP_ep_th: [5, -1.0]  # Stop after 5 epochs no improvement
+SOLVER.MAX_ITER: 10000
+SOLVER.EARLY_STOP_ep_th: [5, -1.0]
 SOLVER.LR_POLICY: cosine
 TASKS.TASKS: ["steps", "phases"]
-TASKS.WEIGHT_LOSS_BY_CLASS: [False, False]  # Must be False if CSV files don't match data
+TASKS.NUM_CLASSES: [33, 15]
+TASKS.LOSS_FUNC: ["cross_entropy", "cross_entropy"]
+TASKS.WEIGHT_LOSS_BY_CLASS: [steps_distribution.csv, phases_distribution.csv]
+ENDOVIS_DATASET.ADD_IDLE: 10
+ENDOVIS_DATASET.ORSI_ROOT_DIR: /data/orsi_tensors
 ```
 
-## Patient Splits
+Override YAML defaults via command line: `python -B tools/run_net.py --cfg <yaml> TRAIN.BATCH_SIZE 12 TEST.BATCH_SIZE 24`
 
-```
-all_patients: RARP01-RARP65 (50 total, some gaps)
-n_train: 43  n_val: 0  n_test: 7
-```
-
-## Common Issues & Fixes
-
-1. **CUDA OOM**: Reduce TEST.BATCH_SIZE (60→24) or TRAIN.BATCH_SIZE
-2. **Missing data**: Verify FRAME_DIR exists at `/data/orsi_tensors`
-3. **GPU unavailable**: Check `nvidia-smi` and set correct CUDA_VISIBLE_DEVICES
-4. **Weight loss error**: `tapis/datasets/orsi.py:138` - `df` undefined bug. Use `self.counter[task]['total_count'].sum()`
-5. **WEIGHT_LOSS_BY_CLASS**: Files must match actual class distribution or set to `[False, False]`
-
-## Testing
-
-```bash
-pytest tests/test_dataset_orsi.py -v
-```
 
 ## Output Locations
 
 ```
-outputs/orsi/LONG/Container/totale/
-├── checkpoints/     # checkpoint_epoch_*.pyth
-├── stdout.log      # Training logs
-└── metrics/        # Evaluation results
+outputs/{DATASET}/{TASK}/{NAME}/totale/
+├── checkpoints/          # checkpoint_epoch_*.pyth
+├── stdout.log            # Training logs
+├── metrics/              # Evaluation results and confusion matrices
+└── distributions/        # Class distribution CSVs for loss weighting
 ```
+
+
+## Common Issues & Fixes
+
+1. **CUDA OOM**: Reduce `TEST.BATCH_SIZE` (64→24 or lower)
+2. **Missing data**: Verify `/data/orsi_tensors` and `/data/coco` exist
+3. **GPU unavailable**: Check `nvidia-smi`
+4. **PYTHONPATH errors**: Ensure `tapis/` and `region_proposals/` are in PYTHONPATH (done in run_files/*.sh)

@@ -85,7 +85,7 @@ MODEL:
   DROPOUT_RATE: 0.5
 TASKS:
   TASKS:  ["steps", "phases"]
-  NUM_CLASSES: [32, 14]
+  NUM_CLASSES: [33, 15]
   LOSS_FUNC: ["cross_entropy", "cross_entropy"]
   HEAD_ACT:  ["softmax", "softmax"]
   LOSS_WEIGHTS:  [1.0, 1.0]
@@ -111,4 +111,4 @@ ENDOVIS_DATASET:
   TRAIN_GT_BOX_JSON: [all_merged.json]
   TEST_GT_BOX_JSON: [all_merged.json]
   ORSI_ROOT_DIR: /data/orsi_tensors
-  ADD_IDLE: 150
+  ADD_IDLE: 10

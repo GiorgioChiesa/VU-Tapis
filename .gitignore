@@ -1,5 +1,6 @@
 .export_vars.txt
 .vscode
+.pytest_cache
 checkpoints
 fold1/
 fold2/
@@ -70,3 +71,6 @@ detectron2/datasets/*
 /projects/*/datasets
 detectron2/models
 /snippet
+
+temp.sh
+AGENTS.md

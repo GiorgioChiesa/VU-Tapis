@@ -13,8 +13,9 @@ output
 instant_test_output
 inference_test_output
 session-*.md
+data/**
 
-**/ACTIONS.pyth
+**.pyth
 **/INSTRUMENTS.pyth
 **/swinl.pth
 

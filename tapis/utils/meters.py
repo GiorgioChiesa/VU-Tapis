@@ -296,7 +296,7 @@ class SurgeryMeter(object):
             self.early_stop[1] = deepcopy(self.cfg.SOLVER.EARLY_STOP_ep_th[0])
         self.early_stop[0] = max(mean_map, self.early_stop[0])
         
-        if (self.early_stop[1] <= 0 or epoch >= self.early_stop[3]) and self.mode != "train":
+        if (self.early_stop[1] <= 0 or epoch >= self.early_stop[3]) and self.mode == "val":
             logging.log_json_stats({"mode": self.mode, "early_stop": True, "epoch": epoch})
             for task,metric in zip(self.tasks, self.metrics):
                 if task in ["phases","steps"]:            
@@ -323,7 +323,7 @@ class SurgeryMeter(object):
         Args:
             cur_epoch (int): the number of current epoch.
         """
-        if self.mode == "val":
+        if self.mode == "val" or self.mode == "test":
             metrics_val, mean_map, out_files = self.finalize_metrics(cur_epoch +1, log=False, mode=self.mode)
             stats = {
                 "_type": "{}_epoch".format(self.mode),

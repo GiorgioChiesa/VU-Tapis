@@ -81,12 +81,12 @@ SOLVER:
 MODEL:
   ARCH: mvit
   MODEL_NAME: MViT
-  LOSS_FUNC: soft_cross_entropy
-  DROPOUT_RATE: 0.5
+  # LOSS_FUNC: soft_cross_entropy
+  DROPOUT_RATE: 0.2
 TASKS:
   TASKS:  ["steps", "phases"]
   NUM_CLASSES: [33, 15]
-  LOSS_FUNC: ["cross_entropy", "cross_entropy"]
+  LOSS_FUNC: ["focal_loss", "cross_entropy"]
   HEAD_ACT:  ["softmax", "softmax"]
   LOSS_WEIGHTS:  [1.0, 1.0]
   METRICS: ["mAP","mAP"]  

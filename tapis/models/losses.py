@@ -11,38 +11,83 @@ import pandas as pd
 import numpy as np
 
 
-class FocalLoss(nn.Module):
-    """
-    Focal Loss for addressing class imbalance.
-    """
-    def __init__(self, weight=None, alpha=None, gamma=2.0, reduction='mean'):
-        super(FocalLoss, self).__init__()
-        self.weight = weight
-        self.alpha = alpha
-        self.gamma = gamma
-        self.reduction = reduction
+# class FocalLoss(nn.Module):
+#     """
+#     Focal Loss for addressing class imbalance.
+#     """
+#     def __init__(self, weight=None, alpha=None, gamma=2.0, reduction='mean'):
+#         super(FocalLoss, self).__init__()
+#         self.weight = weight
+#         self.alpha = alpha
+#         self.gamma = gamma
+#         self.reduction = reduction
         
-    def forward(self, inputs, targets):
-        if self.weight is not None:
-            ce_loss = F.cross_entropy(inputs, targets, weight=self.weight, reduction='none')
-        else:
-            ce_loss = F.cross_entropy(inputs, targets, reduction='none')
-        pt = torch.exp(-ce_loss)
-        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+    # def forward(self, inputs, targets):
+    #     if self.weight is not None:
+    #         ce_loss = F.cross_entropy(inputs, targets, weight=self.weight, reduction='none')
+    #     else:
+    #         ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+    #     pt = torch.exp(-ce_loss)
+    #     focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+    #     if self.alpha is not None:
+    #         if isinstance(self.alpha, (list, np.ndarray)):
+    #             alpha_t = torch.tensor(self.alpha, device=inputs.device)[targets]
+    #         elif isinstance(self.alpha, torch.Tensor):
+    #             alpha_t = self.alpha[targets]
+    #         else:
+    #             alpha_t = self.alpha
+    #         focal_loss = alpha_t * focal_loss
+    #     if self.reduction == 'mean':
+    #         return focal_loss.mean()
+    #     elif self.reduction == 'sum':
+    #         return focal_loss.sum()
+    #     else:
+    #         return focal_loss
+    
+
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2.0, weight=None, alpha=None, reduction='mean'):
+        """
+        gamma: focusing parameter (più alto = più focus sugli esempi difficili)
+        alpha: tensor di pesi per classe (shape: [num_classes]) oppure None
+        reduction: 'mean', 'sum' o 'none'
+        """
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = weight if weight is not None else alpha
+        self.reduction = reduction
+
+    def forward(self, logits, targets):
+        """
+        logits: [batch_size, num_classes]
+        targets: [batch_size] (class indices)
+        """
+
+        # log softmax per stabilità numerica
+        log_probs = F.log_softmax(c, dim=1)
+        probs = torch.exp(log_probs)
+
+        # seleziona la probabilità della classe corretta
+        log_pt = log_probs.gather(1, targets.unsqueeze(1)).squeeze(1)
+        pt = probs.gather(1, targets.unsqueeze(1)).squeeze(1)
+
+        # focal term
+        focal_term = (1 - pt) ** self.gamma
+
+        # alpha weighting (se fornito)
         if self.alpha is not None:
-            if isinstance(self.alpha, (list, np.ndarray)):
-                alpha_t = torch.tensor(self.alpha, device=inputs.device)[targets]
-            elif isinstance(self.alpha, torch.Tensor):
-                alpha_t = self.alpha[targets]
-            else:
-                alpha_t = self.alpha
-            focal_loss = alpha_t * focal_loss
-        if self.reduction == 'mean':
-            return focal_loss.mean()
-        elif self.reduction == 'sum':
-            return focal_loss.sum()
+            alpha_t = self.alpha[targets]
+            loss = -alpha_t * focal_term * log_pt
         else:
-            return focal_loss
+            loss = -focal_term * log_pt
+
+        # reduction
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        else:
+            return loss    
 
 
 _LOSSES = {

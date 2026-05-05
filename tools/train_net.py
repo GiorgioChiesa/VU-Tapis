@@ -711,7 +711,7 @@ def train(cfg):
     # Run streaming test after training if enabled
     if cfg.TEST.ENABLE:
         print(f"\n{'=' * 60}")
-        print("Running streaming test after training...")
+        print("Starting streaming test inference")
         print(f"{'=' * 60}\n")
 
         # Load best checkpoint for testing
@@ -743,7 +743,8 @@ def test_streaming(cfg, model, output_dir):
 
     # Setup metrics
     test_meter = SurgeryMeter(len(test_loader), cfg, mode="test")
-
+    test_meter.iter_tic()
+    
     # Output directory for predictions
     test_output_dir = os.path.join(output_dir, "test_predictions")
     os.makedirs(test_output_dir, exist_ok=True)
@@ -752,9 +753,6 @@ def test_streaming(cfg, model, output_dir):
     all_predictions = {task: [] for task in complete_tasks}
     all_labels = {task: [] for task in complete_tasks}
 
-    print(f"\n{'=' * 60}")
-    print("Starting streaming test inference")
-    print(f"{'=' * 60}\n")
 
     last_video = ""
     with tqdm(total=len(test_loader), desc="Test (Streaming)", unit="it") as t:
@@ -771,7 +769,8 @@ def test_streaming(cfg, model, output_dir):
                 inputs[0] = inputs[0].cuda(non_blocking=True)
                 for key, val in labels.items():
                     labels[key] = val.cuda(non_blocking=True)
-
+            test_meter.data_toc()
+            
             # Reset memory bank when switching to a new video
             if hasattr(model, "reset_memory_bank"):
                 current_video = None
@@ -803,13 +802,28 @@ def test_streaming(cfg, model, output_dir):
                     all_labels[task].extend(labels[task].cpu().tolist())
 
             test_meter.iter_toc()
-            test_meter.update_predictions(preds, labels)
+            test_meter.update_stats(preds, image_names, labels=labels)
             test_meter.iter_tic()
 
     # Calculate metrics
     print(f"\n{'=' * 60}")
     print("Computing test metrics...")
     print(f"{'=' * 60}\n")
+    
+    t.close()
+    if cfg.NUM_GPUS > 1:
+        if du.is_master_proc():
+            task_map, mean_map, out_files, stats, early_stop = test_meter.log_epoch_stats(cur_epoch)
+        else:
+            task_map, mean_map, out_files, stats, early_stop = [0, 0, 0, {}, False]
+        torch.distributed.barrier()
+    else:
+        task_map, mean_map, out_files, stats, early_stop = test_meter.log_epoch_stats(cfg.SOLVER.MAX_EPOCH)
+
+    if cfg.WANDB_ENABLE and cfg.NUM_GPUS <= 1:
+        wandgb_log(stats)
+
+    return task_map
 
     map_task = {}
     for task in complete_tasks:

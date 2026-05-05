@@ -225,8 +225,13 @@ class Orsi_streaming(Dataset):
         # Process images
         if isinstance(imgs[0], np.ndarray):
             imgs = np.stack(imgs)
-            imgs = torch.from_numpy(imgs).float() / 255.0
-            imgs = imgs.permute(3, 0, 1, 2)  # NCHW -> CTHW
+            imgs = torch.from_numpy(imgs).float()
+            if imgs.max() > 10.0:
+                imgs = imgs / 255.0
+            if imgs.ndim == 4 and imgs.shape[-1] == 3:
+                imgs = imgs.permute(3, 0, 1, 2)  # NCHW -> CTHW
+            elif imgs.ndim == 4 and imgs.shape[1] == 3:
+                imgs = imgs.permute(1, 0, 2, 3)  # NCHW -> CTHW
 
         # Get labels for center frame
         center_frame_id = frames[frame_idx][0]

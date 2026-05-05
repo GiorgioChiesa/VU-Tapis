@@ -1,5 +1,14 @@
 # AGENTS.md - TAPIS Project Context
 
+## Project Overview
+VU-Tapis is a deep learning system for surgical video analysis using the TAPIS (Transformers for Actions, Phases, Steps, and Instrument Segmentation) model. It performs multi-task learning on endoscopic surgical videos to classify steps (33 classes), phases (15 classes), and optionally instruments via instance segmentation.
+
+## Core Architecture
+- **Primary Backbone**: MViT (MultiScale Vision Transformer) with hierarchical scaling, patch embedding (3×7×7 patches, 2×4×4 stride), multi-head attention
+- **Alternative Backbones**: SlowFast (two-pathway CNN), VideoSwinTransformer, LEMON (ConvNext-based)
+- **Memory-Augmented Variants**: TAPISWithMemory for temporal reasoning across frames
+- **Task Types**: Frame tasks (global classification for steps/phases), Region tasks (RPN + region head for instruments/actions)
+
 ## Quick Start
 
 ```bash
@@ -15,7 +24,7 @@ python -B tools/run_net.py --cfg configs/Orsi/TAPIS/TAPIS_LONG.yaml \
 
 ```
 run_files/*.sh → tools/run_net.py → tools/train_net.py:train() (line 525)
-  ├── build_model()        # tapis/models/build.py
+  ├── build_model()        # tapis/models/video_model_builder.py
   ├── construct_loader()  # tapis/datasets/loader.py
   ├── train_epoch()       # tools/train_net.py:163
   └── eval_epoch()        # tools/train_net.py:393
@@ -102,6 +111,13 @@ ENDOVIS_DATASET.ORSI_ROOT_DIR: /data/orsi_tensors
 
 Override YAML defaults via command line: `python -B tools/run_net.py --cfg <yaml> TRAIN.BATCH_SIZE 12 VAL.BATCH_SIZE 24`
 
+## Key Project Conventions
+1. **Frame vs Region tasks**: Frame tasks use global classification; region tasks use RPN + region head
+2. **Clip construction**: Center-aligned sequence of NUM_FRAMES at SAMPLING_RATE
+3. **Label assignment**: Nearest non-idle label in ±30 frame window around clip center
+4. **Checkpoint format**: PyTorch .pyth with model state, optimizer state, metrics
+5. **Paths**: Auto-added to PYTHONPATH: `tapis/`, `region_proposals/` (see orsi.py lines 1-16)
+
 ## Output Locations
 
 ```
@@ -121,3 +137,6 @@ outputs/{DATASET}/{TASK}/{NAME}/totale/
 2. **Missing data**: Verify `/data/orsi_tensors` and `/data/coco` exist
 3. **GPU unavailable**: Check `nvidia-smi`
 4. **PYTHONPATH errors**: `tapis/` and `region_proposals/` added automatically in run_files/*.sh and orsi.py
+5. **NaN loss**: Check data validity, learning rate extremes, gradient clipping parameters
+6. **Memory bank not reset**: TAPISWithMemory must reset between videos (handled in eval_epoch lines 439-452)
+7. **Config overrides**: Must use spaces not `=`: `TRAIN.BATCH_SIZE 12` ✓ vs `TRAIN.BATCH_SIZE=12` ✗

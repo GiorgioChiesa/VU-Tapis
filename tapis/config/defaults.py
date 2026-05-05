@@ -168,6 +168,16 @@ _C.MULTIGRID.DEFAULT_S = 0
 
 
 # ---------------------------------------------------------------------------- #
+# Test options
+# ---------------------------------------------------------------------------- #
+_C.TEST = CfgNode()
+
+# If True test the model, else skip the testing.
+_C.TEST.ENABLE = False
+_C.TEST.DATASET = "orsi_streaming"
+_C.TEST.BATCH_SIZE = 1
+
+# ---------------------------------------------------------------------------- #
 # Validation options
 # ---------------------------------------------------------------------------- #
 _C.VAL = CfgNode()
@@ -904,6 +914,10 @@ _C.ENDOVIS_DATASET.MASKS_PATH = ""
 
 # Aspect ratio threshold for difference between original image and cropped image when using RPN
 _C.ENDOVIS_DATASET.ASPECT_RATION_TH = 0.02
+
+# Test streaming options
+_C.ENDOVIS_DATASET.TEST_LISTS = ["RARP50.csv"]
+_C.ENDOVIS_DATASET.TEST_GT_BOX_JSON = ["RARP50_coco.json"]
 
 # -----------------------------------------------------------------------------
 # Classification heads options

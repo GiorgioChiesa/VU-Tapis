@@ -1,5 +1,5 @@
 # Install Ollama (no sudo required)
-if [ ! -f "$HOME/ollama/bin/ollama" ]; then
+if [ ! -d "$HOME/ollama" ]; then
     echo "Installing Ollama..."
     mkdir -p ~/ollama
     cd ~/ollama
@@ -29,9 +29,9 @@ fi
 # Export PATH for Ollama
 export PATH="$HOME/ollama/bin:$PATH"
 echo "Ollama PATH exported: $HOME/ollama/bin"
-
-pip install 'git+https://github.com/facebookresearch/fvcore'
-pip install 'git+https://github.com/facebookresearch/fairscale'
+uv pip install -r requirements.txt
+uv pip install 'git+https://github.com/facebookresearch/fvcore'
+uv pip install 'git+https://github.com/facebookresearch/fairscale'
 # git clone https://github.com/facebookresearch/detectron2.git
 clear 
 

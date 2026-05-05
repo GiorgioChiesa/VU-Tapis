@@ -6,4 +6,5 @@ from .grasp import Grasp  # noqa
 from .endovis_2017 import Endovis_2017
 from .endovis_2018 import Endovis_2018
 from .orsi import Orsi  # noqa
+from .orsi_streaming import Orsi_streaming  # noqa
 from .build import DATASET_REGISTRY, build_dataset  # noqa

@@ -708,10 +708,177 @@ def train(cfg):
             scaler if cfg.TRAIN.MIXED_PRECISION else None,
         )
 
+    # Run streaming test after training if enabled
+    if cfg.TEST.ENABLE:
+        print(f"\n{'=' * 60}")
+        print("Running streaming test after training...")
+        print(f"{'=' * 60}\n")
+
+        # Load best checkpoint for testing
+        best_checkpoint = os.path.join(cfg.OUTPUT_DIR, "checkpoint_best_mean.pyth")
+        if os.path.exists(best_checkpoint):
+            print(f"Loading best checkpoint: {best_checkpoint}")
+            checkpoint = torch.load(best_checkpoint, map_location="cpu")
+            model.load_state_dict(checkpoint["model_state"])
+
+        test_streaming(cfg, model, cfg.OUTPUT_DIR)
+
     profiler.stop()
     profiler.print()
     with open(f"{cfg.OUTPUT_DIR}/profiler.html", "wb+") as f:
         f.write(profiler.output_html().encode("utf-8"))
+
+
+@torch.no_grad()
+def test_streaming(cfg, model, output_dir):
+    """
+    Test the model on streaming data (one video at a time, sequential processing).
+    Uses OrsiStreaming dataset for frame-by-frame inference.
+    """
+    model.eval()
+
+    # Build test dataset
+    # test_dataset = build_dataset(cfg.TEST.DATASET, cfg, "test")
+    test_loader = loader.construct_loader(cfg, "test")
+
+    # Setup metrics
+    test_meter = SurgeryMeter(len(test_loader), cfg, mode="test")
+
+    # Output directory for predictions
+    test_output_dir = os.path.join(output_dir, "test_predictions")
+    os.makedirs(test_output_dir, exist_ok=True)
+
+    complete_tasks = cfg.TASKS.TASKS
+    all_predictions = {task: [] for task in complete_tasks}
+    all_labels = {task: [] for task in complete_tasks}
+
+    print(f"\n{'=' * 60}")
+    print("Starting streaming test inference")
+    print(f"{'=' * 60}\n")
+
+    last_video = ""
+    with tqdm(total=len(test_loader), desc="Test (Streaming)", unit="it") as t:
+        for cur_iter, data_batch in enumerate(test_loader):
+            t.update(1)
+
+            if len(data_batch) == 4:
+                inputs, labels, data, image_names = data_batch
+            else:
+                inputs, labels, image_names = data_batch
+                data = {}
+
+            if cfg.NUM_GPUS:
+                inputs[0] = inputs[0].cuda(non_blocking=True)
+                for key, val in labels.items():
+                    labels[key] = val.cuda(non_blocking=True)
+
+            # Reset memory bank when switching to a new video
+            if hasattr(model, "reset_memory_bank"):
+                current_video = None
+                try:
+                    if isinstance(image_names, (list, tuple)) and len(image_names) > 0:
+                        current_video = str(image_names[0]).split("/")[0]
+                except Exception:
+                    current_video = None
+
+                if current_video is not None and current_video != last_video:
+                    model.reset_memory_bank()
+                    last_video = current_video
+                    print(f"\nProcessing video: {current_video}")
+
+            # Forward pass
+            preds = model(inputs)
+            if isinstance(preds, tuple):
+                preds = preds[0]
+
+            if cfg.NUM_GPUS:
+                preds = {task: preds[task].to("cpu", non_blocking=True) for task in complete_tasks}
+                torch.cuda.synchronize()
+
+            # Store predictions and labels
+            for task in complete_tasks:
+                if task not in data.get("region_tasks", set()):
+                    preds[task] = preds[task].tolist()
+                    all_predictions[task].extend(preds[task])
+                    all_labels[task].extend(labels[task].cpu().tolist())
+
+            test_meter.iter_toc()
+            test_meter.update_predictions(preds, labels)
+            test_meter.iter_tic()
+
+    # Calculate metrics
+    print(f"\n{'=' * 60}")
+    print("Computing test metrics...")
+    print(f"{'=' * 60}\n")
+
+    map_task = {}
+    for task in complete_tasks:
+        if len(all_predictions[task]) > 0:
+            from sklearn.metrics import average_precision_score
+            import numpy as np
+
+            preds_arr = np.array(all_predictions[task])
+            labels_arr = np.array(all_labels[task])
+
+            # mAP
+            if preds_arr.ndim > 1:
+                ap = []
+                for c in range(preds_arr.shape[1]):
+                    if c == 0:  # Skip background
+                        continue
+                    try:
+                        ap.append(average_precision_score(labels_arr == c, preds_arr[:, c]))
+                    except:
+                        pass
+                map_task[task] = {"mAP": np.mean(ap) if ap else 0.0}
+            else:
+                map_task[task] = {"mAP": 0.0}
+
+            print(f"Task {task}: mAP = {map_task[task]['mAP']:.4f}")
+
+    # Save results
+    results = {
+        "predictions": all_predictions,
+        "labels": all_labels,
+        "metrics": map_task,
+    }
+
+    import json
+
+    results_path = os.path.join(test_output_dir, "test_results.json")
+    with open(results_path, "w") as f:
+        json.dump(results, f, indent=2, default=str)
+
+    # Save confusion matrices
+    for task in complete_tasks:
+        if len(all_predictions[task]) > 0:
+            from sklearn.metrics import confusion_matrix
+            import matplotlib
+
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+
+            pred_classes = (
+                np.argmax(np.array(all_predictions[task]), axis=1)
+                if np.array(all_predictions[task]).ndim > 1
+                else np.array(all_predictions[task])
+            )
+            cm = confusion_matrix(all_labels[task], pred_classes)
+
+            plt.figure(figsize=(10, 8))
+            sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
+            plt.title(f"Test Confusion Matrix - {task}")
+            plt.ylabel("True label")
+            plt.xlabel("Predicted label")
+
+            cm_path = os.path.join(test_output_dir, f"test_confusion_matrix_{task}.png")
+            plt.savefig(cm_path, bbox_inches="tight")
+            plt.close()
+            print(f"Saved confusion matrix: {cm_path}")
+
+    print(f"\nTest results saved to: {test_output_dir}")
+    return map_task
 
 
 print(f"Current working directory: {os.getcwd()}")

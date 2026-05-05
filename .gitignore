@@ -14,8 +14,8 @@ instant_test_output
 inference_test_output
 session-*.md
 
-data/pretrained_models/train/ACTIONS.pyth
-data/pretrained_models/train/INSTRUMENTS.pyth
+**/ACTIONS.pyth
+**/INSTRUMENTS.pyth
 **/swinl.pth
 
 *.mp4

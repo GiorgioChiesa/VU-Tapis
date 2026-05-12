@@ -269,6 +269,12 @@ class Orsi(torch.utils.data.Dataset):
 
         self.collapse_event_dfs()
 
+        # Ensure index is properly reset after all operations
+        if self.filtered_dfs is not None:
+            self.filtered_dfs = self.filtered_dfs.reset_index(drop=True)
+        else:
+            self.dfs = self.dfs.reset_index(drop=True)
+
         saving = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
         saving.to_csv(os.path.join(self.cfg.OUTPUT_DIR, f"{self._split}_data.csv"), index=False)
 
@@ -615,7 +621,18 @@ class Orsi(torch.utils.data.Dataset):
         return imgs, boxes, image
 
     def __getitem__(self, idx):
-        clip = self.filtered_dfs.iloc[idx] if self.filtered_dfs is not None else self.dfs.iloc[idx]
+        # Get the appropriate dataframe
+        target_df = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
+        
+        # Safety check: ensure index is within bounds
+        if idx < 0 or idx >= len(target_df):
+            raise IndexError(
+                f"Index {idx} is out of bounds for dataset with length {len(target_df)}. "
+                f"This may indicate a synchronization issue between __len__ and __getitem__. "
+                f"Target dataframe has shape {target_df.shape} with index range [{target_df.index.min()}, {target_df.index.max()}]"
+            )
+        
+        clip = target_df.iloc[idx]
 
         df = self.dfs[self.dfs["patient_id"] == clip["patient_id"]]
 

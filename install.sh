@@ -1,34 +1,35 @@
 # Install Ollama (no sudo required)
-if [ ! -d "$HOME/ollama" ]; then
-    echo "Installing Ollama..."
-    mkdir -p ~/ollama
-    cd ~/ollama
+# if [ ! -d "$HOME/ollama" ]; then
+#     echo "Installing Ollama..."
+#     mkdir -p ~/ollama
+#     cd ~/ollama
     
-    # Download Ollama binary
-    curl -fsSL -o ollama-linux-amd64.tar.zst https://github.com/ollama/ollama/releases/download/v0.21.2/ollama-linux-amd64.tar.zst
+#     # Download Ollama binary
+#     curl -fsSL -o ollama-linux-amd64.tar.zst https://github.com/ollama/ollama/releases/download/v0.21.2/ollama-linux-amd64.tar.zst
     
-    # Install zstandard if not present
-    pip install zstandard --quiet 2>/dev/null || true
+#     # Install zstandard if not present
+#     pip install zstandard --quiet 2>/dev/null || true
     
-    # Extract the archive
-    python3 -c "
-import zstandard
-import tarfile
-with open('ollama-linux-amd64.tar.zst', 'rb') as fh:
-    dctx = zstandard.ZstdDecompressor()
-    with dctx.stream_reader(fh) as reader:
-        with tarfile.open(fileobj=reader, mode='r|') as tar:
-            tar.extractall()
-"
+#     # Extract the archive
+#     python3 -c "
+# import zstandard
+# import tarfile
+# with open('ollama-linux-amd64.tar.zst', 'rb') as fh:
+#     dctx = zstandard.ZstdDecompressor()
+#     with dctx.stream_reader(fh) as reader:
+#         with tarfile.open(fileobj=reader, mode='r|') as tar:
+#             tar.extractall()
+# "
     
-    echo "Ollama installed to ~/ollama/bin/"
-else
-    echo "Ollama already installed. Skipping."
-fi
+#     echo "Ollama installed to ~/ollama/bin/"
+#     # Export PATH for Ollama
+#     export PATH="$HOME/ollama/bin:$PATH"
+#     echo "Ollama PATH exported: $HOME/ollama/bin"
+# else
+#     echo "Ollama already installed. Skipping."
+# fi
 
-# Export PATH for Ollama
-export PATH="$HOME/ollama/bin:$PATH"
-echo "Ollama PATH exported: $HOME/ollama/bin"
+
 uv pip install -r requirements.txt
 uv pip install 'git+https://github.com/facebookresearch/fvcore'
 uv pip install 'git+https://github.com/facebookresearch/fairscale'

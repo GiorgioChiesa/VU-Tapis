@@ -137,10 +137,17 @@ def compute_weighted_loss(losses, weight_vector):
     return final_loss
 
 
-def get_weight_from_csv(path, num_classes=None):
+def get_weight_from_csv(path, num_classes=None, weight_type="class"):
     """
     Retrieve the weight vector from a csv file.
-    Args (str):
+    
+    Args:
+        path (str): Path to the CSV file
+        num_classes (int): Number of classes
+        weight_type (str): "class" for class weights (loss function) or "sample" for sample weights (sampler)
+    
+    Returns:
+        torch.Tensor: Weight tensor
     """
     if path is None or path==False:
         return None
@@ -151,9 +158,50 @@ def get_weight_from_csv(path, num_classes=None):
     else:
         num_classes = len(df)
     if 'total_count' not in df.columns:
-        print(f"Column 'total_count' not found in csv {path}. Please make sure the csv has a column named 'total_count' with the count of samples for each class.")
-        return None
-    counts = df['total_count'].values
-    inverted = [1.0 / val if val != 0 else 0.0 for val in counts]
-    # inverted[:3] = [val * 0.01 for val in inverted[:3]]  # set the first three classes to 0 weight
-    return torch.tensor(inverted, dtype=torch.float32)
+        # Try with leading/trailing spaces
+        count_col = None
+        for col in df.columns:
+            if 'total_count' in col.strip():
+                count_col = col
+                break
+        if count_col is None:
+            print(f"Column 'total_count' not found in csv {path}. Available columns: {df.columns.tolist()}")
+            return None
+    else:
+        count_col = 'total_count'
+    
+    counts = df[count_col].values
+    
+    if weight_type == "class":
+        # Create class weights by normalizing inverse frequencies
+        # This gives higher weight to rare classes
+        total_samples = np.sum(counts)
+        class_weights = np.zeros(num_classes, dtype=np.float32)
+        
+        for i, count in enumerate(counts):
+            if count > 0:
+                # Weight = total_samples / (num_classes * count)
+                # This normalizes so that the average weight is 1.0
+                class_weights[i] = total_samples / (num_classes * count)
+            else:
+                class_weights[i] = 0.0
+        
+        return torch.tensor(class_weights, dtype=torch.float32)
+    
+    elif weight_type == "sample":
+        # Create sample weights by repeating class weights for each sample
+        # This is used for WeightedRandomSampler
+        total_samples = np.sum(counts)
+        sample_weights = []
+        
+        for i, count in enumerate(counts):
+            if count > 0:
+                # Weight for each sample of this class
+                class_weight = total_samples / (num_classes * count)
+                sample_weights.extend([class_weight] * count)
+            # If count is 0, no samples for this class
+        
+        return torch.tensor(sample_weights, dtype=torch.float32)
+    
+    else:
+        raise ValueError(f"Unknown weight_type: {weight_type}. Must be 'class' or 'sample'")

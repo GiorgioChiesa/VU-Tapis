@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import csv
 import os
 import cv2
 import time
@@ -11,6 +12,7 @@ from collections import defaultdict
 
 import torch
 import torch.utils.data.distributed
+
 from torchvision.io import read_image
 import torchvision.transforms as transforms
 
@@ -452,7 +454,53 @@ def revert_tensor_normalize(tensor, mean, std):
     return tensor
 
 
-def create_sampler(dataset, shuffle, cfg):
+def _load_steps_distribution_weights(cfg):
+    """Load weights from cfg.OutputDir/distributions/steps_distribution.csv."""
+    output_dir = getattr(cfg, "OutputDir", None)
+    if output_dir is None:
+        output_dir = getattr(cfg, "OUTPUT_DIR", None)
+    if output_dir is None:
+        output_dir = getattr(cfg, "output_dir", None)
+    if output_dir is None:
+        return None
+
+    csv_path = os.path.join(str(output_dir), "distributions", "steps_distribution.csv")
+    if not os.path.exists(csv_path):
+        return None
+
+    weights = []
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        rows = [row for row in reader if row and any(cell.strip() for cell in row)]
+    if not rows:
+        return None
+
+    first_row = rows[0]
+    lower_fields = [cell.strip().lower() for cell in first_row]
+    header_row = False
+    weight_col = 0
+    for candidate in ("weight", "weights", "probability", "probabilities", "freq", "frequency", "count"):
+        if candidate in lower_fields:
+            weight_col = lower_fields.index(candidate)
+            header_row = True
+            break
+
+    data_rows = rows[1:] if header_row else rows
+    for row in data_rows:
+        if len(row) <= weight_col:
+            continue
+        cell = row[weight_col].strip()
+        if not cell:
+            continue
+        try:
+            weights.append(float(cell))
+        except ValueError:
+            continue
+
+    return weights if weights else None
+
+
+def create_sampler(dataset, shuffle=True, cfg=None, **kwargs):
     """
     Create sampler for the given dataset.
     Args:
@@ -464,7 +512,35 @@ def create_sampler(dataset, shuffle, cfg):
     Returns:
         sampler (Sampler): the created sampler.
     """
-    sampler = DistributedSampler(dataset) if cfg.NUM_GPUS > 1 else None
+    if cfg.NUM_GPUS > 1:
+        return DistributedSampler(dataset)
+    index = cfg.TASKS.TASKS.index(cfg.TASKS.WEIGHT_SAMPLER_TASK) if cfg.TASKS.WEIGHT_SAMPLER_TASK in cfg.TASKS.TASKS else None
+    if index is None or cfg.TASKS.WEIGHT_LOSS_BY_CLASS[index] is False:
+        return None  # Use default random shuffling in DataLoader, no need for a separate sampler
+    
+    sampler = None
+    if shuffle:
+        from torch.utils.data import WeightedRandomSampler
+        from models.losses import get_weight_from_csv
+        weiths_paths = os.path.join(cfg.OUTPUT_DIR, "distributions", 
+                                    cfg.TASKS.WEIGHT_LOSS_BY_CLASS[index])
+        weights = get_weight_from_csv(weiths_paths, cfg.TASKS.NUM_CLASSES[index], weight_type="sample")
+        if weights is not None:
+            # Ensure num_samples matches actual dataset length to prevent index out of bounds
+            actual_dataset_len = len(dataset)
+            num_samples = min(len(weights), actual_dataset_len)
+            
+            if num_samples != len(weights):
+                logger.warning(
+                    f"Sampler weights count ({len(weights)}) != dataset length ({actual_dataset_len}). "
+                    f"Using num_samples={num_samples}. This may indicate data was modified after weights were generated."
+                )
+            
+            sampler = WeightedRandomSampler(
+                weights=weights[:num_samples] if num_samples < len(weights) else weights,
+                num_samples=num_samples,
+                replacement=kwargs.get("replacement", True)
+            )
 
     return sampler
 

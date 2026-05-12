@@ -57,8 +57,8 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="Idlex10-focal"
-GPUIDS="1"
+NAME="control"
+GPUIDS="3"
 
 DATASET="orsi"
 CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_LONG.yaml"

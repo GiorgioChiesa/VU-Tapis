@@ -83,14 +83,18 @@ MODEL:
   MODEL_NAME: MViT
   # LOSS_FUNC: soft_cross_entropy
   DROPOUT_RATE: 0.2
+  HEAD_TYPE: "transformer" #"transformer" or "moe"  
+  MOE_NUM_EXPERTS: 5
+  MOE_EXPERT_DIM_HIDDEN: 256
 TASKS:
   TASKS:  ["steps", "phases"]
   NUM_CLASSES: [33, 15]
-  LOSS_FUNC: ["focal_loss", "cross_entropy"]
+  LOSS_FUNC: ["cross_entropy", "cross_entropy"]
   HEAD_ACT:  ["softmax", "softmax"]
-  LOSS_WEIGHTS:  [1.0, 1.0]
+  LOSS_WEIGHTS:  [2.0, 1.0]
   METRICS: ["mAP","mAP"]  
   WEIGHT_LOSS_BY_CLASS: [steps_distribution.csv, phases_distribution.csv]
+  WEIGHT_SAMPLER_TASK: None # or None to disable weighted sampling
   FOCAL_GAMMA: 2.0
   FOCAL_ALPHA_MODE: "auto"  # auto, manual, or None
 DATA_LOADER:

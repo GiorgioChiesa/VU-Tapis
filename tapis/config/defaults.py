@@ -372,6 +372,11 @@ _C.MODEL.DECODER_NUM_LAYERS = 1
 # Model float precision
 _C.MODEL.PRECISION = 32
 
+#Mixture of Expert head options
+_C.MODEL.HEAD_TYPE = "transformer"  # or "moe"
+_C.MODEL.MOE_NUM_EXPERTS = 3
+_C.MODEL.MOE_EXPERT_DIM_HIDDEN = 512
+
 
 # -----------------------------------------------------------------------------
 # MViT options
@@ -947,6 +952,8 @@ _C.TASKS.LOSS_WEIGHTS = [0.3, 0.2, 0.3, 0.2]
 
 # Whether to evaluate each extra head during training false or the path of csv distribution.
 _C.TASKS.WEIGHT_LOSS_BY_CLASS = [False, False, False, False]
+
+_C.TASKS.WEIGHT_SAMPLER_TASK = "steps"
 
 # Include presence recognition.
 _C.TASKS.PRESENCE_RECOGNITION = False

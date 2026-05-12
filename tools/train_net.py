@@ -177,14 +177,20 @@ def train_epoch(train_loader, model, optimizer, scaler, train_meter, cur_epoch, 
     data_size = len(train_loader)
     tasks = cfg.TASKS.TASKS
     loss_funs = cfg.TASKS.LOSS_FUNC
-    weiths_paths = [
-        os.path.join(cfg.OUTPUT_DIR, "distributions", cfg.TASKS.WEIGHT_LOSS_BY_CLASS[t_id])
-        for t_id, task in enumerate(tasks)
-    ]
-    weight = {
-        task: losses.get_weight_from_csv(weiths_paths[t_id], cfg.TASKS.NUM_CLASSES[t_id])
+    weight={
+        task: None
         for t_id, task in enumerate(tasks)
     }
+    index = cfg.TASKS.TASKS.index(cfg.TASKS.WEIGHT_SAMPLER_TASK) if cfg.TASKS.WEIGHT_SAMPLER_TASK in cfg.TASKS.TASKS else None
+    if index is None or cfg.TASKS.WEIGHT_LOSS_BY_CLASS[index] is False:
+        weiths_paths = [
+            os.path.join(cfg.OUTPUT_DIR, "distributions", cfg.TASKS.WEIGHT_LOSS_BY_CLASS[t_id])
+            for t_id, task in enumerate(tasks)
+        ]
+        weight = {
+            task: losses.get_weight_from_csv(weiths_paths[t_id], cfg.TASKS.NUM_CLASSES[t_id], weight_type="class")
+            for t_id, task in enumerate(tasks)
+        }
     if cfg.NUM_GPUS:
         weight = {
             task: weight[task].to("cuda") if weight[task] is not None else None for task in weight

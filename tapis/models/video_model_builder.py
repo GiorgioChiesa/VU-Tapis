@@ -681,14 +681,29 @@ class MViT(nn.Module):
                     )
                     self.add_module(f"extra_heads_{task}_presence", recog_head)
             else:
-                extra_head = head_helper.TransformerBasicHead(
-                    embed_dim,
-                    self.num_classes[idx],
-                    dropout_rate=cfg.MODEL.DROPOUT_RATE,
-                    act_func=self.act_fun[idx],
-                    cls_embed=self.cls_embed_on,
-                    recognition=False,
-                )
+                # Determine which head type to use
+                if  hasattr(cfg.MODEL, 'HEAD_TYPE') and cfg.MODEL.HEAD_TYPE == 'moe':
+                    # Use Mixture of Experts head
+                    extra_head = head_helper.MixtureOfExpertHead(
+                        dim_in=embed_dim,
+                        num_classes=self.num_classes[idx],
+                        num_experts=cfg.MODEL.MOE_NUM_EXPERTS if hasattr(cfg.MODEL, 'MOE_NUM_EXPERTS') else 3,
+                        expert_dim_hidden=cfg.MODEL.MOE_EXPERT_DIM_HIDDEN if hasattr(cfg.MODEL, 'MOE_EXPERT_DIM_HIDDEN') else 512,
+                        dropout_rate=cfg.MODEL.DROPOUT_RATE,
+                        act_func=self.act_fun[idx],
+                        cls_embed=self.cls_embed_on,
+                        recognition=False,
+                    )
+                else:
+                    # Use default Transformer head
+                    extra_head = head_helper.TransformerBasicHead(
+                        embed_dim,
+                        self.num_classes[idx],
+                        dropout_rate=cfg.MODEL.DROPOUT_RATE,
+                        act_func=self.act_fun[idx],
+                        cls_embed=self.cls_embed_on,
+                        recognition=False,
+                    )
 
             self.add_module(f"extra_heads_{task}", extra_head)
 

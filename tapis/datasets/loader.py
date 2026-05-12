@@ -10,6 +10,8 @@ import torch
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
+from torch.utils.data import WeightedRandomSampler
+
 
 from . import utils as utils
 from .build import build_dataset
@@ -104,14 +106,18 @@ def construct_loader(cfg, split, is_precise_bn=False):
             drop_last=drop_last,
             collate_fn=detection_collate,
             worker_init_fn=utils.loader_worker_init_fn(dataset),
-            prefetch_factor=4,  # aggiungere
-            persistent_workers=True,  # aggiungere: evita di ricreare i worker ogni epoca
+            prefetch_factor=4,
+            persistent_workers=(cfg.DATA_LOADER.NUM_WORKERS > 0 and split != "train"),
         )
     else:
         # Create a sampler for multi-process training
         sampler = utils.create_sampler(dataset, shuffle, cfg)
         # Create a loader
         collate_func = detection_collate
+
+        # For training with complex data loading (filtering, sampling), disable persistent workers
+        # to ensure workers sync properly with dataset state changes
+        persist_workers = (cfg.DATA_LOADER.NUM_WORKERS > 0 and split != "train")
 
         loader = torch.utils.data.DataLoader(
             dataset,
@@ -123,8 +129,8 @@ def construct_loader(cfg, split, is_precise_bn=False):
             drop_last=drop_last,
             collate_fn=collate_func,
             worker_init_fn=utils.loader_worker_init_fn(dataset),
-            prefetch_factor=4,  # aggiungere
-            persistent_workers=True,  # aggiungere: evita di ricreare i worker ogni epoca
+            prefetch_factor=4 if persist_workers else 2,
+            persistent_workers=persist_workers,
         )
     return loader
 
@@ -143,7 +149,7 @@ def shuffle_dataset(loader, cur_epoch):
             raise RuntimeError("Unknown sampler for IterableDataset when shuffling dataset")
     else:
         sampler = loader.sampler
-    assert isinstance(sampler, (RandomSampler, DistributedSampler)), (
+    assert isinstance(sampler, (RandomSampler, DistributedSampler, WeightedRandomSampler)), (
         "Sampler type '{}' not supported".format(type(sampler))
     )
     # RandomSampler handles shuffling automatically

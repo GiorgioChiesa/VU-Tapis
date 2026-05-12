@@ -7,6 +7,11 @@ import torch
 import torch.nn as nn
 from detectron2.layers import ROIAlign
 from .build import MODEL_REGISTRY
+try:
+    from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
 
 FEATURE_SIZE = {'faster': 1024,
                 'mask': 1024,
@@ -517,3 +522,310 @@ class TransformerRoIHead(nn.Module):
             return x
         else:
             return {self.cfg.TASKS.TASKS[0]:x}
+
+
+@MODEL_REGISTRY.register()
+class MixtureOfExpertHead(nn.Module):
+    """
+    Mixture of Experts (MoE) Classification Head.
+    Combines multiple expert networks with a gating network to produce robust predictions.
+    Supports both PyTorch-native experts and sklearn ensemble methods (RandomForest, AdaBoost).
+    Compatible with TAPIS frame classification tasks.
+    """
+
+    def __init__(
+        self,
+        dim_in,
+        num_classes,
+        num_experts=3,
+        expert_dim_hidden=512,
+        dropout_rate=0.0,
+        act_func="softmax",
+        sklearn_method="random_forest",
+        sklearn_n_estimators=100,
+        cls_embed=False,
+        recognition=False,
+    ):
+        """
+        Args:
+            dim_in (int): Input feature dimension
+            num_classes (int): Number of output classes
+            num_experts (int): Number of expert networks
+            expert_dim_hidden (int): Hidden dimension for each expert
+            dropout_rate (float): Dropout probability
+            act_func (str): Activation function ('softmax' or 'sigmoid')
+            use_sklearn (bool): Use sklearn ensemble for experts
+            sklearn_method (str): 'random_forest' or 'adaboost'
+            sklearn_n_estimators (int): Number of estimators for sklearn
+            cls_embed (bool): Whether to use class embedding (for compatibility)
+            recognition (bool): Whether this is for presence recognition task
+        """
+        super(MixtureOfExpertHead, self).__init__()
+        
+        self.num_experts = num_experts
+        self.num_classes = num_classes
+        self.sklearn_method = sklearn_method
+        self.use_sklearn = HAS_SKLEARN and sklearn_method in ["random_forest", "adaboost"]
+        self.act_func = act_func
+        self.cls_embed = cls_embed
+        self.recognition = recognition
+        
+        # Experts: Small neural networks
+        self.experts = nn.ModuleList()
+        for _ in range(num_experts):
+            expert = nn.Sequential(
+                nn.Linear(dim_in, expert_dim_hidden, bias=True),
+                nn.ReLU(),
+                nn.Dropout(dropout_rate) if dropout_rate > 0.0 else nn.Identity(),
+                nn.Linear(expert_dim_hidden, num_classes, bias=True)
+            )
+            self.experts.append(expert)
+        
+        # Gating network: Learns to weight expert outputs
+        self.gating_network = nn.Sequential(
+            nn.Linear(dim_in, expert_dim_hidden, bias=True),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate) if dropout_rate > 0.0 else nn.Identity(),
+            nn.Linear(expert_dim_hidden, num_experts, bias=True),
+            nn.Softmax(dim=1)  # Weight distribution across experts
+        )
+        
+        # Final projection (optional)
+        self.final_proj = nn.Linear(num_classes, num_classes, bias=True)
+        
+        # Activation function
+        if act_func == "softmax":
+            self.act = nn.Softmax(dim=1)
+        elif act_func == "sigmoid":
+            self.act = nn.Sigmoid()
+        else:
+            raise NotImplementedError(
+                f"{act_func} is not supported as an activation function."
+            )
+        
+        # sklearn experts (optional, for inference)
+        self.sklearn_experts = None
+        self.sklearn_method = sklearn_method
+        self.sklearn_n_estimators = sklearn_n_estimators
+        self.is_trained = False
+
+    def fit_sklearn_experts(self, X, y):
+        """
+        Train sklearn ensemble experts on data. Useful for transfer learning.
+        
+        Args:
+            X (array-like): Training features of shape (n_samples, dim_in)
+            y (array-like): Training labels of shape (n_samples,)
+        """
+        if not HAS_SKLEARN:
+            raise ImportError("scikit-learn is required for sklearn experts. Install with: pip install scikit-learn")
+        
+        self.sklearn_experts = []
+        
+        for _ in range(self.num_experts):
+            if self.sklearn_method == "random_forest":
+                expert = RandomForestClassifier(
+                    n_estimators=self.sklearn_n_estimators,
+                    max_depth=15,
+                    random_state=None
+                )
+            elif self.sklearn_method == "adaboost":
+                expert = AdaBoostClassifier(
+                    n_estimators=self.sklearn_n_estimators,
+                    random_state=None
+                )
+            else:
+                raise ValueError(f"sklearn_method must be 'random_forest' or 'adaboost', got {self.sklearn_method}")
+            
+            expert.fit(X, y)
+            self.sklearn_experts.append(expert)
+        
+        self.is_trained = True
+
+    def forward(self, inputs, cls_idx=1, use_sklearn_forward=True, **kwargs):
+        """
+        Forward pass through MoE head.
+        
+        Args:
+            inputs (torch.Tensor): Input features of shape (batch_size, seq_len, dim_in) or (batch_size, dim_in)
+            cls_idx (int): Index of cls_embed to use if cls_embed is True
+            use_sklearn_forward (bool): Use sklearn experts if available
+            **kwargs: Additional arguments (unused)
+        
+        Returns:
+            torch.Tensor: Class predictions of shape (batch_size, num_classes)
+        """
+        # Handle cls_embed similar to TransformerBasicHead
+        x = inputs
+        if self.cls_embed and not self.recognition:
+            # Extract cls_idx token: (batch_size,)
+            x = x[:, cls_idx]
+        elif self.cls_embed:
+            # For recognition: average all tokens except cls token
+            x = x[:, 1:].mean(1)
+        else:
+            # Default: average all tokens
+            x = x.mean(1)
+        
+        # Now x is (batch_size, dim_in)
+        batch_size = x.shape[0]
+        
+        # Use sklearn experts if requested and trained
+        if use_sklearn_forward and self.sklearn_experts is not None and self.is_trained:
+            return self._forward_sklearn(x)
+        
+        # PyTorch experts forward
+        # Compute gating weights
+        gate_logits = self.gating_network(x)  # (batch_size, num_experts)
+        
+        # Get expert outputs
+        expert_outputs = []
+        for expert in self.experts:
+            expert_out = expert(x)  # (batch_size, num_classes)
+            expert_outputs.append(expert_out)
+        
+        # Stack expert outputs: (batch_size, num_experts, num_classes)
+        expert_outputs = torch.stack(expert_outputs, dim=1)
+        
+        # Expand gate weights for broadcasting: (batch_size, num_experts, 1)
+        gate_weights = gate_logits.unsqueeze(2)
+        
+        # Weighted combination of expert outputs
+        # (batch_size, num_experts, num_classes) * (batch_size, num_experts, 1) -> (batch_size, num_experts, num_classes)
+        weighted_experts = expert_outputs * gate_weights
+        
+        # Sum across experts: (batch_size, num_classes)
+        moe_output = weighted_experts.sum(dim=1)
+        
+        # Final projection
+        x_out = self.final_proj(moe_output)
+        
+        # Apply activation
+        if self.act_func == "sigmoid" or not self.training:
+            x_out = self.act(x_out)
+        
+        return x_out
+
+    def _forward_sklearn(self, x):
+        """
+        Forward pass using sklearn experts. Converts to numpy, computes predictions,
+        and converts back to torch tensor.
+        
+        Args:
+            x (torch.Tensor): Input features
+        
+        Returns:
+            torch.Tensor: Combined predictions
+        """
+        batch_size = x.shape[0]
+        device = x.device
+        dtype = x.dtype
+        
+        # Convert to numpy
+        x_np = x.detach().cpu().numpy()
+        
+        # Get predictions from each sklearn expert
+        expert_probs = []
+        for expert in self.sklearn_experts:
+            probs = expert.predict_proba(x_np)  # (batch_size, num_classes)
+            expert_probs.append(torch.from_numpy(probs).to(device).to(dtype))
+        
+        # Stack expert predictions: (batch_size, num_experts, num_classes)
+        expert_probs = torch.stack(expert_probs, dim=1)
+        
+        # Simple averaging across experts (unweighted)
+        moe_output = expert_probs.mean(dim=1)  # (batch_size, num_classes)
+        
+        # Ensure softmax
+        moe_output = torch.softmax(moe_output, dim=1)
+        
+        return moe_output
+
+
+@MODEL_REGISTRY.register()
+class SklearnEnsembleHead(nn.Module):
+    """
+    Pure Sklearn Ensemble Head wrapper for PyTorch.
+    Uses trained sklearn RandomForest or AdaBoost for classification.
+    Suitable for inference and knowledge distillation.
+    """
+
+    def __init__(
+        self,
+        num_classes,
+        ensemble_method="random_forest",
+        n_estimators=100,
+    ):
+        """
+        Args:
+            num_classes (int): Number of output classes
+            ensemble_method (str): 'random_forest' or 'adaboost'
+            n_estimators (int): Number of estimators
+        """
+        super(SklearnEnsembleHead, self).__init__()
+        
+        self.num_classes = num_classes
+        self.ensemble_method = ensemble_method
+        self.n_estimators = n_estimators
+        self.ensemble_model = None
+        self.is_trained = False
+        
+        if not HAS_SKLEARN:
+            raise ImportError("scikit-learn is required. Install with: pip install scikit-learn")
+
+    def fit(self, X, y):
+        """
+        Train the ensemble classifier.
+        
+        Args:
+            X (array-like): Training features
+            y (array-like): Training labels
+        """
+        if self.ensemble_method == "random_forest":
+            self.ensemble_model = RandomForestClassifier(
+                n_estimators=self.n_estimators,
+                max_depth=20,
+                random_state=42
+            )
+        elif self.ensemble_method == "adaboost":
+            self.ensemble_model = AdaBoostClassifier(
+                n_estimators=self.n_estimators,
+                random_state=42
+            )
+        else:
+            raise ValueError(f"ensemble_method must be 'random_forest' or 'adaboost'")
+        
+        self.ensemble_model.fit(X, y)
+        self.is_trained = True
+
+    def forward(self, x, **kwargs):
+        """
+        Forward pass (inference only).
+        
+        Args:
+            x (torch.Tensor): Input features of shape (batch_size, feature_dim)
+        
+        Returns:
+            torch.Tensor: Class probabilities of shape (batch_size, num_classes)
+        """
+        if self.ensemble_model is None or not self.is_trained:
+            raise RuntimeError("Ensemble model must be trained before forward pass. Call .fit() first.")
+        
+        device = x.device
+        dtype = x.dtype
+        
+        # Convert to numpy
+        x_np = x.detach().cpu().numpy()
+        
+        # Get predictions
+        probs = self.ensemble_model.predict_proba(x_np)
+        
+        # Convert back to torch
+        probs_torch = torch.from_numpy(probs).to(device).to(dtype)
+        
+        return probs_torch
+    
+    
+    
+    
+    

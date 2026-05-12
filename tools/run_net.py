@@ -9,6 +9,9 @@ os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 curr_path = os.getcwd()
 if curr_path not in sys.path:
     sys.path.insert(0, curr_path)
+# Add tools directory first to ensure we import the right train_net
+if os.path.join(curr_path, "tools") not in sys.path:
+    sys.path.insert(0, os.path.join(curr_path, "tools"))
 # if os.path.join(curr_path, "tapis") not in sys.path:
 #     sys.path.insert(0, os.path.join(curr_path, "tapis"))
 if os.path.join(curr_path, "detectron2") not in sys.path:

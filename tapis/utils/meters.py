@@ -82,7 +82,17 @@ class SurgeryMeter(object):
         self.segmentation = cfg.REGIONS.ENABLE and cfg.REGIONS.LEVEL=='segmentation'
         self.all_labels = {k: [] for k in self.tasks}
         data = load_json(cfg.ENDOVIS_DATASET.VAL_COCO_ANNS)
-        self.class_dict = {task: data[f'{task}_categories'] for task in self.tasks}
+        self.class_dict = {}
+        for task in self.tasks:
+            key = f'{task}_categories'
+            if key in data:
+                self.class_dict[task] = data[key]
+            else:
+                fallback = 'steps_categories' if task == 'actions' else None
+                if fallback and fallback in data:
+                    self.class_dict[task] = data[fallback]
+                else:
+                    self.class_dict[task] = []
         try: 
             for task, dist_file in zip(self.tasks, cfg.TASKS.WEIGHT_LOSS_BY_CLASS):
                 csv_file = os.path.join(cfg.OUTPUT_DIR,"distributions",dist_file)
@@ -267,7 +277,7 @@ class SurgeryMeter(object):
         out_name = {}
         for task,metric in zip(self.tasks, self.metrics):
             out_name[task] = self.save_json(task, epoch)
-            if task in ["phases","steps"]:
+            if task in ["phases", "steps", "actions"]:
                 self.full_map[task] = grasp_eval.main_per_long_tasks(self.all_labels[task], 
                                                                      self.all_preds[task], 
                                                                      task, 
@@ -298,8 +308,8 @@ class SurgeryMeter(object):
         
         if (self.early_stop[1] <= 0 or epoch >= self.early_stop[3]) and self.mode == "val":
             logging.log_json_stats({"mode": self.mode, "early_stop": True, "epoch": epoch})
-            for task,metric in zip(self.tasks, self.metrics):
-                if task in ["phases","steps"]:            
+            for task, metric in zip(self.tasks, self.metrics):
+                if task in ["phases", "steps", "actions"]:
                     save_missmatches(preds=self.all_preds[task], 
                                     labels=self.all_labels[task], 
                                     task=task, 

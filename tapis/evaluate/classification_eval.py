@@ -8,6 +8,8 @@ from sklearn.metrics import (
     average_precision_score,
     f1_score,
     roc_auc_score,
+    roc_curve,
+    auc,
 )
 import torch
 from tqdm import tqdm
@@ -105,6 +107,7 @@ def eval_classification(task, coco_anns, preds, **kwargs):
         os.path.join(saving_dir, f"{mode}_preds_{task}_argmax.png"),
         label_binarize(bin_preds.argmax(axis=1), classes=list(range(0, num_classes))),
     )
+    
 
     # TODO: discomment for all metrics, for now only AP to speed up
 
@@ -120,6 +123,54 @@ def eval_classification(task, coco_anns, preds, **kwargs):
     mACC = np.nanmean(balanced_accuracy_score(best_labels, best_preds))
     mAUC = np.nanmean(roc_auc_score(bin_labels, bin_preds))
     mf1 = np.nanmean(f1_score(best_labels, best_preds, average="macro"))
+
+    # plot and save ROC curve
+    try:
+        fpr = {}
+        tpr = {}
+        roc_auc = {}
+        for c in range(num_classes):
+            if np.sum(bin_labels[:, c]) == 0 or np.sum(bin_labels[:, c]) == len(bin_labels):
+                continue
+            fpr[c], tpr[c], _ = roc_curve(bin_labels[:, c], bin_preds[:, c])
+            roc_auc[c] = auc(fpr[c], tpr[c])
+
+        if len(fpr) > 0:
+            plt.figure()
+            for c in range(num_classes):
+                if c not in fpr:
+                    continue
+                class_name = classes[c]["name"] if isinstance(classes[c], dict) else str(classes[c])
+                plt.plot(
+                    fpr[c],
+                    tpr[c],
+                    lw=2,
+                    label=f"{class_name} (AUC = {roc_auc[c]:.2f})",
+                )
+            if num_classes > 1:
+                fpr["micro"], tpr["micro"], _ = roc_curve(bin_labels.ravel(), bin_preds.ravel())
+                roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
+                plt.plot(
+                    fpr["micro"],
+                    tpr["micro"],
+                    color="navy",
+                    linestyle=":",
+                    label=f"micro-average (AUC = {roc_auc['micro']:.2f})",
+                )
+            plt.plot([0, 1], [0, 1], linestyle="--", color="gray")
+            plt.xlim([0.0, 1.0])
+            plt.ylim([0.0, 1.0])
+            plt.xlabel("False Positive Rate")
+            plt.ylabel("True Positive Rate")
+            plt.title(f"ROC Curve {mode} {task} -- AUC: {mAUC:.2f}")
+            plt.legend(loc="lower right", fontsize="small")
+            roc_path = os.path.join(
+                kwargs.get("output_dir", "./temp"), f"{mode}_roc_curve_{task}.png"
+            )
+            plt.savefig(roc_path, bbox_inches="tight")
+            plt.close()
+    except Exception as e:
+        print(f"Could not save ROC curve: {e}")
 
     # cat_names = [f"{cat['name']}-AP" for cat in classes]
     # cat_res_dict = dict(zip(cat_names,list(ap.values())))

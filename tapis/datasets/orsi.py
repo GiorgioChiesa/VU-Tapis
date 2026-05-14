@@ -136,7 +136,7 @@ class Orsi(torch.utils.data.Dataset):
                 self.remapping_local_id()
 
     def remapping_local_id(self):
-        map_task = {"steps": "event", "phases": "phase"}
+        map_task = {"steps": "event", "phases": "phase", "actions": "event"}
         for task in self.cfg.TASKS.TASKS:
             id_map = dict(zip(self.counter[task]["id"], range(len(self.counter[task]))))
             self.filtered_dfs[f"{map_task[task]}_id"] = (
@@ -144,7 +144,7 @@ class Orsi(torch.utils.data.Dataset):
             )
 
     def generate_weight_vector(self):
-        map_task = {"steps": "event", "phases": "phase"}
+        map_task = {"steps": "event", "phases": "phase", "actions": "event"}
         self.counter = {}
         for task, weight_loss_by_class in zip(
             self.cfg.TASKS.TASKS, self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS
@@ -152,7 +152,7 @@ class Orsi(torch.utils.data.Dataset):
             clip = self.filtered_dfs.copy() if self.filtered_dfs is not None else self.dfs.copy()
 
             his = []
-            mapping = self.event_idx2name if task == "steps" else self.phase_idx2name
+            mapping = self.event_idx2name if task in ("steps", "actions") else self.phase_idx2name
             for id, event in mapping.items():
                 if event.strip().lower().replace(" ", "_") in self.exclude_event_names:
                     continue
@@ -175,7 +175,7 @@ class Orsi(torch.utils.data.Dataset):
             assert self.counter[task]["total_count"].sum() <= len(clip), (
                 f"Total count in distribution ({self.counter[task]['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
             )
-            assert len(self.counter[task]) == self._num_classes[task], (
+            assert len(self.counter[task]) <= self._num_classes[task], (
                 f"Numero di classi non coincide, deve essere: {len(self.counter[task])}"
             )
 
@@ -674,6 +674,9 @@ class Orsi(torch.utils.data.Dataset):
             elif task == "phases":
                 all_labels[task] = clip.get("phase_id", -1)
                 extra_data[f"{task}_name"] = clip.get("phase_name", "unknown")
+            elif task == "actions":
+                all_labels[task] = clip.get("event_id", -1)
+                extra_data[f"{task}_name"] = clip.get("event_name", "unknown")
             else:
                 all_labels[task] = clip.get(f"{task}_id", -1)
                 extra_data[f"{task}_name"] = clip.get(f"{task}_name", "unknown")

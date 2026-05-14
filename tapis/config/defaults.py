@@ -51,6 +51,18 @@ _C.TRAIN.DATASET = "kinetics"
 # Total mini-batch size.
 _C.TRAIN.BATCH_SIZE = 64
 
+# Gradient accumulation steps.
+_C.TRAIN.ACCUM_STEPS = 1
+
+# Evaluate model on test data every eval period epochs.
+_C.TRAIN.EVAL_PERIOD = 10
+
+# Save model checkpoint every checkpoint period epochs.
+_C.TRAIN.CHECKPOINT_PERIOD = 10
+
+# Resume training from the latest checkpoint in the output directory.
+_C.TRAIN.AUTO_RESUME = True
+
 # Evaluate model on test data every eval period epochs.
 _C.TRAIN.EVAL_PERIOD = 10
 
@@ -83,6 +95,9 @@ _C.TRAIN.EVAL_TRAIN = False
 
 # Evaluate training performance
 _C.TRAIN.FILTER_EMPTY = True
+
+# Freeze encoder
+_C.TRAIN.FREEZE_ENCODER = False
 
 # ---------------------------------------------------------------------------- #
 # Augmentation options.
@@ -585,6 +600,10 @@ _C.DATA.PATH_TO_PRELOAD_IMDB = ""
 
 # The mean value of the video raw pixels across the R G B channels.
 _C.DATA.MEAN = [0.45, 0.45, 0.45]
+
+# The std value of the video raw pixels across the R G B channels.
+_C.DATA.STD = [0.225, 0.225, 0.225]
+
 # List of input frame channel dimensions.
 
 _C.DATA.INPUT_CHANNEL_NUM = [3, 3]
@@ -610,7 +629,12 @@ _C.DATA.USE_OFFSET_SAMPLING = False
 _C.DATA.TRAIN_JITTER_MOTION_SHIFT = False
 
 # The spatial crop size for training.
+_C.DATA.SEQ_MODE = "center"
+_C.DATA.JUST_CENTER = True
 _C.DATA.TRAIN_CROP_SIZE = 224
+_C.DATA.TRAIN_CROP_SIZE_LARGE = 224
+_C.DATA.VAL_CROP_SIZE = 224
+_C.DATA.VAL_CROP_SIZE_LARGE = 224
 
 # The spatial crop size for training.
 _C.DATA.TRAIN_CROP_SIZE_LARGE = 224
@@ -708,8 +732,20 @@ _C.SOLVER.WARMUP_START_LR = 0.01
 # Optimization method.
 _C.SOLVER.OPTIMIZING_METHOD = "sgd"
 
+# Final learning rates for 'cosine' policy.
+_C.SOLVER.COSINE_END_LR = 0.0
+
 # Base learning rate is linearly scaled with NUM_SHARDS.
 _C.SOLVER.BASE_LR_SCALE_NUM_SHARDS = False
+
+# The start learning rate of the warm up.
+_C.SOLVER.WARMUP_START_LR = 0.01
+
+# Do not apply weight decay to 1D parameters (bias, norm).
+_C.SOLVER.ZERO_WD_1D_PARAM = False
+
+# Max iteration for epoch.
+_C.SOLVER.MAX_ITER = None
 
 # If True, start from the peak cosine learning rate after warm up.
 _C.SOLVER.COSINE_AFTER_WARMUP = False
@@ -810,23 +846,35 @@ _C.ENDOVIS_DATASET.FRAME_LIST_DIR = ""
 _C.ENDOVIS_DATASET.ANNOTATION_DIR = ""
 
 # Filenames of training samples list files.
-_C.ENDOVIS_DATASET.TRAIN_LISTS = "train.csv"
+_C.ENDOVIS_DATASET.TRAIN_LISTS = ["train.csv"]
 
 # Filenames of test samples list files.
-_C.ENDOVIS_DATASET.TEST_LISTS = "val.csv"
+_C.ENDOVIS_DATASET.TEST_LISTS = ["val.csv"]
+
+# Filenames of validation samples list files (for orsi compatibility).
+_C.ENDOVIS_DATASET.VAL_LISTS = ["val.csv"]
+
+# Orsi-specific dataset options
+_C.ENDOVIS_DATASET.ORSI_ROOT_DIR = ""
+_C.ENDOVIS_DATASET.ORSI_LABEL_DIR = ""
+_C.ENDOVIS_DATASET.ORSI_FRAME_FOLDER = "Video_1fps"
+_C.ENDOVIS_DATASET.ORSI_LABEL_FOLDER = "Label"
+_C.ENDOVIS_DATASET.ORSI_IMAGE_TYPE = "pt"
+_C.ENDOVIS_DATASET.EXCLUDE_EVENT_NAMES = []
+_C.ENDOVIS_DATASET.ADD_IDLE = 0
 
 # Filenames of box list files for training. Note that we assume files which
 # contains predicted boxes will have a suffix "predicted_boxes" in the
 # filename.
-_C.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON = "train_coco_anns.json"
+_C.ENDOVIS_DATASET.TRAIN_GT_BOX_JSON = ["train_coco_anns.json"]
 
-_C.ENDOVIS_DATASET.TEST_GT_BOX_JSON = ""
+_C.ENDOVIS_DATASET.TEST_GT_BOX_JSON = [""]
 
 # Filenames of box list files for train.
-_C.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON = "train_coco_preds.json"
+_C.ENDOVIS_DATASET.TRAIN_PREDICT_BOX_JSON = ["train_coco_preds.json"]
 
 # Filenames of box list files for test.
-_C.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON = "val_coco_preds.json"
+_C.ENDOVIS_DATASET.TEST_PREDICT_BOX_JSON = ["val_coco_preds.json"]
 
 # This option controls the score threshold for the predicted boxes to use.
 _C.ENDOVIS_DATASET.DETECTION_SCORE_THRESH = 0.0
@@ -841,6 +889,9 @@ _C.ENDOVIS_DATASET.TRAIN_USE_COLOR_AUGMENTATION = False
 # Whether to only use PCA jitter augmentation when using color augmentation
 # method (otherwise combine with color jitter method).
 _C.ENDOVIS_DATASET.TRAIN_PCA_JITTER_ONLY = True
+
+# Whether to do horizontal flipping during val.
+_C.ENDOVIS_DATASET.VAL_FORCE_FLIP = False
 
 # Whether to do horizontal flipping during test.
 _C.ENDOVIS_DATASET.TEST_FORCE_FLIP = False
@@ -916,6 +967,11 @@ _C.TASKS.MULTIPLE_CLS = False
 # Use videofeature extractor or not
 _C.TASKS.USE_VIDEO = True
 
+# Whether to evaluate each extra head during training false or the path of csv distribution.
+_C.TASKS.WEIGHT_LOSS_BY_CLASS = [False, False, False, False]
+
+_C.TASKS.WEIGHT_SAMPLER_TASK = "steps"
+
 # ---------------------------------------------------------------------------- #
 # FEATURES
 # ---------------------------------------------------------------------------- #
@@ -950,6 +1006,9 @@ _C.FEATURES.PRECALCULATE_TEST = True
 
 # Path to Mask2Former pretrained weights
 _C.FEATURES.RPN_CHECKPOINT = ""
+
+# Memory bank size for temporal streaming.
+_C.MODEL.MEMORY_BANK_SIZE = 0
 
 # Add custom config with default values.
 custom_config.add_custom_config(_C)

@@ -64,6 +64,8 @@ class SurgeryMeter(object):
         self.generate_masks = not cfg.FEATURES.PRECALCULATE_TEST
 
         self.all_classes = cfg.TASKS.NUM_CLASSES
+        self.all_labels = {k: [] for k in self.tasks}
+        self.all_preds = {k: [] for k in self.tasks}
         self.lr = None
         self.loss = ScalarMeter(cfg.LOG_PERIOD)
         self.task_loss = TaskMeter(cfg.LOG_PERIOD, len(self.log_tasks)) 
@@ -72,6 +74,7 @@ class SurgeryMeter(object):
         self.data_timer = Timer()
         self.net_timer = Timer()
         self.all_preds = {k: [] for k in self.tasks}
+        self.all_labels = {k: [] for k in self.tasks}
         self.full_map = {}
         self.all_boxes,  self.all_detect_names, self.all_names = [], [], []
         self.overall_iters = overall_iters
@@ -183,29 +186,36 @@ class SurgeryMeter(object):
         self.loss.reset()
         self.task_loss.reset()
         self.full_map = {}
-        self.all_preds = {task:[] for task in self.tasks}
+        self.all_preds = {task: [] for task in self.tasks}
+        self.all_labels = {task: [] for task in self.tasks}
         self.all_names = []
         self.all_boxes = []
 
         if self.generate_masks:
             self.all_masks = []
 
-    def update_stats(self, preds, names, boxes, final_loss= None, losses=None, lr=None):
+    def update_stats(self, preds, names, boxes, final_loss= None, losses=None, lr=None, labels=None):
         """
         Update the current stats.
         Args:
             preds (tensor): prediction embedding.
-            keep_box(tensor): tensor of boolean to keep the original bounding boxes. 
+            keep_box(tensor): tensor of boolean to keep the original bounding boxes.
             boxes (tensor): predicted boxes (x1, y1, x2, y2).
             d_names (list): names of the keyframes with detection anns.
             names (list): names of all the keyframes.
             final_loss (float): final loss value.
             lr (float): learning rate.
-        """ 
+            labels (dict): labels per task.
+        """
         if self.eval_train or self.mode in ["val", "test"]:
             
             for task in self.tasks:
                 self.all_preds[task].extend(preds[task])
+                if labels is not None and task in labels:
+                    if isinstance(labels[task], torch.Tensor):
+                        self.all_labels[task].extend(labels[task].cpu().numpy().tolist())
+                    else:
+                        self.all_labels[task].extend(labels[task])
             
             if self.parallel:
                 try:
@@ -237,9 +247,19 @@ class SurgeryMeter(object):
         Calculate and log the final PSI-AVA metrics.
         """
         out_name = {}
-        for task,metric in zip(self.tasks, self.metrics):
+        for task, metric in zip(self.tasks, self.metrics):
             out_name[task] = self.save_json(task, epoch)
-            self.full_map[task] = grasp_eval.main_per_task(self.groundtruth, out_name[task], task, metric, masks_path=self.mask_path)
+            if task in ["actions", "steps", "phases"]:
+                if len(self.all_labels[task]) == 0 or len(self.all_preds[task]) == 0:
+                    self.full_map[task] = {"mAP": 0.0}
+                    continue
+                n_classes = self.all_classes[self.tasks.index(task)]
+                self.full_map[task] = grasp_eval.main_per_long_tasks(
+                    self.all_labels[task], self.all_preds[task], task, metric,
+                    class_names=[{"id": i, "name": f"class_{i}"} for i in range(n_classes)],
+                )
+            else:
+                self.full_map[task] = grasp_eval.main_per_task(self.groundtruth, out_name[task], task, metric, masks_path=self.mask_path)
             if log:
                 stats = {"mode": self.mode, "task": task, "metric": self.full_map[task]}
                 logging.log_json_stats(stats)

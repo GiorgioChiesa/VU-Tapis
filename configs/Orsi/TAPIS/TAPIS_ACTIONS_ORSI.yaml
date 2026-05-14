@@ -1,0 +1,81 @@
+TRAIN:
+  ENABLE: True
+  DATASET: orsi
+  BATCH_SIZE: 12
+  EVAL_PERIOD: 1
+  CHECKPOINT_PERIOD: 1
+  AUTO_RESUME: True
+  CHECKPOINT_EPOCH_RESET: False
+  FREEZE_ENCODER: False
+  MIXED_PRECISION: True
+TEST:
+  ENABLE: False
+  DATASET: orsi
+  BATCH_SIZE: 24
+DATA:
+  NUM_FRAMES: 16
+  SAMPLING_RATE: 1
+  TRAIN_JITTER_SCALES: [256, 320]
+  TRAIN_CROP_SIZE: 224
+  VAL_CROP_SIZE: 224
+  INPUT_CHANNEL_NUM: [3]
+ENDOVIS_DATASET:
+  FRAME_DIR: /data/orsi_tensors
+  FRAME_LIST_DIR: /data/coco
+  ANNOTATION_DIR: /data/coco
+  TEST_COCO_ANNS: /data/coco/all_merged.json
+  BGR: False
+  TRAIN_USE_COLOR_AUGMENTATION: True
+  REGION_TASKS: []
+  ADD_IDLE: 10
+  EXCLUDE_EVENT_NAMES: ["Out_of_body", "Back_inside_body", "Final_reinforcing_suture", "Inside_abdomen", "Test_image_start", "Remove_gauze", "Remove_hemostatic_agens", "Unsuccesful_clip_placement", "Hemostatic_metal_clip_placement", "Aiding_suture_stitch", "Aiding_suture_clip_placement", "3D_model", "Fat_removal", "Instrument_swap:_insertion", "Test_image_stop", "Incision_of_the_fascia_-_right", "Remove_needle_bladder_stretch_stitch", "Lift_right_seminal_vesicle", "Lift_left_seminal_vesicle", "Stitch_in_DVC_after_apical_dissection", "Needle_removal_DVC_ligation", "Stitch_in_urethra", "Tie_suture", "Threads_removal", "Vessel_loop_removal", "Camera_stop", "Camera_out_of_body", "Hemolock_clip_removal", "Hemolock_clip_on_bladder_pedicle_attached_to_prostate", "Lymphadenectomy", "Lymph_node_removal", "Lymph_node_dissection", "Coagulation_of_accessory_vessels", "Coagulation", "Cauterization", "Irrigation", "Suction", "Irrigation_and_suction", "Lymphadenectomy_L", "Lymphadenectomy_R"]
+MVIT:
+  ZERO_DECAY_POS_CLS: False
+  NUM_HEADS: 1
+  EMBED_DIM: 96
+  PATCH_KERNEL: [3, 7, 7]
+  PATCH_STRIDE: [2, 4, 4]
+  PATCH_PADDING: [1, 3, 3]
+  MLP_RATIO: 4.0
+  QKV_BIAS: True
+  DROPOUT_RATE: 0.0
+  DROPPATH_RATE: 0.2
+  MODE: conv
+  DEPTH: 16
+  POOL_Q_STRIDE: [[1, 1, 2, 2], [3, 1, 2, 2], [14, 1, 2, 2]]
+  DIM_MUL: [[1, 2.0], [3, 2.0], [14, 2.0]]
+  HEAD_MUL: [[1, 2.0], [3, 2.0], [14, 2.0]]
+  POOL_KV_STRIDE_ADAPTIVE: [1, 8, 8]
+  POOL_KVQ_KERNEL: [3, 3, 3]
+  SEP_POS_EMBED: True
+  CLS_EMBED_ON: True
+REGIONS:
+  ENABLE: False
+SOLVER:
+  BASE_LR: 5e-5
+  LR_POLICY: cosine
+  MAX_EPOCH: 50
+  MOMENTUM: 0.9
+  WEIGHT_DECAY: 1e-4
+  OPTIMIZING_METHOD: adam
+MODEL:
+  ARCH: mvit
+  MODEL_NAME: MViT
+  DROPOUT_RATE: 0.5
+TASKS:
+  TASKS: ["actions"]
+  NUM_CLASSES: [40]
+  HEAD_ACT: ["softmax"]
+  LOSS_FUNC: ["cross_entropy"]
+  LOSS_WEIGHTS: [1.0]
+  METRICS: ["mAP"]
+  WEIGHT_LOSS_BY_CLASS: [actions_distribution.csv]
+DATA_LOADER:
+  NUM_WORKERS: 5
+FEATURES:
+  ENABLE: False
+NUM_GPUS: 1
+NUM_SHARDS: 1
+RNG_SEED: 0
+LOG_PERIOD: 50000
+OUTPUT_DIR: .

@@ -5,15 +5,27 @@ from sklearn.metrics import precision_recall_curve, average_precision_score, f1_
 from tqdm import tqdm
 
 def eval_classification(task, coco_anns, preds, **kwargs):
+    if not isinstance(coco_anns, dict):
+        # Direct labels path (labels passed as list of ints, preds as list of probs)
+        num_classes = len(preds[0]) if len(preds) > 0 else 1
+        bin_labels = label_binarize(coco_anns, classes=list(range(0, num_classes)))
+        bin_preds = np.array(preds)
+        mAP = np.nanmean(average_precision_score(bin_labels, bin_preds))
+        mf1 = np.nanmean(f1_score(np.argmax(bin_labels, axis=1), np.argmax(bin_preds, axis=1), average="macro"))
+        return mAP, {"mAP": mAP, "f1": mf1}
     
-    classes = coco_anns[f'{task}_categories']
+    fallback = kwargs.get("fallback_task", "steps" if task == "actions" else None)
+    cat_key = f'{task}_categories'
+    if cat_key not in coco_anns and fallback:
+        cat_key = f'{fallback}_categories'
+    classes = coco_anns[cat_key]
     num_classes = len(classes)
     bin_labels = np.zeros((len(coco_anns["annotations"]), num_classes))
     bin_preds = np.zeros((len(coco_anns["annotations"]), num_classes))
     ann_preds_dict = {}
     evaluated_frames = []
     for idx, ann in tqdm(enumerate(coco_anns["annotations"]), total=len(coco_anns["annotations"])):
-        ann_class = int(ann[task])
+        ann_class = int(ann.get(task, ann.get(fallback, -1)))
         bin_labels[idx, :] = label_binarize([ann_class], classes=list(range(0, num_classes)))
         
 

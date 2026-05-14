@@ -54,10 +54,7 @@ def detection_collate(batch):
         
         if isinstance(data[0],list):
             data = list(itertools.chain(*data))
-        else:
-            #TODO: These are just security checks, REMOVE when all done
-            assert isinstance(data[0],int) or isinstance(data[0],np.ndarray), f'Type {type(data[0])} not supported'
-            
+        
         collated_labels[key] = torch.tensor(data).float()
 
     return images, collated_labels, collated_extra_data, image_names

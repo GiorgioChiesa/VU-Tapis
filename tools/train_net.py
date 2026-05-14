@@ -238,7 +238,7 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
                 preds[task] = preds[task].tolist()
         
         # Update and log stats.
-        val_meter.update_stats(preds, image_names, ori_boxes)
+        val_meter.update_stats(preds, image_names, ori_boxes, labels=labels)
         val_meter.log_iter_stats(cur_epoch, cur_iter)
         val_meter.iter_tic()
 

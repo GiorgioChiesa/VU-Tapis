@@ -24,6 +24,7 @@ import tapis.models.optimizer as optim
 import tapis.utils.checkpoint as cu
 import tapis.utils.distributed as du
 import torch
+import torch.nn.functional as F
 import torch.backends.cudnn
 import wandb
 from pyinstrument import Profiler
@@ -299,7 +300,20 @@ def train_epoch(train_loader, model, optimizer, scaler, train_meter, cur_epoch, 
                 for task in loss_dict:
                     loss_fun = loss_dict[task]
                     target_type = type_dict[task]
-                    window_loss_items.append(loss_fun(preds[task], labels[task].to(target_type)))
+                    pred = preds[task]
+                    target = labels[task]
+
+                    if isinstance(loss_fun, (torch.nn.BCEWithLogitsLoss, torch.nn.BCELoss)):
+                        if pred.dim() == 2 and pred.shape[1] > 1 and target.dim() == 1:
+                            target = F.one_hot(target.long(), num_classes=pred.shape[1]).to(target_type)
+                        elif pred.dim() == 2 and pred.shape[1] == 1 and target.dim() == 1:
+                            target = target.unsqueeze(1).to(target_type)
+                        else:
+                            target = target.to(target_type)
+                    else:
+                        target = target.to(target_type)
+
+                    window_loss_items.append(loss_fun(pred, target))
 
                 if len(window_loss_items) > 1:
                     final_loss = losses.compute_weighted_loss(window_loss_items, loss_weights)

@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from detectron2.layers import ROIAlign
 from .build import MODEL_REGISTRY
+from torch.nn import functional as F
 try:
     from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
     HAS_SKLEARN = True
@@ -322,8 +323,61 @@ class TransformerBasicHead(nn.Module):
         if self.act_func == "sigmoid" or not self.training:
             x = self.act(x)
         return x
-    
-    
+
+
+@MODEL_REGISTRY.register()
+class BinaryClassificationHead(nn.Module):
+    """
+    One-vs-all binary classification head.
+
+    Produces independent binary scores for each class.
+    """
+
+    def __init__(
+        self,
+        dim_in,
+        num_classes,
+        dropout_rate=0.0,
+        act_func="sigmoid",
+        cls_embed=False,
+        recognition=False,
+    ):
+        super(BinaryClassificationHead, self).__init__()
+        if dropout_rate > 0.0:
+            self.dropout = nn.Dropout(dropout_rate)
+        self.class_projection = nn.Linear(dim_in, num_classes, bias=True)
+        self.act_func = act_func
+        self.cls_embed = cls_embed
+        self.recognition = recognition
+
+        if act_func == "softmax":
+            self.act = nn.Softmax(dim=1)
+        elif act_func == "sigmoid":
+            self.act = nn.Sigmoid()
+        elif act_func in ["none", "logits"]:
+            self.act = None
+        else:
+            raise NotImplementedError(
+                f"{act_func} is not supported as an activation function."
+            )
+
+    def forward(self, inputs, cls_idx=1, **kwargs):
+        x = inputs
+        if self.cls_embed and not self.recognition:
+            x = x[:, cls_idx]
+        elif self.cls_embed:
+            x = x[:, 1:].mean(1)
+        else:
+            x = x.mean(1)
+
+        if hasattr(self, "dropout"):
+            x = self.dropout(x)
+        x = self.class_projection(x)
+
+        if self.act is not None and (self.act_func == "sigmoid" or not self.training):
+            x = self.act(x)
+        return x
+
 
 class ClassificationBasicHead(nn.Module):
     """
@@ -829,3 +883,274 @@ class SklearnEnsembleHead(nn.Module):
     
     
     
+@MODEL_REGISTRY.register()
+class CascadeClassificationHead(nn.Module):
+    """
+    Two-stage Cascade Classification Head.
+    
+    Stage 1: Binary classifier distinguishes between Idle (0) and Event (1-N)
+    Stage 2: Multi-class classifier for event types (only applied when event is non-idle)
+    
+    Supports both end-to-end and two-phase training modes.
+    Label format: 0 = Idle, 1-num_event_classes = Event types
+    """
+    
+    def __init__(
+        self,
+        dim_in,
+        num_event_classes,
+        stage1_hidden_dim=512,
+        stage2_hidden_dim=512,
+        dropout_rate=0.0,
+        act_func="softmax",
+        stage1_weight=1.0,
+        stage2_weight=0.5,
+        training_mode="end-to-end",
+        cls_embed=False,
+        recognition=False,
+    ):
+        """
+        Args:
+            dim_in (int): Input feature dimension
+            num_event_classes (int): Number of event types (e.g., 33 for steps)
+            stage1_hidden_dim (int): Hidden dimension for Stage 1 (binary classifier)
+            stage2_hidden_dim (int): Hidden dimension for Stage 2 (event classifier)
+            dropout_rate (float): Dropout probability
+            act_func (str): Activation function ('softmax' or 'sigmoid')
+            stage1_weight (float): Loss weight for Stage 1 (default: 1.0)
+            stage2_weight (float): Loss weight for Stage 2 (default: 0.5)
+            training_mode (str): 'end-to-end' or 'two-phase'
+            cls_embed (bool): Whether to use class embedding
+            recognition (bool): Presence recognition mode
+        """
+        super(CascadeClassificationHead, self).__init__()
+        
+        self.dim_in = dim_in
+        self.num_event_classes = num_event_classes
+        self.num_output_classes = num_event_classes + 1  # +1 for Idle
+        self.act_func = act_func
+        self.stage1_weight = stage1_weight
+        self.stage2_weight = stage2_weight
+        self.training_mode = training_mode
+        self.cls_embed = cls_embed
+        self.recognition = recognition
+        self.current_training_phase = 1  # 1 or 2 for two-phase training
+        
+        # Stage 1: Binary Classifier (Idle vs Event)
+        self.stage1 = nn.Sequential(
+            nn.Linear(dim_in, stage1_hidden_dim, bias=True),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate) if dropout_rate > 0.0 else nn.Identity(),
+            nn.Linear(stage1_hidden_dim, 2, bias=True),  # Binary: Idle / Event
+        )
+        
+        # Stage 2: Event Classifier (33 event types)
+        self.stage2 = nn.Sequential(
+            nn.Linear(dim_in, stage2_hidden_dim, bias=True),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate) if dropout_rate > 0.0 else nn.Identity(),
+            nn.Linear(stage2_hidden_dim, num_event_classes, bias=True),
+        )
+        
+        # Activation functions
+        if act_func == "softmax":
+            self.act1 = nn.Softmax(dim=1)
+            self.act2 = nn.Softmax(dim=1)
+        elif act_func == "sigmoid":
+            self.act1 = nn.Sigmoid()
+            self.act2 = nn.Sigmoid()
+        else:
+            raise NotImplementedError(f"{act_func} not supported")
+    
+    def set_training_phase(self, phase):
+        """
+        Set training phase for two-phase training mode.
+        
+        Phase 1: Train only Stage 1 (binary classifier)
+        Phase 2: Train only Stage 2 (event classifier, Stage 1 frozen)
+        
+        Args:
+            phase (int): 1 or 2
+        """
+        if phase not in [1, 2]:
+            raise ValueError("phase must be 1 or 2")
+        
+        self.current_training_phase = phase
+        
+        if phase == 1:
+            # Freeze Stage 2, enable Stage 1
+            for param in self.stage2.parameters():
+                param.requires_grad = False
+            for param in self.stage1.parameters():
+                param.requires_grad = True
+        else:  # phase == 2
+            # Freeze Stage 1, enable Stage 2
+            for param in self.stage1.parameters():
+                param.requires_grad = False
+            for param in self.stage2.parameters():
+                param.requires_grad = True
+    
+    def forward(self, inputs, cls_idx=1, labels=None, **kwargs):
+        """
+        Forward pass through cascade head.
+        
+        Args:
+            inputs (torch.Tensor): Input features (batch, seq_len, dim_in) or (batch, dim_in)
+            cls_idx (int): CLS token index if cls_embed is True
+            labels (torch.Tensor): Ground truth labels (batch,) for training
+                                  0 = Idle, 1-num_event_classes = Event types
+            **kwargs: Additional arguments
+        
+        Returns:
+            torch.Tensor: Combined logits (batch, num_event_classes + 1)
+                         or dict with loss if labels provided
+        """
+        # Handle cls_embed similar to TransformerBasicHead
+        x = inputs
+        if self.cls_embed and not self.recognition:
+            x = x[:, cls_idx]
+        elif self.cls_embed:
+            x = x[:, 1:].mean(1)
+        else:
+            x = x.mean(1)
+        
+        # Now x is (batch, dim_in)
+        batch_size = x.shape[0]
+        device = x.device
+        
+        # Stage 1: Binary classification (Idle vs Event)
+        stage1_logits = self.stage1(x)  # (batch, 2)
+        
+        # Stage 2: Event classification (33 types)
+        stage2_logits = self.stage2(x)  # (batch, num_event_classes)
+        
+        # Combine outputs
+        if self.training and labels is not None:
+            # Training mode: compute losses
+            if self.training_mode == "end-to-end":
+                loss = self._compute_loss_end_to_end(stage1_logits, stage2_logits, labels)
+            else:  # two-phase
+                loss = self._compute_loss_two_phase(stage1_logits, stage2_logits, labels)
+            
+            return {"logits": self._combine_outputs(stage1_logits, stage2_logits), 
+                    "loss": loss}
+        else:
+            # Inference mode: return combined logits
+            return self._combine_outputs(stage1_logits, stage2_logits)
+    
+    def _combine_outputs(self, stage1_logits, stage2_logits):
+        """
+        Combine Stage 1 (binary) and Stage 2 (event) outputs.
+        
+        Returns logits for all classes: P(Idle) and P(Event_i) for i in 1..num_event_classes
+        
+        Args:
+            stage1_logits (torch.Tensor): (batch, 2) - [idle_logit, event_logit]
+            stage2_logits (torch.Tensor): (batch, num_event_classes)
+        
+        Returns:
+            torch.Tensor: (batch, num_event_classes + 1) combined logits
+        """
+        batch_size = stage1_logits.shape[0]
+        device = stage1_logits.device
+        
+        # Get probabilities
+        stage1_probs = F.softmax(stage1_logits, dim=1)  # (batch, 2)
+        stage2_probs = F.softmax(stage2_logits, dim=1)  # (batch, num_event_classes)
+        
+        # P(Idle) is probability of first bin in Stage 1
+        p_idle = stage1_probs[:, 0]  # (batch,)
+        
+        # P(Event) is probability of second bin in Stage 1
+        p_event = stage1_probs[:, 1]  # (batch,)
+        
+        # Combined probabilities: P(Idle) and P(Event_i) = P(Event) * P(Event_i | Event)
+        combined_probs = torch.zeros(batch_size, self.num_output_classes, 
+                                     device=device, dtype=stage1_probs.dtype)
+        
+        combined_probs[:, 0] = p_idle  # P(Idle)
+        combined_probs[:, 1:] = p_event.unsqueeze(1) * stage2_probs  # P(Event) * P(Event_i|Event)
+        
+        # Convert back to logits for consistency
+        combined_logits = torch.log(combined_probs + 1e-8)
+        
+        return combined_logits
+    
+    def _compute_loss_end_to_end(self, stage1_logits, stage2_logits, labels):
+        """
+        Compute loss for end-to-end training.
+        
+        Both stages see gradients and can improve each other.
+        - Stage 1: Learn to distinguish Idle (0) vs Event (1-33)
+        - Stage 2: Learn to classify event types
+        
+        Args:
+            stage1_logits (torch.Tensor): (batch, 2)
+            stage2_logits (torch.Tensor): (batch, num_event_classes)
+            labels (torch.Tensor): (batch,) ground truth labels
+        
+        Returns:
+            torch.Tensor: scalar loss
+        """
+        # Stage 1 loss: Binary classification
+        # Convert labels: 0 → 0 (Idle), 1-33 → 1 (Event)
+        binary_labels = (labels > 0).long()  # 0 for Idle, 1 for Event
+        
+        loss_stage1 = F.cross_entropy(stage1_logits, binary_labels, reduction="mean")
+        
+        # Stage 2 loss: Event classification (only for non-idle samples)
+        # For Idle samples (labels == 0), Stage 2 loss doesn't apply
+        event_mask = labels > 0  # Boolean mask for event samples
+        
+        if event_mask.any():
+            # Adjust labels for Stage 2: subtract 1 (since events are 1-33)
+            event_labels = labels[event_mask] - 1  # Convert to 0-32
+            event_logits = stage2_logits[event_mask]  # Select event samples
+            
+            loss_stage2 = F.cross_entropy(event_logits, event_labels, reduction="mean")
+        else:
+            loss_stage2 = torch.tensor(0.0, device=stage1_logits.device, 
+                                      dtype=stage1_logits.dtype)
+        
+        # Combined loss
+        total_loss = (self.stage1_weight * loss_stage1 + 
+                     self.stage2_weight * loss_stage2)
+        
+        return total_loss
+    
+    def _compute_loss_two_phase(self, stage1_logits, stage2_logits, labels):
+        """
+        Compute loss for two-phase training.
+        
+        Phase 1: Only train Stage 1 (binary classifier)
+        Phase 2: Only train Stage 2 (event classifier)
+        
+        Args:
+            stage1_logits (torch.Tensor): (batch, 2)
+            stage2_logits (torch.Tensor): (batch, num_event_classes)
+            labels (torch.Tensor): (batch,) ground truth labels
+        
+        Returns:
+            torch.Tensor: scalar loss
+        """
+        if self.current_training_phase == 1:
+            # Phase 1: Train binary classifier
+            binary_labels = (labels > 0).long()
+            loss = F.cross_entropy(stage1_logits, binary_labels, reduction="mean")
+        
+        else:  # phase == 2
+            # Phase 2: Train event classifier
+            event_mask = labels > 0
+            
+            if event_mask.any():
+                event_labels = labels[event_mask] - 1
+                event_logits = stage2_logits[event_mask]
+                loss = F.cross_entropy(event_logits, event_labels, reduction="mean")
+            else:
+                # No events in batch, return zero loss
+                loss = torch.tensor(0.0, device=stage2_logits.device,
+                                   dtype=stage2_logits.dtype)
+        
+        return loss
+
+

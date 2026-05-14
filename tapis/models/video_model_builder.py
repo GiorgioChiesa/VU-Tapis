@@ -681,19 +681,57 @@ class MViT(nn.Module):
                     )
                     self.add_module(f"extra_heads_{task}_presence", recog_head)
             else:
-                # Determine which head type to use
-                if  hasattr(cfg.MODEL, 'HEAD_TYPE') and cfg.MODEL.HEAD_TYPE == 'moe':
+                # Determine which head type to use (TASKS config takes precedence over MODEL)
+                head_type = getattr(cfg.TASKS, 'HEAD_TYPE', None) or getattr(cfg.MODEL, 'HEAD_TYPE', None)
+                
+                if head_type == 'moe':
                     # Use Mixture of Experts head
+                    moe_experts = getattr(cfg.TASKS, 'MOE_NUM_EXPERTS', 3)
+                    moe_hidden = getattr(cfg.TASKS, 'MOE_EXPERT_DIM_HIDDEN', 512)
                     extra_head = head_helper.MixtureOfExpertHead(
                         dim_in=embed_dim,
                         num_classes=self.num_classes[idx],
-                        num_experts=cfg.MODEL.MOE_NUM_EXPERTS if hasattr(cfg.MODEL, 'MOE_NUM_EXPERTS') else 3,
-                        expert_dim_hidden=cfg.MODEL.MOE_EXPERT_DIM_HIDDEN if hasattr(cfg.MODEL, 'MOE_EXPERT_DIM_HIDDEN') else 512,
+                        num_experts=moe_experts,
+                        expert_dim_hidden=moe_hidden,
                         dropout_rate=cfg.MODEL.DROPOUT_RATE,
                         act_func=self.act_fun[idx],
                         cls_embed=self.cls_embed_on,
                         recognition=False,
                     )
+                
+                elif head_type == 'binary':
+                    # Use independent one-vs-all binary classifiers
+                    binary_act = getattr(cfg.TASKS, 'BINARY_ACT', 'sigmoid')
+                    extra_head = head_helper.BinaryClassificationHead(
+                        dim_in=embed_dim,
+                        num_classes=self.num_classes[idx],
+                        dropout_rate=cfg.MODEL.DROPOUT_RATE,
+                        act_func=binary_act,
+                        cls_embed=self.cls_embed_on,
+                        recognition=False,
+                    )
+
+                elif head_type == 'cascade':
+                    # Use Cascade Classification head (two-stage: Idle vs Event)
+                    cascade_stage1_hidden = getattr(cfg.TASKS, 'CASCADE_STAGE1_HIDDEN', 512)
+                    cascade_stage2_hidden = getattr(cfg.TASKS, 'CASCADE_STAGE2_HIDDEN', 512)
+                    cascade_training_mode = getattr(cfg.TASKS, 'CASCADE_TRAINING_MODE', 'end-to-end')
+                    cascade_stage1_weight = getattr(cfg.TASKS, 'CASCADE_STAGE1_WEIGHT', 1.0)
+                    cascade_stage2_weight = getattr(cfg.TASKS, 'CASCADE_STAGE2_WEIGHT', 0.5)
+                    extra_head = head_helper.CascadeClassificationHead(
+                        dim_in=embed_dim,
+                        num_event_classes=self.num_classes[idx]-1,
+                        stage1_hidden_dim=cascade_stage1_hidden,
+                        stage2_hidden_dim=cascade_stage2_hidden,
+                        dropout_rate=cfg.MODEL.DROPOUT_RATE,
+                        act_func=self.act_fun[idx],
+                        stage1_weight=cascade_stage1_weight,
+                        stage2_weight=cascade_stage2_weight,
+                        training_mode=cascade_training_mode,
+                        cls_embed=self.cls_embed_on,
+                        recognition=False,
+                    )
+                
                 else:
                     # Use default Transformer head
                     extra_head = head_helper.TransformerBasicHead(

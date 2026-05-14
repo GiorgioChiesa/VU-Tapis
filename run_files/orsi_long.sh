@@ -57,8 +57,8 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="control"
-GPUIDS="3"
+NAME="binary"
+GPUIDS="2"
 
 DATASET="orsi"
 CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_LONG.yaml"

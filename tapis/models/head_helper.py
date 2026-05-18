@@ -345,7 +345,8 @@ class BinaryClassificationHead(nn.Module):
         super(BinaryClassificationHead, self).__init__()
         if dropout_rate > 0.0:
             self.dropout = nn.Dropout(dropout_rate)
-        self.class_projection = nn.Linear(dim_in, num_classes, bias=True)
+            
+        self.class_projections = nn.ModuleList([nn.Linear(dim_in, 1, bias=True) for _ in range(num_classes)])
         self.act_func = act_func
         self.cls_embed = cls_embed
         self.recognition = recognition
@@ -372,7 +373,7 @@ class BinaryClassificationHead(nn.Module):
 
         if hasattr(self, "dropout"):
             x = self.dropout(x)
-        x = self.class_projection(x)
+        x = torch.hstack([proj(x) for proj in self.class_projections])
 
         if self.act is not None and (self.act_func == "sigmoid" or not self.training):
             x = self.act(x)

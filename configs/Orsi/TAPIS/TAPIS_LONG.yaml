@@ -83,7 +83,7 @@ MODEL:
   MODEL_NAME: MViT
   # LOSS_FUNC: soft_cross_entropy
   DROPOUT_RATE: 0.2
-  HEAD_TYPE: "binary" # "transformer", "moe", "cascade" or "binary"
+  HEAD_TYPE: "moe" # "transformer", "moe", "cascade" or "binary"
   MOE_NUM_EXPERTS: 5
   MOE_EXPERT_DIM_HIDDEN: 256
 TASKS:

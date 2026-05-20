@@ -1,8 +1,8 @@
 TRAIN:
   ENABLE: True
   DATASET: orsi
-  BATCH_SIZE: 16
-  ACCUM_STEPS: 1
+  BATCH_SIZE: 12
+  ACCUM_STEPS: 7
   EVAL_PERIOD: 1
   CHECKPOINT_PERIOD: 1
   AUTO_RESUME: True
@@ -13,7 +13,7 @@ TRAIN:
 VAL:
   ENABLE: True
   DATASET: orsi
-  BATCH_SIZE: 20 #24
+  BATCH_SIZE: 24 #24
 DATA:
   NUM_FRAMES: 16
   SAMPLING_RATE: 1
@@ -69,7 +69,7 @@ SOLVER:
   LR_POLICY: cosine
   COSINE_AFTER_WARMUP: True
   COSINE_END_LR: 1e-5 #1e-5
-  MAX_EPOCH: 50
+  MAX_EPOCH: 75
   MAX_ITER: 10000
   EARLY_STOP_ep_th: [5, -1.0] # epoch and threshold for early stopping, if the metric does not improve for this many epochs by at least this threshold, stop training.
   WARMUP_EPOCHS: 5.0
@@ -83,7 +83,7 @@ MODEL:
   MODEL_NAME: MViT
   # LOSS_FUNC: soft_cross_entropy
   DROPOUT_RATE: 0.2
-  HEAD_TYPE: "moe" # "transformer", "moe", "cascade" or "binary"
+  HEAD_TYPE: "transformer" # "transformer", "moe", "cascade" or "binary"
   MOE_NUM_EXPERTS: 5
   MOE_EXPERT_DIM_HIDDEN: 256
 TASKS:
@@ -94,7 +94,7 @@ TASKS:
   LOSS_WEIGHTS:  [2.0, 1.0]
   METRICS: ["mAP","mAP"]  
   WEIGHT_LOSS_BY_CLASS: [steps_distribution.csv, phases_distribution.csv]
-  WEIGHT_SAMPLER_TASK: None # or None to disable weighted sampling
+  WEIGHT_SAMPLER_TASK: steps # task on sampling or None to disable weighted sampling
   FOCAL_GAMMA: 2.0
   FOCAL_ALPHA_MODE: "auto"  # auto, manual, or None
 DATA_LOADER:
@@ -115,7 +115,7 @@ ENDOVIS_DATASET:
   TRAIN_GT_BOX_JSON: ["all_merged.json"]
   VAL_GT_BOX_JSON: ["all_merged.json"]
   ORSI_ROOT_DIR: /data/orsi_tensors
-  ADD_IDLE: 10
+  ADD_IDLE: 30
 TEST:
   ENABLE: False
   DATASET: orsi_streaming

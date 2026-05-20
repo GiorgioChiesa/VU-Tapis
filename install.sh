@@ -51,6 +51,12 @@ else
   echo "LemonFM/lemonfm.pth already exists. Skipping download."
 fi
 
+if [ -f ".export_vars.txt" ]; then
+  source .export_vars.txt
+  wandb login --relogin $WANDB_API
+else
+  echo ".export_vars.txt not exists. log into wandb manually"
+fi 
 
 # python -m pip install -e detectron2
 # export 

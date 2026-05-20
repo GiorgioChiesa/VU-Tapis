@@ -204,7 +204,7 @@ def eval_classification(task, coco_anns, preds, **kwargs):
         path=os.path.join(
             kwargs.get("output_dir", "./temp"), f"{mode}_confusion_matrix_{task}.png"
         ),
-        normalize=None,
+        normalize="true",
     )
 
     # save_missmatches(preds=best_preds,

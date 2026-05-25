@@ -1,6 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="7.667" timestamp="2026-05-20T08:26:36.102930+00:00" hostname="f22c92487b6c"><testcase classname="" name="LemonFM.model_loader" time="0.000"><error message="collection failure">import file mismatch:
-imported module 'model_loader' has this __file__ attribute:
-  /workspaces/thesis_giorgiochiesa/src/VU-Tapis/LemonFM/LEMON_curation_models/model_loader.py
-which is not the same as the test file we want to collect:
-  /workspaces/thesis_giorgiochiesa/src/VU-Tapis/LemonFM/model_loader.py
-HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules</error></testcase></testsuite></testsuites>
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="18.832" timestamp="2026-05-25T07:55:02.497062+00:00" hostname="f22c92487b6c"><testcase classname="" name="LEMON.downstream.load_action" time="0.000"><error message="collection failure">LEMON/downstream/load_action.py:41: in &lt;module&gt;
+    def setup_tensorboard(log_dir) -&gt; torch.utils.tensorboard.SummaryWriter:
+                                      ^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'torch.utils' has no attribute 'tensorboard'</error></testcase></testsuite></testsuites>

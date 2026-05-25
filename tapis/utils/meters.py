@@ -277,7 +277,7 @@ class SurgeryMeter(object):
         out_name = {}
         for task,metric in zip(self.tasks, self.metrics):
             out_name[task] = self.save_json(task, epoch)
-            if task in ["phases", "steps", "actions"]:
+            if task in ["phases", "steps", "actions", "classes"]:
                 self.full_map[task] = grasp_eval.main_per_long_tasks(self.all_labels[task], 
                                                                      self.all_preds[task], 
                                                                      task, 

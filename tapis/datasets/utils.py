@@ -9,6 +9,7 @@ import logging
 import numpy as np
 from PIL import ImageFilter
 from collections import defaultdict
+import math
 
 import torch
 import torch.utils.data.distributed
@@ -185,13 +186,13 @@ def get_sequence(center_idx, length, sample_rate, num_frames, mode="center", tem
         effective_sample_rate = max(1, int(sample_rate * jitter_factor))
     else:
         effective_sample_rate = sample_rate
-    
+
     if mode == "center":
-        seq = list(range(center_idx - length//2, center_idx + length//2, effective_sample_rate))
+        seq = list(range(math.floor(center_idx - length/2), math.floor(center_idx + length/2), effective_sample_rate))
     elif mode == "before" or mode == "last":
-        seq = list(range(center_idx - length + effective_sample_rate, center_idx + effective_sample_rate, effective_sample_rate))
+        seq = list(range(math.floor(center_idx - length + effective_sample_rate), math.floor(center_idx + effective_sample_rate), effective_sample_rate))
     elif mode == "after" or mode == "first":
-        seq = list(range(center_idx, center_idx + length, effective_sample_rate))
+        seq = list(range(math.floor(center_idx), math.floor(center_idx + length), effective_sample_rate))
     else:
         raise ValueError(f"Invalid sequence mode: {mode}")
 
@@ -523,7 +524,7 @@ def create_sampler(dataset, shuffle=True, cfg=None, **kwargs):
         from torch.utils.data import WeightedRandomSampler
         from models.losses import get_weight_from_csv
         weiths_paths = os.path.join(cfg.OUTPUT_DIR, "distributions", 
-                                    cfg.TASKS.WEIGHT_LOSS_BY_CLASS[index])
+                                    f"train_{cfg.TASKS.WEIGHT_LOSS_BY_CLASS[index]}")
         weights = get_weight_from_csv(weiths_paths, cfg.TASKS.NUM_CLASSES[index], weight_type="sample")
         if weights is not None:
             # Ensure num_samples matches actual dataset length to prevent index out of bounds

@@ -185,7 +185,8 @@ def train_epoch(train_loader, model, optimizer, scaler, train_meter, cur_epoch, 
     index = cfg.TASKS.TASKS.index(cfg.TASKS.WEIGHT_SAMPLER_TASK) if cfg.TASKS.WEIGHT_SAMPLER_TASK in cfg.TASKS.TASKS else None
     if index is None or cfg.TASKS.WEIGHT_LOSS_BY_CLASS[index] is False:
         weiths_paths = [
-            os.path.join(cfg.OUTPUT_DIR, "distributions", cfg.TASKS.WEIGHT_LOSS_BY_CLASS[t_id])
+            os.path.join(cfg.OUTPUT_DIR, "distributions",
+                         f"train_{cfg.TASKS.WEIGHT_LOSS_BY_CLASS[t_id]}")
             for t_id, task in enumerate(tasks)
         ]
         weight = {

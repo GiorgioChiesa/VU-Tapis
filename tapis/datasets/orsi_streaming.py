@@ -151,7 +151,7 @@ class Orsi_streaming(Dataset):
             num_frames = len(frames)
             if num_frames >= self._video_length:
                 total += num_frames - self._video_length + 1
-        return total
+        return total 
 
     def get_video_info(self):
         """Return list of (patient, start_frame_idx, num_frames) for streaming."""
@@ -243,10 +243,22 @@ class Orsi_streaming(Dataset):
                 all_labels[task] = label_info.get("event_id", -1)
             elif task == "phases":
                 all_labels[task] = label_info.get("phase_id", -1)
+            elif task == "classes":
+                all_labels[task] = label_info.get("classes_id", -1)
 
         frame_identifier = f"{patient}/{center_frame_id:09d}.{self.image_type}"
 
         return [imgs], all_labels, {}, frame_identifier
+    
+    def frame_name_spliting(self, video_name, sec):
+        video_num = int(video_name.replace("RARP", ""))
+        return [video_num, sec]
+
+    def frame_num_joining(self, video_num, sec):
+        return f"RARP{video_num:03d}/{sec:0{self.zero_fill}d}.{self.image_type}"
+
+    def frame_name_joining(self, video_name, sec):
+        return f"{video_name}/IMAGES/{sec:0{self.zero_fill}d}.{self.image_type}"
 
 
 if __name__ == "__main__":

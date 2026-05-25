@@ -3,7 +3,9 @@
 
 """Video models."""
 
+import importlib.util
 import math
+import os
 from copy import deepcopy
 from functools import partial
 
@@ -30,6 +32,27 @@ try:
     from fairscale.nn.checkpoint import checkpoint_wrapper
 except ImportError:
     checkpoint_wrapper = None
+
+
+def _load_lemon_builder():
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    lemon_src_path = os.path.join(repo_root, "LEMON", "src", "model_loader.py")
+    lemon_weights_path = os.path.join(repo_root, "LEMON", "lemonfm.pth")
+    if os.path.isfile(lemon_src_path):
+        spec = importlib.util.spec_from_file_location("lemon_src_model_loader", lemon_src_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.build_LemonFM, lemon_weights_path
+
+    try:
+        from LemonFM.model_loader import build_LemonFM as _build_LemonFM
+    except Exception:
+        _build_LemonFM = None
+
+    return _build_LemonFM, os.path.join(repo_root, "LemonFM", "lemonfm.pth")
+
+
+build_LemonFM, DEFAULT_LEMON_WEIGHTS_PATH = _load_lemon_builder()
 
 
 # Number of blocks for different stages given the model depth.
@@ -973,16 +996,23 @@ class MViT(nn.Module):
         return out
 
 
-from LemonFM.model_loader import build_LemonFM
-
-
 @MODEL_REGISTRY.register()
 class LEMON(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        weiths_path = "LemonFM/lemonfm.pth"
-        self.backbone = build_LemonFM(pretrained_weights=weiths_path)
+        weights_path = getattr(cfg.MODEL, "LEMON_WEIGHTS", None)
+        if weights_path is None:
+            weights_path = DEFAULT_LEMON_WEIGHTS_PATH
+
+        if build_LemonFM is None:
+            raise ImportError(
+                "Could not load the LEMON model builder. "
+                "Make sure the local LEMON clone exists at 'LEMON/src/model_loader.py' "
+                "or the LemonFM package is installed."
+            )
+
+        self.backbone = build_LemonFM(pretrained_weights=weights_path)
 
         self.tasks = deepcopy(cfg.TASKS.TASKS)
         self.num_classes = deepcopy(cfg.TASKS.NUM_CLASSES)
@@ -1005,7 +1035,7 @@ class LEMON(nn.Module):
                 0
             ]  # Prendi il primo elemento se è una lista (caso SlowFast)
         # print(batch_frames.shape)
-        features = self.backbone(batch_frames)  # [B, d_model]
+        features = self.backbone(batch_frames.squeeze())  # [B, d_model]
         # print(features.shape)
         out = {"cls_tokens": features}
         # TAPIS head classification

@@ -57,11 +57,11 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="more_idle"
-GPUIDS="0"
+NAME="classes_streaming"
+GPUIDS="1"
 
 DATASET="orsi"
-CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_LONG.yaml"
+CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_ALL.yaml"
 OUTPUT_DIR="outputs/"$DATASET"/"$TASK"/"$NAME"/totale"
 
 #Change this variables if data is not located in ./data

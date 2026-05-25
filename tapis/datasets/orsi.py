@@ -119,8 +119,10 @@ class Orsi(torch.utils.data.Dataset):
         if self.video_root not in sys.path:
             sys.path.insert(0, self.video_root)
         try:
-            from events_lists import mapping_events_name_to_id, mapping_phases_name_to_id
-
+            from events_lists import mapping_events_name_to_id, mapping_phases_name_to_id, class_mapping, classes
+            self.classes_eventname2class_name = class_mapping
+            self.classes_name2idx = classes
+            self.classes_idx2name = {v: k for k, v in classes.items()}
             self.event_name2idx = mapping_events_name_to_id
             self.phase_name2idx = mapping_phases_name_to_id
             self.event_idx2name = {v: k for k, v in mapping_events_name_to_id.items()}
@@ -136,7 +138,7 @@ class Orsi(torch.utils.data.Dataset):
                 self.remapping_local_id()
 
     def remapping_local_id(self):
-        map_task = {"steps": "event", "phases": "phase", "actions": "event"}
+        map_task = {"steps": "event", "phases": "phase", "actions": "event", "classes": "classes"}
         for task in self.cfg.TASKS.TASKS:
             id_map = dict(zip(self.counter[task]["id"], range(len(self.counter[task]))))
             self.filtered_dfs[f"{map_task[task]}_id"] = (
@@ -144,7 +146,7 @@ class Orsi(torch.utils.data.Dataset):
             )
 
     def generate_weight_vector(self):
-        map_task = {"steps": "event", "phases": "phase", "actions": "event"}
+        map_task = {"steps": "event", "phases": "phase", "actions": "event","classes": "classes"}
         self.counter = {}
         for task, weight_loss_by_class in zip(
             self.cfg.TASKS.TASKS, self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS
@@ -152,7 +154,13 @@ class Orsi(torch.utils.data.Dataset):
             clip = self.filtered_dfs.copy() if self.filtered_dfs is not None else self.dfs.copy()
 
             his = []
-            mapping = self.event_idx2name if task in ("steps", "actions") else self.phase_idx2name
+            if task in ["steps", "actions"]:
+                mapping = self.event_idx2name
+            elif task == "phases":
+                mapping = self.phase_idx2name
+            elif task == "classes":
+                mapping = self.classes_idx2name
+                
             for id, event in mapping.items():
                 if event.strip().lower().replace(" ", "_") in self.exclude_event_names:
                     continue
@@ -176,12 +184,12 @@ class Orsi(torch.utils.data.Dataset):
                 f"Total count in distribution ({self.counter[task]['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
             )
             assert len(self.counter[task]) <= self._num_classes[task], (
-                f"Numero di classi non coincide, deve essere: {len(self.counter[task])}"
+                f"Numero di classi non coincide per {task}, deve essere: {len(self.counter[task])}"
             )
 
             print(f"Weight loss by class for task {task} -- {self._split}:\n{self.counter[task]}")
-            if weight_loss_by_class and self._split == "train":
-                csv_path = os.path.join(self.cfg.OUTPUT_DIR, "distributions", weight_loss_by_class)
+            if weight_loss_by_class:
+                csv_path = os.path.join(self.cfg.OUTPUT_DIR, "distributions", f"{self._split}_{weight_loss_by_class}")
                 os.makedirs(os.path.dirname(csv_path), exist_ok=True)
                 self.counter[task].to_csv(csv_path, index=False)
 
@@ -677,6 +685,9 @@ class Orsi(torch.utils.data.Dataset):
             elif task == "actions":
                 all_labels[task] = clip.get("event_id", -1)
                 extra_data[f"{task}_name"] = clip.get("event_name", "unknown")
+            elif task == "classes":
+                all_labels[task] = int(clip.get("classes_id", -1))
+                extra_data[f"{task}_name"] = clip.get("classes_name", "unknown")
             else:
                 all_labels[task] = clip.get(f"{task}_id", -1)
                 extra_data[f"{task}_name"] = clip.get(f"{task}_name", "unknown")

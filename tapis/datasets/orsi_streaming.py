@@ -134,9 +134,11 @@ class Orsi_streaming(Dataset):
                 # Store label info for quick lookup
                 self.frame_to_label[(patient, frame_id)] = {
                     "event_id": row.get("event_id", -1),
-                    "event_name": row.get("event_name", "Idle"),
+                    "event_name": row.get("event_name", "Unknown"),
                     "phase_id": row.get("phase_id", -1),
-                    "phase_name": row.get("phase_name", "Idle"),
+                    "phase_name": row.get("phase_name", "Unknown"),
+                    "classes_id": row.get("classes_id", -1),
+                    "classes_name": row.get("classes_name", "Unknown"),
                 }
 
             # Sort by frame_id to ensure sequential order

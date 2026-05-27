@@ -1,6 +1,6 @@
 TRAIN:
   ENABLE: True
-  DATASET: orsi
+  DATASET: orsi_streaming
   BATCH_SIZE: 12
   ACCUM_STEPS: 7
   EVAL_PERIOD: 1
@@ -94,7 +94,7 @@ TASKS:
   LOSS_WEIGHTS:  [2.0, 1.0, 1.0]
   METRICS: ["mAP","mAP", "mAP"]  
   WEIGHT_LOSS_BY_CLASS: [steps_distribution.csv, phases_distribution.csv, classes_distribution.csv] # or None to disable weighted loss
-  WEIGHT_SAMPLER_TASK: None # task on sampling or None to disable weighted sampling
+  WEIGHT_SAMPLER_TASK: steps # task on sampling or None to disable weighted sampling
   FOCAL_GAMMA: 2.0
   FOCAL_ALPHA_MODE: "auto"  # auto, manual, or None
 DATA_LOADER:

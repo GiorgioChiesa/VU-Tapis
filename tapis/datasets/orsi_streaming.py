@@ -61,15 +61,44 @@ class Orsi_streaming(Dataset):
         self.frame_folder = getattr(cfg.ENDOVIS_DATASET, "ORSI_FRAME_FOLDER", "Video_1fps")
         self.label_folder = getattr(cfg.ENDOVIS_DATASET, "ORSI_LABEL_FOLDER", "Label")
         self.image_type = getattr(cfg.ENDOVIS_DATASET, "ORSI_IMAGE_TYPE", "pt")
+        self.exclude_event_names = {
+            name.strip().lower() for name in getattr(cfg.ENDOVIS_DATASET, "EXCLUDE_EVENT_NAMES", [])
+        }
 
         # Store loaded data
         self.patient_frame_ids = {}
         self.frame_info = {}
         self.video_frame_lists = {}  # patient -> list of (frame_id, frame_path)
         self.frame_to_label = {}  # (patient, frame_id) -> label info
+        self.dfs = pd.DataFrame()
+        self.filtered_dfs = None
+        self.counter = {}
+
+        # Load mappings from events_lists
+        if self.video_root not in sys.path:
+            sys.path.insert(0, self.video_root)
+        try:
+            from events_lists import mapping_events_name_to_id, mapping_phases_name_to_id, class_mapping, classes
+            self.classes_eventname2class_name = class_mapping
+            self.classes_name2idx = classes
+            self.classes_idx2name = {v: k for k, v in classes.items()}
+            self.event_name2idx = mapping_events_name_to_id
+            self.phase_name2idx = mapping_phases_name_to_id
+            self.event_idx2name = {v: k for k, v in mapping_events_name_to_id.items()}
+            self.phase_idx2name = {v: k for k, v in mapping_phases_name_to_id.items()}
+        except ImportError as e:
+            print(f"Error importing events_lists: {e}")
+            self.event_name2idx = {}
+            self.phase_name2idx = {}
+            self.classes_idx2name = {}
+            self.event_idx2name = {}
+            self.phase_idx2name = {}
 
         if load:
             self._load_data()
+            if any(self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS):
+                self.generate_weight_vector()
+                self.remapping_local_id()
 
     def _list_patient_ids(self):
         if self._split == "train":
@@ -120,9 +149,12 @@ class Orsi_streaming(Dataset):
 
     def _load_data(self):
         """Load data and organize frames sequentially by video."""
+        dfs = []
+        
         for patient in self._list_patient_ids():
             label_path = self._locate_label_file(patient)
             df = pd.read_csv(label_path)
+            dfs.append(df)
 
             # Store frame info for this patient
             frame_list = []
@@ -145,6 +177,197 @@ class Orsi_streaming(Dataset):
             frame_list.sort(key=lambda x: x[0])
             self.video_frame_lists[patient] = frame_list
             self.patient_frame_ids[patient] = [f[0] for f in frame_list]
+
+        # Concatenate all dataframes
+        self.dfs = pd.concat(dfs, ignore_index=True)
+
+        # Filter based on exclude_event_names
+        if self.exclude_event_names:
+            exclude = self.exclude_event_names
+            
+            exclude.discard("idle")
+            self.filtered_dfs = self.dfs[
+                ~self.dfs["event_name"].str.strip().str.lower().str.replace(" ", "_").isin(exclude)
+            ].reset_index(drop=True)
+        else:
+            self.filtered_dfs = self.dfs.copy()
+
+        # # Remove idle frames if ADD_IDLE is enabled
+        # if getattr(self.cfg.ENDOVIS_DATASET, "ADD_IDLE", 0) > 0:
+        #     self.filtered_dfs = self.filtered_dfs[
+        #         self.filtered_dfs["event_name"].str.strip().str.lower() != "idle"
+        #     ].reset_index(drop=True)
+        
+        self.collapse_event_dfs()
+
+
+        # Ensure index is properly reset
+        self.filtered_dfs = self.filtered_dfs.reset_index(drop=True)
+
+        # Save the dataset CSV
+        saving = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
+        os.makedirs(self.cfg.OUTPUT_DIR, exist_ok=True)
+        saving.to_csv(os.path.join(self.cfg.OUTPUT_DIR, f"{self._split}_data.csv"), index=False)
+
+
+    def collapse_event_dfs(self):
+        """
+        Collapse multiple events into one by mapping certain event names to others.
+
+        Mapping rules:
+        - Instrument_swap:_removal -> Removal_of_robotic_instruments
+        - Hemolock_clip_on_right_pedicle -> Metal_clip_on_right_pedicle
+        - Hemolock_clip_on_left_pedicle -> Metal_clip_on_left_pedicle
+        - Events with 'left'/'right' in name are collapsed to the same event
+        - Insert_gauze -> Insert_hemostatic_agens
+        - Cutting_the_needles -> Removing_needles
+          (e.g., 'Clip_on_left_pedicle' and 'Clip_on_right_pedicle' become the same)
+        """
+        dfs = self.filtered_dfs if self.filtered_dfs is not None else self.dfs
+
+        # Define explicit collapse mappings: source_event -> target_event
+        collapse_mapping = {
+            "instrument_swap:_removal": "removal_of_robotic_instruments",
+            "hemolock_clip_on_right_pedicle": "metal_clip_on_right_pedicle",
+            "hemolock_clip_on_left_pedicle": "metal_clip_on_left_pedicle",
+            "insert_gauze": "insert_hemostatic_agens",
+            "cutting_the_needles": "removing_needles",
+        }
+
+        # Get unique events from the dataframe
+        unique_events = dfs[["event_id", "event_name"]].drop_duplicates()
+
+        # Create a lookup for event IDs by normalized name
+        event_lookup = {}
+        for _, row in unique_events.iterrows():
+            normalized_name = str(row["event_name"]).strip().lower().replace(" ", "_")
+            event_lookup[normalized_name] = {
+                "event_id": row["event_id"],
+                "event_name": row["event_name"],
+            }
+
+        # Apply explicit collapse mapping
+        for source_name, target_name in collapse_mapping.items():
+            if target_name in event_lookup:
+                target_event = event_lookup[target_name]
+                self.exclude_event_names.add(source_name)
+                mask = (
+                    dfs["event_name"].str.strip().str.lower().str.replace(" ", "_") == source_name
+                )
+                if mask.any():
+                    dfs.loc[mask, "event_id"] = target_event["event_id"]
+                    dfs.loc[mask, "event_name"] = target_event["event_name"]
+                    print(f"Collapsed '{source_name}' -> '{target_name}' ({mask.sum()} rows)")
+            else:
+                print(f"Warning: Target event '{target_name}' not found in dataset")
+
+        # Collapse events that differ only by left/right
+        # Group events by base name (without left/right)
+        left_right_groups = {}
+        for _, row in unique_events.iterrows():
+            normalized_name = str(row["event_name"]).strip().lower().replace(" ", "_")
+            # Remove left/right prefixes/suffixes to get base name
+            base_name = normalized_name.replace("_left", "").replace("_right", "")
+            base_name = base_name.replace("left_", "").replace("right_", "")
+
+            if base_name not in left_right_groups:
+                left_right_groups[base_name] = []
+            left_right_groups[base_name].append(
+                {
+                    "original_name": normalized_name,
+                    "event_id": row["event_id"],
+                    "event_name": row["event_name"],
+                }
+            )
+
+        # For each group with multiple variants, collapse to one (prefer "right" or lower ID)
+        for base_name, variants in left_right_groups.items():
+            if len(variants) > 1:
+                # Check if variants actually differ by left/right
+                has_left = any("left" in v["original_name"] for v in variants)
+                has_right = any("right" in v["original_name"] for v in variants)
+
+                if has_left and has_right:
+                    # Prefer "right" variant, otherwise use lowest ID
+                    target = next(
+                        (v for v in variants if "right" in v["original_name"]),
+                        min(variants, key=lambda x: x["event_id"]),
+                    )
+
+                    # Collapse all variants to target
+                    for variant in variants:
+                        if variant["event_id"] != target["event_id"]:
+                            self.exclude_event_names.add(variant["original_name"])
+                            mask = (
+                                dfs["event_name"].str.strip().str.lower().str.replace(" ", "_")
+                                == variant["original_name"]
+                            )
+                            if mask.any():
+                                dfs.loc[mask, "event_id"] = target["event_id"]
+                                dfs.loc[mask, "event_name"] = target["event_name"]
+                                print(
+                                    f"Collapsed left/right '{variant['original_name']}' -> '{target['original_name']}' ({mask.sum()} rows)"
+                                )
+
+        # Update filtered_dfs with the modified dataframe
+        if self.filtered_dfs is not None:
+            self.filtered_dfs = dfs
+        else:
+            self.dfs = dfs
+
+    def remapping_local_id(self):
+        """Remap class IDs based on distribution counter."""
+        map_task = {"steps": "event", "phases": "phase", "actions": "event", "classes": "classes"}
+        for task in self.cfg.TASKS.TASKS:
+            id_map = dict(zip(self.counter[task]["id"], range(len(self.counter[task]))))
+            self.filtered_dfs[f"{map_task[task]}_id"] = (
+                self.filtered_dfs[f"{map_task[task]}_id"].map(id_map).fillna(0)
+            )
+
+    def generate_weight_vector(self):
+        """Generate class distribution statistics and save to CSV."""
+        map_task = {"steps": "event", "phases": "phase", "actions": "event", "classes": "classes"}
+        self.counter = {}
+        for task, weight_loss_by_class in zip(
+            self.cfg.TASKS.TASKS, self.cfg.TASKS.WEIGHT_LOSS_BY_CLASS
+        ):
+            clip = self.filtered_dfs.copy() if self.filtered_dfs is not None else self.dfs.copy()
+
+            his = []
+            if task in ["steps", "actions"]:
+                mapping = self.event_idx2name
+            elif task == "phases":
+                mapping = self.phase_idx2name
+            elif task == "classes":
+                mapping = self.classes_idx2name
+            else:
+                mapping = {}
+                
+            for id, event in mapping.items():
+                if event.strip().lower().replace(" ", "_") in self.exclude_event_names:
+                    continue
+                his.append(
+                    {
+                        "id": id,
+                        "name": event,
+                        "total_count": sum(clip[f"{map_task[task]}_id"] == id),
+                    }
+                )
+            self.counter[task] = pd.DataFrame(his)
+
+            assert self.counter[task]["total_count"].sum() <= len(clip), (
+                f"Total count in distribution ({self.counter[task]['total_count'].sum()}) does not match total samples in dataset ({len(clip)})"
+            )
+            assert len(self.counter[task]) <= self._num_classes[task], (
+                f"Numero di classi non coincide per {task}, deve essere: {len(self.counter[task])}"
+            )
+
+            print(f"Weight loss by class for task {task} -- {self._split}:\n{self.counter[task]}")
+            if weight_loss_by_class:
+                distributions_dir = os.path.join(self.cfg.OUTPUT_DIR, "distributions")
+                os.makedirs(distributions_dir, exist_ok=True)
+                csv_path = os.path.join(distributions_dir, f"{self._split}_{weight_loss_by_class}")
+                self.counter[task].to_csv(csv_path, index=False)
 
     def __len__(self):
         """Return total number of clips across all videos."""

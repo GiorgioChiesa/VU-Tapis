@@ -57,7 +57,7 @@ echo "TRAIN: [$TRAIN_FOLDS_STR]"
 echo "VAL: [$VAL_FOLDS_STR]"
 echo "TEST: [$TEST_FOLDS_STR]"
 #-------------------------
-NAME="classes_streaming"
+NAME="classes_streaming_debug"
 GPUIDS="1"
 
 DATASET="orsi"

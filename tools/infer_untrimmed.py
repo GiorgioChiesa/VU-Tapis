@@ -41,15 +41,32 @@ from tapis.datasets import utils as data_utils
 from tapis.models import build_model
 
 
-def load_cfg_and_model(ckpt_path, gpu):
+def load_cfg_and_model(ckpt_path, gpu, encoder_ckpt=None):
+    """
+    Build the model from the config stored in ``ckpt_path``. With ``encoder_ckpt``
+    the weights come from that file instead (e.g. the official GraSP-trained TAPIS,
+    which has no ``cfg``): its task heads are read from the state dict.
+    """
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     cfg = get_cfg()
     cfg.set_new_allowed(True)  # older checkpoints carry keys removed from defaults.py
     cfg.merge_from_other_cfg(CfgNode.load_cfg(ckpt["cfg"]))
+    state = ckpt["model_state"]
+    if encoder_ckpt is not None:
+        state = torch.load(encoder_ckpt, map_location="cpu", weights_only=False)["model_state"]
+        heads = {
+            k.split(".")[0].removeprefix("extra_heads_"): v.shape[0]
+            for k, v in state.items()
+            if k.startswith("extra_heads_") and k.endswith("class_projection.weight")
+        }
+        cfg.TASKS.TASKS = list(heads)
+        cfg.TASKS.NUM_CLASSES = list(heads.values())
+        cfg.TASKS.LOSS_FUNC = [cfg.TASKS.LOSS_FUNC[0]] * len(heads)
+        cfg.TASKS.HEAD_ACT = [cfg.TASKS.HEAD_ACT[0]] * len(heads)
     cfg.NUM_GPUS = 1
     torch.cuda.set_device(gpu)
     model = build_model(cfg, gpu_id=gpu)
-    missing, unexpected = model.load_state_dict(ckpt["model_state"], strict=False)
+    missing, unexpected = model.load_state_dict(state, strict=False)
     if missing or unexpected:
         raise RuntimeError(f"State dict mismatch. Missing: {missing[:5]} Unexpected: {unexpected[:5]}")
     model.eval()
@@ -61,7 +78,9 @@ def patients_for_split(cfg, split):
         "train": cfg.ENDOVIS_DATASET.TRAIN_LISTS,
         "val": cfg.ENDOVIS_DATASET.VAL_LISTS,
         "test": cfg.ENDOVIS_DATASET.TEST_LISTS,
-    }[split]
+    }
+    lists["all"] = list(lists["train"]) + list(lists["val"]) + list(lists["test"])
+    lists = lists[split]
     return [os.path.basename(f).removesuffix(".csv").removesuffix("_all_label") for f in lists]
 
 
@@ -85,7 +104,11 @@ def load_frames(frame_dir, patient, frame_paths, workers=16):
 
 
 @torch.no_grad()
-def infer_video(cfg, model, frames, batch_size, gpu, amp):
+def infer_video(cfg, model, frames, batch_size, gpu, amp, features=False):
+    """
+    Per-second task probabilities; with ``features=True`` also the clip embedding
+    the heads read (CLS token(s), flattened) concatenated with the mean patch token.
+    """
     n = frames.shape[0]
     seq_len = cfg.DATA.NUM_FRAMES * cfg.DATA.SAMPLING_RATE
     seqs = torch.tensor(
@@ -98,6 +121,8 @@ def infer_video(cfg, model, frames, batch_size, gpu, amp):
     if hasattr(model, "reset_memory_bank"):
         model.reset_memory_bank()
     out = {task: [] for task in cfg.TASKS.TASKS}
+    if features:
+        out["features"] = []
     for start in range(0, n, batch_size):
         idx = seqs[start : start + batch_size].cuda(gpu)
         clips = frames[idx].permute(0, 2, 1, 3, 4).contiguous()  # B,T,C,H,W -> B,C,T,H,W
@@ -105,16 +130,21 @@ def infer_video(cfg, model, frames, batch_size, gpu, amp):
             preds = model([clips])
         if isinstance(preds, tuple):
             preds = preds[0]
-        for task in out:
+        for task in cfg.TASKS.TASKS:
             out[task].append(preds[task].float().cpu())
-    return {task: torch.cat(v).numpy() for task, v in out.items()}
+        if features:
+            cls = preds["cls_tokens"]
+            tokens = preds["features"][:, 0 if cls is None else cls.shape[1] :]
+            parts = ([] if cls is None else [cls.flatten(1)]) + [tokens.mean(1)]
+            out["features"].append(torch.cat(parts, dim=1).half().cpu())
+    return {k: torch.cat(v).numpy() for k, v in out.items()}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--run", required=True, help="Run output dir containing the checkpoint")
     parser.add_argument("--ckpt", default="checkpoint_best_steps.pyth")
-    parser.add_argument("--split", default="val", choices=["train", "val", "test"])
+    parser.add_argument("--split", default="val", choices=["train", "val", "test", "all"])
     parser.add_argument("--patients", nargs="*", help="Override the patients of --split")
     parser.add_argument("--frame-dir", default="/data/orsi_tensors")
     parser.add_argument("--out", help="Default: <run>/untrimmed/<ckpt stem>/<split>")
@@ -122,11 +152,16 @@ def main():
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--amp", action="store_true", help="fp16 autocast (validation in train_net runs in fp32)")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--features", action="store_true", help="also save the clip embeddings (fp16)")
+    parser.add_argument("--shard", default="0/1", help="i/n: process every n-th patient starting at i")
+    parser.add_argument("--encoder-ckpt", help="take the weights from this file (cfg still from --run/--ckpt)")
+    parser.add_argument("--normalize", action="store_true", help="(x - DATA.MEAN) / DATA.STD, as in GraSP training")
     args = parser.parse_args()
 
     run = Path(args.run).resolve()
-    cfg, model = load_cfg_and_model(run / args.ckpt, args.gpu)
+    cfg, model = load_cfg_and_model(run / args.ckpt, args.gpu, args.encoder_ckpt)
     patients = args.patients or patients_for_split(cfg, args.split)
+    shard, n_shards = map(int, args.shard.split("/"))
     out_dir = Path(args.out) if args.out else run / "untrimmed" / Path(args.ckpt).stem / args.split
     out_dir.mkdir(parents=True, exist_ok=True)
     meta = {
@@ -141,10 +176,14 @@ def main():
         "sampling_rate": cfg.DATA.SAMPLING_RATE,
         "amp": args.amp,
     }
-    (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+    meta["features"] = args.features
+    meta["encoder_ckpt"] = args.encoder_ckpt
+    meta["normalize"] = args.normalize
+    if shard == 0:
+        (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
     print(json.dumps(meta, indent=2), flush=True)
 
-    for patient in patients:
+    for patient in patients[shard::n_shards]:
         target = out_dir / f"{patient}.npz"
         if target.exists() and not args.overwrite:
             print(f"{patient}: exists, skipping", flush=True)
@@ -152,10 +191,15 @@ def main():
         t0 = time.time()
         labels = pd.read_csv(os.path.join(args.frame_dir, patient, "Label", f"{patient}_all_labels.csv"))
         frames = load_frames(args.frame_dir, patient, labels["frame_path"].tolist())
+        if args.normalize:
+            mean = torch.tensor(cfg.DATA.MEAN).view(1, 3, 1, 1)
+            std = torch.tensor(cfg.DATA.STD).view(1, 3, 1, 1)
+            frames = (frames - mean) / std
         t1 = time.time()
-        probs = infer_video(cfg, model, frames, args.batch_size, args.gpu, args.amp)
+        probs = infer_video(cfg, model, frames, args.batch_size, args.gpu, args.amp, args.features)
         del frames
         torch.cuda.empty_cache()
+        feats = probs.pop("features", None)
         for task, p in probs.items():
             row_sums = p.sum(axis=1)
             assert np.allclose(row_sums, 1.0, atol=1e-3), f"{task} outputs are not probabilities"
@@ -164,6 +208,7 @@ def main():
             second=labels["second"].to_numpy(),
             frame_id=labels["frame_id"].to_numpy(),
             **{f"probs_{task}": p.astype(np.float32) for task, p in probs.items()},
+            **({"features": feats} if feats is not None else {}),
         )
         print(
             f"{patient}: {len(labels)} s, load {t1 - t0:.0f}s, infer {time.time() - t1:.0f}s "

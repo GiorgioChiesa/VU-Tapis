@@ -76,7 +76,9 @@ def main():
     has_phases = "phases" in meta["tasks"]
 
     # ---- priors from the training patients -------------------------------------
-    train = [Path(f).name.removesuffix(".csv") for f in cfg.ENDOVIS_DATASET.TRAIN_LISTS]
+    train = meta.get("train_patients") or [
+        Path(f).name.removesuffix(".csv") for f in cfg.ENDOVIS_DATASET.TRAIN_LISTS
+    ]
     work = pred_dir / "constraints"
     work.mkdir(exist_ok=True)
     tr_table, tr_ids = build_label_table(cfg, train, args.frame_dir, work)

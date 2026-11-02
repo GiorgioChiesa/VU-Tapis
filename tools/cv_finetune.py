@@ -85,10 +85,31 @@ def host_paths(ens, data_dir):
     ens["VAL_COCO_ANNS"] = f"{data_dir}/coco/all_merged.json"
 
 
+def wait_gpu_free(gpu, max_used_mib=1500, poll=60):
+    """Block until the physical GPU has (almost) no memory in use, e.g. a previous job ended."""
+    import time
+
+    announced = False
+    while True:
+        used = int(
+            subprocess.run(
+                ["nvidia-smi", f"--id={gpu}", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+                capture_output=True, text=True,
+            ).stdout.strip() or 0
+        )
+        if used < max_used_mib:
+            return
+        if not announced:
+            print(f"[gpu{gpu}] waiting: {used} MiB in use", flush=True)
+            announced = True
+        time.sleep(poll)
+
+
 def run(cmd, log, gpu, done):
     if done.exists():
         print(f"[gpu{gpu}] skip (done): {done.parent.name}/{done.name}", flush=True)
         return
+    wait_gpu_free(gpu)
     print(f"[gpu{gpu}] {' '.join(map(str, cmd))[:200]}", flush=True)
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(gpu), WANDB_SILENT="true")
     with open(log, "w") as f:
@@ -118,7 +139,8 @@ def fold_job(i, args, base_cfg, all_folds, gpu, splits):
     ens["TEST_GT_BOX_JSON"] = [f"{p}_coco.json" for p in held_out]
     cfg["OUTPUT_DIR"] = str(root)
     cfg["NAME"] = f"cv_ft_fold{i}"
-    cfg["GPUIDS"] = [0]
+    # assert_and_infer_cfg() overwrites CUDA_VISIBLE_DEVICES with GPUIDS: use the physical id
+    cfg["GPUIDS"] = [gpu]
     cfg["TEST"]["ENABLE"] = False
     cfg["WANDB_ENABLE"] = args.wandb
     cfg["WANDB_API"] = ""  # login comes from ~/.netrc; never store the key in configs/logs
@@ -126,7 +148,10 @@ def fold_job(i, args, base_cfg, all_folds, gpu, splits):
     cfg_path = root / "config.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
 
-    # 1. fine-tune the encoder
+    # 1. fine-tune the encoder (a run that reached the last epoch outside this script counts as done)
+    last = root / "checkpoints" / f"checkpoint_epoch_{cfg['SOLVER']['MAX_EPOCH']:05d}.pyth"
+    if last.exists() and (root / "checkpoint_best_steps.pyth").exists():
+        (root / ".finetune.done").touch()
     run([PY, "-B", "tools/run_net_host.py", "--cfg", cfg_path, "WANDB_API", '""'],
         logs / "finetune.log", gpu, root / ".finetune.done")
     # 2. features of all videos

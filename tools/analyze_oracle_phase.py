@@ -22,21 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np
 from scipy.stats import spearmanr
 
-from train_hybrid import load_orsi
+from train_hybrid import boundary_fraction, load_orsi
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def boundary_fraction(phase, onsets, tol):
-    """Fraction of ``onsets`` within ``tol`` s of a change in the per-second ``phase`` sequence.
-
-    >>> boundary_fraction(np.array([0, 0, 1, 1, 1, 2]), [2.0, 4.0], 0)
-    0.5
-    """
-    ch = np.flatnonzero(phase[1:] != phase[:-1]) + 1
-    if not len(onsets) or not len(ch):
-        return 0.0
-    return float(np.mean([np.abs(ch - t).min() <= tol for t in onsets]))
 
 
 def main():

@@ -94,6 +94,56 @@ def segment_counts(pred, gt, overlap, ignore=()):
     return tp, fp, int((~used).sum())
 
 
+def changes(labels):
+    """
+    Seconds where the label changes.
+
+    >>> changes([0, 0, 1, 1, 2]).tolist()
+    [2, 4]
+    """
+    labels = np.asarray(labels)
+    return np.flatnonzero(labels[1:] != labels[:-1]) + 1
+
+
+def boundary_counts(pred, gt, tol):
+    """
+    ``(tp, fp, fn)``: changes of ``pred`` matched one-to-one to changes of ``gt`` within ``tol``
+    seconds, closest pairs first. The class on either side of a change is not checked.
+
+    >>> boundary_counts([0, 0, 1, 1, 1, 2], [0, 0, 0, 1, 1, 2], 1)
+    (2, 0, 0)
+    >>> boundary_counts([0, 1, 0, 1, 1, 1], [0, 0, 0, 1, 1, 1], 1)  # flicker: one tp, two fp
+    (1, 2, 0)
+    >>> boundary_counts([0, 0, 0, 0], [0, 0, 1, 1], 5)
+    (0, 0, 1)
+    """
+    p, g = changes(pred), changes(gt)
+    dist = np.abs(p[:, None] - g[None, :])
+    pairs = sorted((int(dist[i, j]), i, j) for i, j in zip(*np.nonzero(dist <= tol)))
+    used_p, used_g = set(), set()
+    for _, i, j in pairs:
+        if i not in used_p and j not in used_g:
+            used_p.add(i)
+            used_g.add(j)
+    return len(used_p), len(p) - len(used_p), len(g) - len(used_g)
+
+
+def boundary_f1(preds, gts, tol):
+    """
+    Boundary precision / recall / F1 (fractions, not percent) at ``tol`` s, counts summed over videos.
+
+    >>> boundary_f1({"v": [0, 1, 0, 1, 1, 1]}, {"v": [0, 0, 0, 1, 1, 1]}, 1)
+    {'P': 0.3333333333333333, 'R': 1.0, 'F1': 0.5}
+    """
+    tp = fp = fn = 0
+    for v in gts:
+        a, b, c = boundary_counts(preds[v], gts[v], tol)
+        tp, fp, fn = tp + a, fp + b, fn + c
+    prec = tp / (tp + fp) if tp + fp else 0.0
+    rec = tp / (tp + fn) if tp + fn else 0.0
+    return {"P": prec, "R": rec, "F1": 2 * prec * rec / (prec + rec) if prec + rec else 0.0}
+
+
 def segmental_metrics(preds, gts, overlaps=OVERLAPS, ignore=()):
     """
     Aggregate over videos: ``{"edit", "F1@10", "F1@25", "F1@50"}`` (percent).

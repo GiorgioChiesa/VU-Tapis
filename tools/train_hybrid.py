@@ -39,6 +39,17 @@ Experiment 2 (Orsi only): what phases and atomic actions add to event recognitio
   sources: grasp_phase (GraSP phases + steps), grasp_action (GraSP actions + instruments),
            sar (SAR-RARP50 suturing gestures), esad (ESAD actions); see train_aux.SOURCES.
 
+Experiment 3 (Orsi only): a phase-change (boundary) head shared by phases and events. Every Orsi
+phase START is an event stamp, so for the "boundary" event classes (>= 50 % of the train-fold
+onsets within 2 s of a phase change) spotting the event and segmenting the phases are one problem.
+  --boundary-head      one more output channel: phase change at t (same target and focal loss
+                       as the events, weight --boundary-weight); val npz get `probs_boundary`
+  --boundary-fuse add  boundary-class event logits += a_c * boundary logit (a_c learned, init 0)
+  --boundary-fuse transition
+                       add, plus b_c * log P(phase the class opens, at t + 2 s) (b_c learned, init 0)
+  --oracle-boundary    ground-truth phase changes (dilated +/- k s, no phase identity) appended to
+                       the input: upper bound of knowing *when* the phase changes
+
 Example:
     python tools/train_hybrid.py --context G4 --causal --target dilate --k 3 --cv-fold 0/5 \
         --feat-dir outputs/orsi/LONG/control/totale/untrimmed/grasp_LONG/all \
@@ -186,6 +197,8 @@ def augment_inputs(args, data, n_phases):
         extra = []
         if args.oracle_phase:
             extra.append(np.eye(n_phases, dtype=np.float32)[d["phase"]])
+        if getattr(args, "oracle_boundary", False):
+            extra.append(boundary_targets(d["phase"], "dilate", args.k)[0])
         if args.aux_mode == "stack":
             for s in args.aux_sources:
                 ds = "grasp" if s.startswith("grasp") else s
@@ -229,6 +242,77 @@ def phase_event_prior(data, train, n_phases, n_events, floor=0.05):
     return prior
 
 
+# ---- Experiment 3: phase-change (boundary) head ---------------------------------------
+BOUNDARY_LEAD = 2  # s: the phase a boundary event opens is read this long after the onset
+
+
+def boundary_targets(phase, kind, k=3, sigma=2.0):
+    """Target ``y`` and mask ``m`` ([T, 1]) of the phase-change channel, built like the event targets.
+
+    >>> y, m = boundary_targets(np.array([0, 0, 0, 1, 1, 1, 1]), "dilate", k=1)
+    >>> y[:, 0].astype(int).tolist(), int(m.min())
+    ([0, 0, 1, 1, 1, 0, 0], 1)
+    """
+    return event_targets(len(phase), [(0, float(t)) for t in segment_eval.changes(phase)], 1, kind, k, sigma)
+
+
+def boundary_fraction(phase, onsets, tol):
+    """Fraction of ``onsets`` within ``tol`` s of a change in the per-second ``phase`` sequence.
+
+    >>> boundary_fraction(np.array([0, 0, 1, 1, 1, 2]), [2.0, 4.0], 0)
+    0.5
+    """
+    ch = segment_eval.changes(phase)
+    if not len(onsets) or not len(ch):
+        return 0.0
+    return float(np.mean([np.abs(ch - t).min() <= tol for t in onsets]))
+
+
+def boundary_classes(data, train, n_events, tol=2.0, min_frac=0.5):
+    """Event classes with >= ``min_frac`` of their train-fold onsets within ``tol`` s of a phase change.
+
+    >>> d = {"a": {"phase": np.array([0, 0, 0, 1, 1, 1]), "events": [(1, 3.0), (1, 4.0), (1, 2.0), (2, 0.0)]}}
+    >>> boundary_classes(d, ["a"], 3)
+    [1]
+    """
+    near, tot = np.zeros(n_events), np.zeros(n_events)
+    for p in train:
+        by_class = {}
+        for c, t in data[p]["events"]:
+            by_class.setdefault(c, []).append(t)
+        for c, on in by_class.items():
+            near[c] += boundary_fraction(np.asarray(data[p]["phase"]), on, tol) * len(on)
+            tot[c] += len(on)
+    return [c for c in range(n_events) if tot[c] and near[c] / tot[c] >= min_frac]
+
+
+def opened_phase(data, train, classes, lead=BOUNDARY_LEAD):
+    """Phase most often in place ``lead`` s after the train-fold onsets of each class of ``classes``.
+
+    >>> d = {"a": {"phase": np.array([0, 0, 0, 1, 1, 1]), "events": [(1, 3.0), (1, 2.0), (2, 0.0)]}}
+    >>> opened_phase(d, ["a"], [1, 2])
+    {1: 1, 2: 0}
+    """
+    votes = {c: {} for c in classes}
+    for p in train:
+        ph = data[p]["phase"]
+        for c, t in data[p]["events"]:
+            if c in votes:
+                q = int(ph[min(int(round(t)) + lead, len(ph) - 1)])
+                votes[c][q] = votes[c].get(q, 0) + 1
+    return {c: max(v, key=v.get) for c, v in votes.items() if v}
+
+
+def boundary_loss(logits, y, m, gamma):
+    """Focal BCE of the phase-change channel (``[B, 1, T]`` per stage), same form as the event loss."""
+    total = 0.0
+    for b in logits:
+        prob = torch.sigmoid(b)
+        bce = F.binary_cross_entropy_with_logits(b, y, reduction="none")
+        total = total + ((torch.abs(y - prob) ** gamma) * bce * m).sum() / torch.clamp(y.sum(), min=1.0)
+    return total
+
+
 def weighted_losses(outs, y_phase, y_event, m_event, fg, gamma, smooth_w, phase_w):
     """`train_temporal.losses` with the phase terms (CE + T-MSE) scaled by ``phase_w``."""
     if phase_w == 1.0:
@@ -256,17 +340,42 @@ class HybridModel(nn.Module):
     Experiment 2: ``n_aux`` extra output channels for the auxiliary tasks (`--aux-mode joint`;
     `forward` drops them, `forward_full` returns ``(phase, event, aux)``) and ``phase_prior``
     (``[P, E]``, `--phase-cond`): event logits += log(softmax(phase) @ sigmoid(W)), W learned.
+
+    Experiment 3: ``boundary`` adds one last output channel (phase change, after the auxiliary ones,
+    returned inside ``aux``); ``fuse = (classes, opened)`` adds to the logits of the boundary event
+    ``classes`` a_c * boundary logit and, when ``opened`` (phase opened by each class) is given,
+    b_c * log P(opened phase at t + BOUNDARY_LEAD). a, b are learned, initialised at 0.
     """
 
-    def __init__(self, context, dim_in, n_phases, n_events, causal=False, n_aux=0, phase_prior=None, **kwargs):
+    def __init__(self, context, dim_in, n_phases, n_events, causal=False, n_aux=0, phase_prior=None, boundary=False,
+                 fuse=None, **kwargs):
         super().__init__()
         self.n_phases, self.n_events = n_phases, n_events
-        self.context = build_context(context, dim_in, n_phases + n_events + n_aux, causal=causal, n_phases=n_phases,
-                                     **kwargs)
+        self.context = build_context(context, dim_in, n_phases + n_events + n_aux + int(boundary), causal=causal,
+                                     n_phases=n_phases, **kwargs)
         self.phase_cond = None
         if phase_prior is not None:
             w = torch.as_tensor(phase_prior, dtype=torch.float32).clamp(1e-3, 1 - 1e-3)
             self.phase_cond = nn.Parameter(torch.log(w / (1 - w)))
+        self.fuse_gate = self.fuse_trans = None
+        if fuse is not None:
+            classes, opened = fuse
+            self.register_buffer("fuse_idx", torch.as_tensor(classes, dtype=torch.long))
+            self.fuse_gate = nn.Parameter(torch.zeros(len(classes)))
+            if opened is not None:
+                self.register_buffer("fuse_phase", torch.as_tensor(opened, dtype=torch.long))
+                self.fuse_trans = nn.Parameter(torch.zeros(len(classes)))
+
+    def fuse_boundary(self, p, e, b):
+        """Event logits ``e`` [B, E, T] + the boundary terms on the fused classes."""
+        add = self.fuse_gate[None, :, None] * b
+        if self.fuse_trans is not None:
+            logp = F.log_softmax(p, 1)[:, self.fuse_phase]
+            lead = min(BOUNDARY_LEAD, logp.shape[2] - 1)
+            if lead > 0:  # value at t + lead, last value repeated at the end
+                logp = torch.cat([logp[:, :, lead:], logp[:, :, -1:].expand(-1, -1, lead)], 2)
+            add = add + self.fuse_trans[None, :, None] * logp
+        return e.index_add(1, self.fuse_idx, add)
 
     def forward_full(self, x):
         outs = []
@@ -276,11 +385,19 @@ class HybridModel(nn.Module):
             if self.phase_cond is not None:
                 compat = torch.einsum("bpt,pe->bet", F.softmax(p, 1), torch.sigmoid(self.phase_cond))
                 e = e + torch.log(compat.clamp_min(1e-4))
+            if self.fuse_gate is not None:
+                e = self.fuse_boundary(p, e, a[:, -1:])
             outs.append((p, e, a))
         return outs
 
     def forward(self, x):
         return [(p, e) for p, e, _ in self.forward_full(x)]
+
+
+@torch.no_grad()
+def predict_boundary(model, x):
+    """Per-second phase-change probability ``[T, 1]`` (last stage, last output channel)."""
+    return torch.sigmoid(model.forward_full(x)[-1][2][:, -1:])[0].T.cpu().numpy().astype(np.float32)
 
 
 @torch.no_grad()
@@ -338,12 +455,22 @@ def parse_args(argv=None):
     parser.add_argument("--oracle-phase", action="store_true", help="ground-truth phases as input (upper bound)")
     parser.add_argument("--streams", default="dynamic", choices=["dynamic", "static", "two"])
     parser.add_argument("--static-feat-dir", help="features of `infer_untrimmed.py --static` (--streams static|two)")
+    # Experiment 3
+    parser.add_argument("--boundary-head", action="store_true", help="phase-change output channel + its loss")
+    parser.add_argument("--boundary-weight", type=float, default=1.0, help="weight of the phase-change loss")
+    parser.add_argument("--boundary-fuse", default="none", choices=["none", "add", "transition"],
+                        help="feed the phase-change channel into the boundary event classes (needs --boundary-head)")
+    parser.add_argument("--oracle-boundary", action="store_true",
+                        help="ground-truth phase changes (dilated +/- k s) as input (upper bound)")
     args = parser.parse_args(argv)
     if len(args.datasets) > 1:
         parser.error("one --datasets at a time; use --aux-mode joint for multi-dataset training")
     exp2 = args.aux_mode != "none" or args.phase_cond or args.oracle_phase or args.phase_weight != 1.0
-    if exp2 and args.datasets != ["orsi"]:
-        parser.error("Experiment 2 options apply to --datasets orsi")
+    exp3 = args.boundary_head or args.oracle_boundary
+    if (exp2 or exp3) and args.datasets != ["orsi"]:
+        parser.error("Experiment 2 and 3 options apply to --datasets orsi")
+    if args.boundary_fuse != "none" and not args.boundary_head:
+        parser.error("--boundary-fuse needs --boundary-head")
     if (args.aux_mode == "none") != (not args.aux_sources):
         parser.error("--aux-mode joint|stack and --aux-sources go together")
     if args.streams != "dynamic" and not args.static_feat_dir:
@@ -407,8 +534,18 @@ def main(argv=None):
     sd = np.concatenate([data[p]["x"] for p in split["train"]]).std(0) + 1e-6
 
     prior = phase_event_prior(data, split["train"], len(ph_names), len(names)) if args.phase_cond else None
+    fuse, b_classes = None, []
+    if args.boundary_head:
+        for d in data.values():
+            d["yb"], d["mb"] = boundary_targets(d["phase"], args.target, args.k, args.sigma)
+        b_classes = [c for c in boundary_classes(data, split["train"], len(names)) if c in fg]
+        if args.boundary_fuse != "none":
+            opened = opened_phase(data, split["train"], b_classes)
+            b_classes = [c for c in b_classes if c in opened]
+            fuse = (b_classes, [opened[c] for c in b_classes] if args.boundary_fuse == "transition" else None)
+        print(f"boundary classes (train fold): {[names[c] for c in b_classes]}", flush=True)
     model = HybridModel(args.context, len(mu), len(ph_names), len(names), args.causal, n_aux=n_aux, phase_prior=prior,
-                        dropout=args.dropout).to(device)
+                        boundary=args.boundary_head, fuse=fuse, dropout=args.dropout).to(device)
     n_params = count_parameters(model)
     print(f"{args.context}{' causal' if args.causal else ''}: {n_params / 1e6:.3f} M parameters", flush=True)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -495,7 +632,15 @@ def main(argv=None):
             start = random.randint(0, max(0, n - args.crop))
             x, yp, ye, me = tensors(p, start, start + args.crop)
             x = F.dropout1d(x, args.feat_dropout, training=True) if args.feat_dropout else x
-            loss = weighted_losses(model(x), yp, ye, me, fg, args.gamma, args.smooth_weight, args.phase_weight)
+            if args.boundary_head:
+                full = model.forward_full(x)
+                loss = weighted_losses([(a, b) for a, b, _ in full], yp, ye, me, fg, args.gamma, args.smooth_weight,
+                                       args.phase_weight)
+                yb, mb = (torch.from_numpy(data[p][k][start : start + args.crop]).T[None].to(device)
+                          for k in ("yb", "mb"))
+                loss = loss + args.boundary_weight * boundary_loss([a[:, -1:] for _, _, a in full], yb, mb, args.gamma)
+            else:
+                loss = weighted_losses(model(x), yp, ye, me, fg, args.gamma, args.smooth_weight, args.phase_weight)
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -538,16 +683,19 @@ def main(argv=None):
             target=args.target, cv_fold=args.cv_fold, context=args.context, causal=args.causal,
             streams=args.streams, dataset=args.datasets[0], event_names=names, aux_mode=args.aux_mode,
             aux_sources=args.aux_sources, phase_cond=args.phase_cond, oracle_phase=args.oracle_phase,
-            phase_weight=args.phase_weight,
+            phase_weight=args.phase_weight, boundary_head=args.boundary_head, boundary_fuse=args.boundary_fuse,
+            oracle_boundary=args.oracle_boundary, boundary_classes=[names[c] for c in b_classes],
         )
         (pred_dir / "meta.json").write_text(json.dumps(meta, indent=2))
         preds = {p: predict(model, tensors(p)[0], bg, fg) for p in split[s]}
         for p, (ev, ph) in preds.items():
+            extra = {"probs_boundary": predict_boundary(model, tensors(p)[0])} if args.boundary_head else {}
             np.savez_compressed(
                 pred_dir / f"{p}.npz",
                 second=data[p]["second"],
                 probs_steps=ev.astype(np.float32),
                 probs_phases=ph.astype(np.float32),
+                **extra,
             )
         longest = max(split[s], key=lambda p: len(data[p]["x"]))
         lat = latency(model, tensors(longest)[0], device)
@@ -556,6 +704,9 @@ def main(argv=None):
             **subset_maps(preds, data, bg, names),
             **{f"phase_{k}": v for k, v in segment_eval.segmental_metrics(
                 {p: ph.argmax(1) for p, (_, ph) in preds.items()}, {p: data[p]["phase"] for p in preds}
+            ).items()},
+            **{f"phase_boundary_{k}@{tol}s": v for tol in (2, 5, 10) for k, v in segment_eval.boundary_f1(
+                {p: ph.argmax(1) for p, (_, ph) in preds.items()}, {p: data[p]["phase"] for p in preds}, tol
             ).items()},
             "n_params": n_params,
             "train_time_s": train_time,

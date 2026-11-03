@@ -18,8 +18,16 @@ Decision rule (fixed before running, plan "Esperimento 1"), on the dilate3 confi
      (COMPLEXITY order), then the highest avg-mAP tight. That config is H*.
 Paired Wilcoxon signed-rank tests (same seed and fold) are reported against G2 and G2c.
 
+Input ablation runs (``--streams static|two``) are named ``<config>-<streams>`` and tested
+against the same config on dynamic features; they are not candidates of the rule.
+
+``--dataset grasp`` summarises the second view (``outputs/grasp/HYBRID/<config>/seed<s>/val``,
+GraSP train -> test): metrics of `hybrid_metrics.json` (same spotting definitions,
+computed by train_hybrid), mean +/- std over seeds; the rule is applied for information.
+
 Example:
     python tools/summarize_hybrid.py --root outputs/orsi/HYBRID [--wandb]
+    python tools/summarize_hybrid.py --dataset grasp
 """
 
 import argparse
@@ -39,7 +47,13 @@ COLS = [
     ("tight", "tight"), ("loose", "loose"), ("F1@5", "F1@5"), ("FA/h", "FA/h"), ("phase_acc", "ph.acc"),
     ("phase_edit", "edit"), ("phase_F1@10", "sF1@10"), ("phase_F1@25", "sF1@25"), ("phase_F1@50", "sF1@50"),
 ]
-NAME = re.compile(r"^(G\dp?)(c?)(\+cc)?_(\w+)$")
+GRASP_COLS = [
+    ("mAP@1", "mAP@1"), ("mAP@5", "mAP@5"), ("mAP@30", "mAP@30"), ("tight", "tight"), ("loose", "loose"),
+    ("F1@5", "F1@5"), ("FA/h", "FA/h"), ("onset_step_mAP@5", "step on. mAP@5"),
+    ("onset_phase_mAP@5", "phase on. mAP@5"), ("phase_acc", "ph.acc"), ("phase_edit", "edit"),
+    ("phase_F1@50", "sF1@50"),
+]
+NAME = re.compile(r"^(G\dp?)(c?)(\+cc)?_([a-z]+\d*)(-\w+)?$")  # context, causal, +cc, target, -streams
 
 
 def run_metrics(val):
@@ -68,6 +82,30 @@ def run_metrics(val):
     return m, derived
 
 
+def hybrid_only_metrics(val):
+    """Metrics from `hybrid_metrics.json` alone (datasets without eval_untrimmed)."""
+    hyb = json.loads((val / "hybrid_metrics.json").read_text())
+    m = {f"mAP@{d}": hyb[f"mAP@{d}s"] for d in (1, 2, 5, 10, 30)}
+    m.update(
+        tight=hyb["avg_mAP_tight"], loose=hyb["avg_mAP_loose"], **{"F1@5": hyb["F1@5s"]},
+        **{"FA/h": hyb["FA_per_hour@5s"]}, phase_acc=hyb["phase_accuracy"], params=hyb["n_params"],
+        train_min=hyb["train_time_s"] / 60, latency_ms_h=hyb["latency_ms_per_video_hour"],
+        **{k: hyb[k] / 100 for k in ("phase_edit", "phase_F1@10", "phase_F1@25", "phase_F1@50")},
+        **{k.removesuffix("s"): v for k, v in hyb.items() if k.startswith("onset_") and k.endswith("s")},
+    )
+    return m
+
+
+def collect_seeds(root):
+    """``{config: {(seed, "-"): metrics}}`` for train -> test runs without folds."""
+    runs = defaultdict(dict)
+    for val in sorted(root.glob("*/seed*/val")):
+        if (val / "hybrid_metrics.json").exists():
+            cfg, seed = val.parts[-3:-1]
+            runs[cfg][(seed, "-")] = hybrid_only_metrics(val)
+    return runs
+
+
 def collect(root):
     """``{config: {(seed, fold): metrics}}``"""
     runs = defaultdict(dict)
@@ -77,12 +115,13 @@ def collect(root):
         cfg, seed, fold = val.parts[-4:-1]
         m, derived = run_metrics(val)
         runs[cfg][(seed, fold)] = m
-        g, c, _, tgt = NAME.match(cfg).groups()
+        g, c, _, tgt, st = NAME.match(cfg).groups()
+        st = st or ""
         for d, dm in derived.items():
             if g == "G1":
-                runs[f"{d}{c}_{tgt}"][(seed, fold)] = dm
+                runs[f"{d}{c}_{tgt}{st}"][(seed, fold)] = dm
             elif d == "G7":
-                runs[f"{g}{c}+cc_{tgt}"][(seed, fold)] = dm
+                runs[f"{g}{c}+cc_{tgt}{st}"][(seed, fold)] = dm
     return runs
 
 
@@ -109,11 +148,11 @@ def table(runs):
     return out
 
 
-def decide(tab, runs, target="dilate3", causal_only=False):
+def decide(tab, runs, target="dilate3", causal_only=False, min_runs=5):
     """H* by the decision rule; ``causal_only`` applies it to the causal configs with G2c as reference."""
     cands = {
         c: r for c, r in tab.items()
-        if c.endswith(f"_{target}") and "+cc" not in c and r["n_runs"][0] >= 5
+        if c.endswith(f"_{target}") and "+cc" not in c and r["n_runs"][0] >= min_runs
         and (not causal_only or NAME.match(c).group(2) == "c")
     }
     ref_name = f"G2{'c' if causal_only else ''}_{target}"
@@ -148,14 +187,17 @@ def fmt(v, s, digits=3):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--root", default="outputs/orsi/HYBRID")
+    parser.add_argument("--dataset", default="orsi", choices=["orsi", "grasp"])
+    parser.add_argument("--root", help="default: outputs/<dataset>/HYBRID")
     parser.add_argument("--out", help="default: <root>/summary.{json,md}")
     parser.add_argument("--wandb", action="store_true", help="write the eval_untrimmed numbers to the W&B run summaries")
     parser.add_argument("--wandb-path", default="eidos-giorgio/OrsiTapis")
     args = parser.parse_args()
 
-    root = Path(args.root)
-    runs = collect(root)
+    grasp = args.dataset == "grasp"
+    root = Path(args.root or f"outputs/{args.dataset}/HYBRID")
+    runs = collect_seeds(root) if grasp else collect(root)
+    cols = GRASP_COLS if grasp else COLS
     tab = table(runs)
     pvals = {}
     for cfg in tab:
@@ -166,13 +208,13 @@ def main():
                     pvals[(cfg, ref, key)] = paired_p(runs[cfg], runs[ref], key)
 
     def order(c):
-        g, causal, cc, tgt = NAME.match(c).groups()
-        return tgt, causal, COMPLEXITY.index(g), bool(cc), c
+        g, causal, cc, tgt, st = NAME.match(c).groups()
+        return tgt, st or "", causal, COMPLEXITY.index(g), bool(cc), c
 
     cfgs = sorted(tab, key=order)
     lines = [
-        "| config | runs | params (M) | " + " | ".join(h for _, h in COLS) + " | p mAP@5 vs G2 | p vs G2c | train (min) | latency (ms / video h) |",
-        "|---" * (len(COLS) + 7) + "|",
+        "| config | runs | params (M) | " + " | ".join(h for _, h in cols) + " | p mAP@5 vs G2 | p vs G2c | train (min) | latency (ms / video h) |",
+        "|---" * (len(cols) + 7) + "|",
     ]
     for cfg in cfgs:
         r = tab[cfg]
@@ -181,14 +223,15 @@ def main():
         p2 = pvals.get((cfg, f"G2c_{tgt}", "mAP@5"), (None, 0))[0]
         lines.append(
             f"| {cfg} | {r['n_runs'][0]} | {r['params'][0] / 1e6:.3f} | "
-            + " | ".join(fmt(*r[k], 1 if k == "FA/h" else 3) for k, _ in COLS)
+            + " | ".join(fmt(*r[k], 1 if k == "FA/h" else 3) for k, _ in cols)
             + f" | {'—' if p1 is None else f'{p1:.3f}'} | {'—' if p2 is None else f'{p2:.3f}'}"
             + f" | {r['train_min'][0]:.1f} | {r['latency_ms_h'][0]:.1f} |"
         )
     md = "\n".join(lines)
-    winner, notes = decide(tab, runs)
+    min_runs = 3 if grasp else 5
+    winner, notes = decide(tab, runs, min_runs=min_runs)
     md += "\n\nDecision (dilate3):\n" + "\n".join(f"- {n}" for n in notes)
-    winner_c, notes_c = decide(tab, runs, causal_only=True)
+    winner_c, notes_c = decide(tab, runs, causal_only=True, min_runs=min_runs)
     md += "\n\nCausal track (dilate3, reference G2c):\n" + "\n".join(f"- {n}" for n in notes_c)
     print(md)
 
@@ -207,9 +250,10 @@ def main():
         api = wandb.Api()
         by_name = {r.name: r for r in api.runs(args.wandb_path, filters={"jobType": "hybrid"})}
         n = 0
+        prefix = "hybrid-grasp" if grasp else "hybrid"
         for cfg, rs in runs.items():
             for (seed, fold), m in rs.items():
-                run = by_name.get(f"hybrid/{cfg}/{seed}/{fold}")
+                run = by_name.get(f"{prefix}/{cfg}/{seed}" + ("" if fold == "-" else f"/{fold}"))
                 if run is not None:
                     run.summary.update({f"full_eval/{k}": v for k, v in m.items()})
                     run.update()

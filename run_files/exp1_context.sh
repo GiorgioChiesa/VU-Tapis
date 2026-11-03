@@ -7,7 +7,9 @@
 #   bash run_files/exp1_context.sh gate  "2 3"           # G2 dilate3 seed 0: must give 0.458 +/- 0.016
 #   bash run_files/exp1_context.sh grid  "2 3"           # offline G0-G5, causal G2-G6, dilate3, seeds 0 1
 #   bash run_files/exp1_context.sh asym  "2 3" "G4 G2c"  # asym3 for the given configs (c = causal)
-# Then: python tools/summarize_hybrid.py
+#   bash run_files/exp1_context.sh streams "2 3" G2      # input ablation on H*: static / two streams
+#   bash run_files/exp1_context.sh grasp "2 3"           # second view: GraSP train -> test, 3 seeds
+# Then: python tools/summarize_hybrid.py [--dataset grasp]
 set -u
 cd "$(dirname "$0")/.."
 PY=${PY:-/home/gchie/miniforge3/envs/Vu-Tapis/bin/python}
@@ -15,6 +17,8 @@ STAGE=${1:?gate|grid|asym}
 GPUS=(${2:-2 3})
 SLOTS=${SLOTS:-4}   # concurrent jobs per GPU (each needs ~1 GB of GPU memory)
 FEATS=outputs/orsi/LONG/control/totale/untrimmed/grasp_LONG/all
+STATIC=outputs/orsi/LONG/control/totale/untrimmed/grasp_LONG_static/all
+GFEATS=outputs/external/grasp/grasp_LONG
 FRAMES=/home/gchie/workspace/data/orsi_tensors
 OUT=outputs/orsi/HYBRID
 LOGS=outputs/untrimmed_logs/exp1
@@ -43,14 +47,30 @@ case $STAGE in
       ctx=${cfg%c}; causal=0; [ "$cfg" != "$ctx" ] && causal=1
       for seed in 0 1; do add $ctx $causal asym3 $seed; done
     done ;;
+  streams)
+    for s in static two; do
+      for seed in 0 1; do
+        for f in 0 1 2 3 4; do
+          jobs+=("${3:?config}_dilate3-$s/seed${seed}/fold${f}|--context ${3%c} $([ "${3%c}" != "$3" ] && echo --causal) ${TARGET[dilate3]} --seed $seed --cv-fold $f/5 --streams $s --static-feat-dir $STATIC")
+        done
+      done
+    done ;;
+  grasp)
+    OUT=outputs/grasp/HYBRID
+    for seed in 0 1 2; do
+      for g in G0 G1 G2 G3 G4 G5; do jobs+=("${g}_dilate3/seed$seed|--datasets grasp --context $g ${TARGET[dilate3]} --seed $seed"); done
+      for g in G2 G3 G4 G5 G6; do jobs+=("${g}c_dilate3/seed$seed|--datasets grasp --context $g --causal ${TARGET[dilate3]} --seed $seed"); done
+    done
+    FEATS=$GFEATS ;;
   *) echo "unknown stage $STAGE"; exit 1 ;;
 esac
 
 run_job() {  # run_job <gpu> <name> <args>
-  local gpu=$1 name=$2 extra=$3 dir=$OUT/$2 log=$LOGS/${2//\//_}.log
+  local gpu=$1 name=$2 extra=$3 dir=$OUT/$2 log=$LOGS/$([ "$STAGE" = grasp ] && echo grasp_)${2//\//_}.log
   [ -f "$dir/.done" ] && return
   $PY -W ignore tools/train_hybrid.py --feat-dir $FEATS --frame-dir $FRAMES $extra --eval-every 25 \
     --out "$dir" --gpu "$gpu" --wandb > "$log" 2>&1 || { echo "FAILED train $name" >> "$log"; return; }
+  if [ "$STAGE" = grasp ]; then touch "$dir/.done"; return; fi  # Orsi-only evaluators; metrics in hybrid_metrics.json
   $PY -W ignore tools/eval_untrimmed.py --pred-dir "$dir/val" --frame-dir $FRAMES >> "$log" 2>&1 \
     || { echo "FAILED eval $name" >> "$log"; return; }
   if [[ $name == G1_* ]]; then  # G7 = G1 + structured decoding
@@ -74,4 +94,4 @@ for q in $(seq 0 $((nq - 1))); do
   ) &
 done
 wait
-echo "stage $STAGE finished: $(ls $OUT/*/seed*/fold*/.done 2>/dev/null | wc -l) runs done in total"
+echo "stage $STAGE finished: $(ls $OUT/*/seed*/{,fold*/}.done 2>/dev/null | wc -l) runs done in total"

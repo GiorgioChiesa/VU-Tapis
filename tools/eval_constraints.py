@@ -27,6 +27,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -54,6 +55,71 @@ def events_by_video(table, patients, g2l, g2l_ph):
     return out
 
 
+def prepare(pred_dir, frame_dir, patients=None):
+    """
+    Everything the decoders need for the saved predictions in ``pred_dir``: priors
+    estimated on the run's training patients, ground truth and per-second
+    probabilities of the evaluated ``patients`` (default: all of ``meta.json``).
+    """
+    pred_dir = Path(pred_dir).resolve()
+    meta = json.loads((pred_dir / "meta.json").read_text())
+    run = Path(meta["run"])
+    cfg = load_cfg(run, meta["ckpt"])
+    patients = patients or meta["patients"]
+    task = "steps" if "steps" in meta["tasks"] else "actions"
+
+    # ---- priors from the training patients -------------------------------------
+    train = meta.get("train_patients") or [
+        Path(f).name.removesuffix(".csv") for f in cfg.ENDOVIS_DATASET.TRAIN_LISTS
+    ]
+    work = pred_dir / "constraints"
+    work.mkdir(exist_ok=True)
+    tr_table, tr_ids = build_label_table(cfg, train, frame_dir, work)
+    g2l, names = global_to_local(run, task, tr_ids[task])
+    g2l_ph, ph_names = global_to_local(run, "phases", tr_ids["phases"])
+    bg = idle_index(names)
+    tr_events = events_by_video(tr_table, train, g2l, g2l_ph)
+    lengths = {p: len(read_phase_labels(frame_dir, p, g2l_ph)) for p in train}
+    priors = sd.estimate_priors(tr_events, lengths, len(names), len(ph_names), background_classes=bg)
+
+    # ---- evaluation patients ----------------------------------------------------
+    table, _ = build_label_table(cfg, patients, frame_dir, work)
+    ev = events_by_video(table, patients, g2l, g2l_ph)
+    preds = {p: dict(np.load(pred_dir / f"{p}.npz")) for p in patients}
+    return SimpleNamespace(
+        pred_dir=pred_dir,
+        meta=meta,
+        patients=patients,
+        task=task,
+        has_phases="phases" in meta["tasks"],
+        names=names,
+        ph_names=ph_names,
+        bg=bg,
+        priors=priors,
+        gts={p: [(c, t) for c, t, _ in ev[p]] for p in patients},
+        preds=preds,
+        durations={p: float(len(preds[p]["second"])) for p in patients},
+        gt_phases={p: read_phase_labels(frame_dir, p, g2l_ph) for p in patients},
+    )
+
+
+def detections(prep, p, variant, alpha, smooth_s, floor, nms_window=5.0):
+    """Decoded ``[(class, second, score)]`` of video ``p`` with one of ``VARIANTS``."""
+    probs = prep.preds[p][f"probs_{prep.task}"]
+    sec = prep.preds[p]["second"]
+    m = floor + (1.0 - floor) * prep.priors["phase_given_event"]
+    if "oracle" in variant:
+        probs = sd.phase_gate(probs, np.eye(len(prep.ph_names))[prep.gt_phases[p]], m)
+    elif variant.startswith("phase"):
+        probs = sd.phase_gate(probs, sd.smooth(prep.preds[p]["probs_phases"], smooth_s), m)
+    dets = se.decode_events(probs, nms_window, 0.0, background_classes=prep.bg)
+    if "caps" in variant:
+        dets = sd.apply_caps(dets, prep.priors["caps"], alpha)
+    if "chain" in variant:
+        dets = sd.chain_decode(dets, prep.priors["chain"], alpha)
+    return [(c, float(sec[t]), s) for c, t, s in dets if s > 0]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--pred-dir", required=True)
@@ -67,50 +133,9 @@ def main():
     )
     args = parser.parse_args()
 
-    pred_dir = Path(args.pred_dir).resolve()
-    meta = json.loads((pred_dir / "meta.json").read_text())
-    run = Path(meta["run"])
-    cfg = load_cfg(run, meta["ckpt"])
-    patients = args.patients or meta["patients"]
-    task = "steps" if "steps" in meta["tasks"] else "actions"
-    has_phases = "phases" in meta["tasks"]
-
-    # ---- priors from the training patients -------------------------------------
-    train = meta.get("train_patients") or [
-        Path(f).name.removesuffix(".csv") for f in cfg.ENDOVIS_DATASET.TRAIN_LISTS
-    ]
-    work = pred_dir / "constraints"
-    work.mkdir(exist_ok=True)
-    tr_table, tr_ids = build_label_table(cfg, train, args.frame_dir, work)
-    g2l, names = global_to_local(run, task, tr_ids[task])
-    g2l_ph, ph_names = global_to_local(run, "phases", tr_ids["phases"])
-    bg = idle_index(names)
-    tr_events = events_by_video(tr_table, train, g2l, g2l_ph)
-    lengths = {p: len(read_phase_labels(args.frame_dir, p, g2l_ph)) for p in train}
-    priors = sd.estimate_priors(tr_events, lengths, len(names), len(ph_names), background_classes=bg)
-
-    # ---- evaluation patients ----------------------------------------------------
-    table, _ = build_label_table(cfg, patients, args.frame_dir, work)
-    ev = events_by_video(table, patients, g2l, g2l_ph)
-    gts = {p: [(c, t) for c, t, _ in ev[p]] for p in patients}
-    preds = {p: dict(np.load(pred_dir / f"{p}.npz")) for p in patients}
-    durations = {p: float(len(preds[p]["second"])) for p in patients}
-    gt_phases = {p: read_phase_labels(args.frame_dir, p, g2l_ph) for p in patients}
-
-    def detections(p, variant, alpha, smooth_s, floor):
-        probs = preds[p][f"probs_{task}"]
-        sec = preds[p]["second"]
-        m = floor + (1.0 - floor) * priors["phase_given_event"]
-        if "oracle" in variant:
-            probs = sd.phase_gate(probs, np.eye(len(ph_names))[gt_phases[p]], m)
-        elif variant.startswith("phase"):
-            probs = sd.phase_gate(probs, sd.smooth(preds[p]["probs_phases"], smooth_s), m)
-        dets = se.decode_events(probs, args.nms_window, 0.0, background_classes=bg)
-        if "caps" in variant:
-            dets = sd.apply_caps(dets, priors["caps"], alpha)
-        if "chain" in variant:
-            dets = sd.chain_decode(dets, priors["chain"], alpha)
-        return [(c, float(sec[t]), s) for c, t, s in dets if s > 0]
+    prep = prepare(args.pred_dir, args.frame_dir, args.patients)
+    pred_dir, meta, patients, names, bg = prep.pred_dir, prep.meta, prep.patients, prep.names, prep.bg
+    gts, durations, has_phases = prep.gts, prep.durations, prep.has_phases
 
     thresholds = np.round(np.arange(0.01, 1.0, 0.01), 2)
     results = {}
@@ -128,7 +153,9 @@ def main():
                     ):
                         continue
                     key = f"{variant}|a={alpha:g}|s={smooth_s}|f={floor:g}"
-                    dets = {p: detections(p, variant, alpha, smooth_s, floor) for p in patients}
+                    dets = {
+                        p: detections(prep, p, variant, alpha, smooth_s, floor, args.nms_window) for p in patients
+                    }
                     res = se.spotting_map(dets, gts, DELTAS, num_classes=len(names), ignore_classes=bg)
                     op = se.best_f1_threshold(dets, gts, 5, durations, thresholds, ignore_classes=bg)
                     results[key] = {
@@ -143,8 +170,8 @@ def main():
         "meta": meta,
         "patients": patients,
         "args": vars(args),
-        "caps": {names[c]: k for c, k in priors["caps"].items()},
-        "chain": [names[c] for c in priors["chain"]],
+        "caps": {names[c]: k for c, k in prep.priors["caps"].items()},
+        "chain": [names[c] for c in prep.priors["chain"]],
         "results": results,
     }
     tag = "" if patients == meta["patients"] else "_" + "-".join(p.removeprefix("RARP") for p in patients)

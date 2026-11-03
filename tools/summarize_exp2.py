@@ -3,10 +3,10 @@
 Experiment 2 table: does information on phases and atomic actions help Orsi event spotting?
 
 Runs are ``outputs/orsi/EXP2/<arm>/seed<s>/fold<i>/val`` (run_files/exp2_multisource.sh) plus the
-reference arm 2.1 = H* of Experiment 1 (``outputs/orsi/HYBRID/G2_dilate3``). For every arm:
-mean +/- std over the (seed, fold) runs of the spotting metrics with NMS only and with the
-caps + order chain decoding (``cc``), paired Wilcoxon against the reference (2.1 for the arms on
-GraSP features, F_base for the arms on fine-tuned features), and AP@5 per family of events.
+reference arms 2.1 = H* of Experiment 1 (``outputs/orsi/HYBRID/G2_dilate3``) and T_base = its two-stream
+version (``outputs/orsi/HYBRID/G2_dilate3-two``). For every arm: mean +/- std over the (seed, fold) runs of
+the spotting metrics with NMS only and with the caps + order chain decoding (``cc``), paired Wilcoxon
+against the reference (see ``reference``), and AP@5 per family of events.
 
 Families group the 32 Orsi event classes by what happens at the onset (see FAMILIES).
 
@@ -42,6 +42,7 @@ LABELS = {
     "J_grasp_phase": "J fasi/step GraSP", "J_grasp_action": "J action/strumenti GraSP", "J_sar": "J gesti SAR",
     "J_esad": "J azioni ESAD", "J_all": "J tutte le fonti",
     "F_base": "F encoder fine-tunato (base)", "F_S_all": "F fine-tunato + S tutte le fonti",
+    "T_base": "T due flussi (base, Esp1)", "T_S_all": "T due flussi + S tutte le fonti",
 }
 METRICS = ["mAP@1", "mAP@5", "mAP@30", "tight", "loose", "F1@5", "FA/h", "phase_acc", "cc_mAP@5", "cc_F1@5"]
 
@@ -60,6 +61,17 @@ def family_of(name):
     return "altro"
 
 
+def reference(arm):
+    """
+    >>> reference("S_all"), reference("F_S_all"), reference("T_S_all"), reference("T_base")
+    ('2.1_H*', 'F_base', 'T_base', '2.1_H*')
+    """
+    for prefix in ("F_", "T_"):
+        if arm.startswith(prefix) and arm != prefix + "base":
+            return prefix + "base"
+    return "2.1_H*"
+
+
 def run_metrics(val):
     rep = json.loads((val / "report_nms5.json").read_text())
     nms = rep["spotting_nms"]
@@ -76,7 +88,7 @@ def run_metrics(val):
 
 
 def collect():
-    arms = {"2.1_H*": ROOT / "HYBRID/G2_dilate3"}
+    arms = {"2.1_H*": ROOT / "HYBRID/G2_dilate3", "T_base": ROOT / "HYBRID/G2_dilate3-two"}
     arms.update({p.name: p for p in sorted((ROOT / "EXP2").glob("*")) if p.is_dir()})
     out = {}
     for arm, root in arms.items():
@@ -108,7 +120,7 @@ def summarize(data):
                      for f in list(FAMILIES) + ["altro"] if any(family_of(c) == f for c in cls)}
         fams[arm]["_per_class"] = cls
     for arm, runs in data.items():
-        ref = "F_base" if arm.startswith("F_") and arm != "F_base" else "2.1_H*"
+        ref = reference(arm)
         if arm == ref or ref not in data:
             continue
         common = sorted(set(runs) & set(data[ref]))
@@ -127,7 +139,7 @@ def markdown(table, wil, fams):
     lines = ["| Braccio | n | mAP@1 | mAP@5 | Δ vs rif. (p) | F1@5 | FA/h | Acc fasi | cc mAP@5 | Δcc (p) |",
              "|---|---|---|---|---|---|---|---|---|---|"]
     for arm, t in table.items():
-        ref = "F_base" if arm.startswith("F_") and arm != "F_base" else "2.1_H*"
+        ref = reference(arm)
         d5 = wil.get(f"{arm}|{ref}|mAP@5")
         dc = wil.get(f"{arm}|{ref}|cc_mAP@5")
         f = lambda k: f"{t[k][0]:.3f}" if k in t else "–"

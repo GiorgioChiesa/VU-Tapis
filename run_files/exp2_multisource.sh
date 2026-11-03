@@ -2,13 +2,13 @@
 # Experiment 2: do phases and atomic actions (GraSP, SAR-RARP50, ESAD) help Orsi event spotting?
 # H* of Experiment 1 (G2 MS-TCN, dilate3), 5-fold video-level CV x 2 seeds, then
 # eval_untrimmed.py + eval_constraints.py (G2 + caps + order chain = the recommended pipeline).
-# Arm 2.1 (H* itself) is not re-run: it is outputs/orsi/HYBRID/G2_dilate3.
+# Arms 2.1 (H* itself) and T_base (two streams) are not re-run: they are outputs/orsi/HYBRID/G2_dilate3{,-two}.
 # Resumable: finished jobs leave a .done marker.
 #
 # Usage (in tmux):
 #   bash run_files/exp2_multisource.sh aux  "2 3"   # auxiliary predictors: quality on their test sets + Orsi posteriors
 #   bash run_files/exp2_multisource.sh grid "2 3"   # arms 2.0, 2.2, 2.3, stack x5, joint x5, fine-tuned x2
-# Then: python tools/summarize_exp2.py ; python tools/analyze_aux_events.py
+# Then: python tools/summarize_exp2.py ; python tools/analyze_aux_events.py ; python tools/analyze_oracle_phase.py
 set -u
 cd "$(dirname "$0")/.."
 PY=${PY:-/home/gchie/miniforge3/envs/Vu-Tapis/bin/python}
@@ -16,6 +16,7 @@ STAGE=${1:?aux|grid}
 GPUS=(${2:-2 3})
 SLOTS=${SLOTS:-4}   # concurrent jobs per GPU (~1 GB each)
 FEATS=outputs/orsi/LONG/control/totale/untrimmed/grasp_LONG/all
+STATIC=outputs/orsi/LONG/control/totale/untrimmed/grasp_LONG_static/all
 FRAMES=/home/gchie/workspace/data/orsi_tensors
 OUT=outputs/orsi/EXP2
 LOGS=outputs/untrimmed_logs/exp2
@@ -50,9 +51,12 @@ declare -A ARMS=(
   [J_all]="--aux-mode joint --aux-sources $ALL"
   [F_base]=""                                            # fine-tuned per-fold features
   [F_S_all]="--aux-mode stack --aux-sources $ALL"        # fine-tuned features + all stacked posteriors
+  [T_S_all]="--streams two --static-feat-dir $STATIC --aux-mode stack --aux-sources $ALL"  # two streams (best input of Exp. 1) + all
 )
+ONLY=${ONLY:-}   # run only the arms whose name starts with this prefix (e.g. ONLY=T_ while the grid runs)
 jobs=()
 for arm in "${!ARMS[@]}"; do
+  [[ -n $ONLY && $arm != $ONLY* ]] && continue
   for seed in 0 1; do
     for f in 0 1 2 3 4; do jobs+=("$arm/seed$seed/fold$f|${ARMS[$arm]} --seed $seed --cv-fold $f/5|$f"); done
   done

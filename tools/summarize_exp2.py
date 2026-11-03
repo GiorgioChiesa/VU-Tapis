@@ -43,6 +43,7 @@ LABELS = {
     "J_esad": "J azioni ESAD", "J_all": "J tutte le fonti",
     "F_base": "F encoder fine-tunato (base)", "F_S_all": "F fine-tunato + S tutte le fonti",
     "T_base": "T due flussi (base, Esp1)", "T_S_all": "T due flussi + S tutte le fonti",
+    "FT_gstatic": "FT clip fine-tunata + frame GraSP", "FT_base": "FT clip + frame fine-tunati",
 }
 METRICS = ["mAP@1", "mAP@5", "mAP@30", "tight", "loose", "F1@5", "FA/h", "phase_acc", "cc_mAP@5", "cc_F1@5"]
 
@@ -61,15 +62,26 @@ def family_of(name):
     return "altro"
 
 
-def reference(arm):
+def references(arm):
+    """Arms ``arm`` is tested against; the first one is the reference of the table.
+
+    >>> references("S_all"), references("F_S_all"), references("T_S_all"), references("T_base")
+    (['2.1_H*'], ['F_base'], ['T_base'], ['2.1_H*'])
+    >>> references("FT_base"), references("2.1_H*")
+    (['F_base', 'T_base', 'FT_gstatic'], [])
     """
-    >>> reference("S_all"), reference("F_S_all"), reference("T_S_all"), reference("T_base")
-    ('2.1_H*', 'F_base', 'T_base', '2.1_H*')
-    """
+    if arm == "2.1_H*":
+        return []
+    if arm.startswith("FT_"):  # fine-tuned clip + a center-frame stream: vs each input alone
+        return [r for r in ("F_base", "T_base", "FT_gstatic") if r != arm]
     for prefix in ("F_", "T_"):
         if arm.startswith(prefix) and arm != prefix + "base":
-            return prefix + "base"
-    return "2.1_H*"
+            return [prefix + "base"]
+    return ["2.1_H*"]
+
+
+def reference(arm):
+    return (references(arm) or [arm])[0]
 
 
 def run_metrics(val):
@@ -119,9 +131,9 @@ def summarize(data):
         fams[arm] = {f: float(np.mean([v for c, v in cls.items() if family_of(c) == f]))
                      for f in list(FAMILIES) + ["altro"] if any(family_of(c) == f for c in cls)}
         fams[arm]["_per_class"] = cls
-    for arm, runs in data.items():
-        ref = reference(arm)
-        if arm == ref or ref not in data:
+    for arm, ref in ((a, r) for a in data for r in references(a)):
+        runs = data[arm]
+        if ref not in data:
             continue
         common = sorted(set(runs) & set(data[ref]))
         for k in ("mAP@5", "cc_mAP@5", "F1@5", "phase_acc"):

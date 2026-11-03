@@ -8,11 +8,12 @@
 # Usage (in tmux):
 #   bash run_files/exp2_multisource.sh aux  "2 3"   # auxiliary predictors: quality on their test sets + Orsi posteriors
 #   bash run_files/exp2_multisource.sh grid "2 3"   # arms 2.0, 2.2, 2.3, stack x5, joint x5, fine-tuned x2
+#   bash run_files/exp2_multisource.sh static "2 3" # center-frame features of the per-fold fine-tuned encoders (FT_base)
 # Then: python tools/summarize_exp2.py ; python tools/analyze_aux_events.py ; python tools/analyze_oracle_phase.py
 set -u
 cd "$(dirname "$0")/.."
 PY=${PY:-/home/gchie/miniforge3/envs/Vu-Tapis/bin/python}
-STAGE=${1:?aux|grid}
+STAGE=${1:?aux|grid|static}
 GPUS=(${2:-2 3})
 SLOTS=${SLOTS:-4}   # concurrent jobs per GPU (~1 GB each)
 FEATS=outputs/orsi/LONG/control/totale/untrimmed/grasp_LONG/all
@@ -34,6 +35,27 @@ if [ "$STAGE" = aux ]; then
   exit 0
 fi
 
+if [ "$STAGE" = static ]; then  # 5 folds x 2 shards, 1 worker per GPU (~11 GB each; 2 do not fit next to the grid)
+  sjobs=(); for f in 0 1 2 3 4; do for s in 0 1; do sjobs+=("$f $s"); done; done
+  nq=${#GPUS[@]}
+  for q in $(seq 0 $((nq - 1))); do
+    (
+      gpu=${GPUS[$((q % ${#GPUS[@]}))]}
+      for i in $(seq $q $nq $(( ${#sjobs[@]} - 1 ))); do
+        read -r f s <<< "${sjobs[$i]}"
+        run=outputs/orsi/LONG/cv_ft/fold$f
+        echo "$(date +%T) gpu$gpu start fold$f shard$s/2"
+        $PY -W ignore tools/infer_untrimmed.py --run $run --ckpt checkpoint_best_steps.pyth --split all --features \
+          --static --frame-dir $FRAMES --out $run/untrimmed/checkpoint_best_steps_static/all --shard $s/2 --gpu $gpu \
+          > $LOGS/ft_static_fold${f}_shard$s.log 2>&1 || echo "FAILED fold$f shard$s"
+        echo "$(date +%T) gpu$gpu end   fold$f shard$s/2"
+      done
+    ) &
+  done
+  wait
+  exit 0
+fi
+
 ALL="grasp_phase grasp_action sar esad"
 declare -A ARMS=(
   [2.0_events_only]="--phase-weight 0"
@@ -52,6 +74,8 @@ declare -A ARMS=(
   [F_base]=""                                            # fine-tuned per-fold features
   [F_S_all]="--aux-mode stack --aux-sources $ALL"        # fine-tuned features + all stacked posteriors
   [T_S_all]="--streams two --static-feat-dir $STATIC --aux-mode stack --aux-sources $ALL"  # two streams (best input of Exp. 1) + all
+  [FT_gstatic]="--streams two --static-feat-dir $STATIC"   # fine-tuned clip features + GraSP-LONG center frame
+  [FT_base]="--streams two --static-feat-dir outputs/orsi/LONG/cv_ft/fold{F}/untrimmed/checkpoint_best_steps_static/all"  # both fine-tuned (needs stage static)
 )
 ONLY=${ONLY:-}   # run only the arms whose name starts with this prefix (e.g. ONLY=T_ while the grid runs)
 jobs=()
@@ -67,7 +91,8 @@ IFS=$'\n' jobs=($(printf '%s\n' "${jobs[@]}" | sort -t'|' -k1,1 -r)); unset IFS
 run_job() {  # run_job <gpu> <name> <args> <fold>
   local gpu=$1 name=$2 extra=$3 fold=$4 dir=$OUT/$2 log=$LOGS/${2//\//_}.log feats=$FEATS
   [ -f "$dir/.done" ] && return
-  [[ $name == F_* ]] && feats=outputs/orsi/LONG/cv_ft/fold$fold/untrimmed/checkpoint_best_steps/all
+  extra=${extra//\{F\}/$fold}   # per-fold paths
+  [[ $name == F* ]] && feats=outputs/orsi/LONG/cv_ft/fold$fold/untrimmed/checkpoint_best_steps/all
   $PY -W ignore tools/train_hybrid.py --context G2 --target dilate --k 3 --feat-dir $feats --frame-dir $FRAMES \
     $extra --eval-every 25 --out "$dir" --gpu "$gpu" --wandb > "$log" 2>&1 || { echo "FAILED train $name" >> "$log"; return; }
   $PY -W ignore tools/eval_untrimmed.py --pred-dir "$dir/val" --frame-dir $FRAMES >> "$log" 2>&1 \

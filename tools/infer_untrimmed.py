@@ -12,10 +12,20 @@ task (`probs_steps`, `probs_phases`, ...) plus `second` and `frame_id`. These
 files are derived from patient data: keep them on this machine (outputs/ is
 gitignored).
 
+With ``--dataset grasp|sar|esad`` the videos come from ``<frame-dir>/meta.json`` and
+``<frame-dir>/<video>/labels.npz`` written by ``tools/prepare_external.py``; the 1 fps
+jpgs are preprocessed like TAPIS validation (cv2 short side -> 224, center crop 224,
+/255, RGB, then ``--normalize``) and clips are built over consecutive rows. With
+``--static`` every clip is its center frame repeated NUM_FRAMES times.
+
 Example:
     python tools/infer_untrimmed.py --run outputs/orsi/LONG/control/totale \
         --ckpt checkpoint_best_steps.pyth --split val \
         --frame-dir /home/gchie/workspace/data/orsi_tensors
+    python tools/infer_untrimmed.py --run outputs/orsi/LONG/control/totale --dataset grasp \
+        --frame-dir /home/gchie/workspace/data/external_1fps/grasp --split all \
+        --encoder-ckpt data/pretrained_models/train/LONG.pyth --normalize --features \
+        --out outputs/external/grasp/grasp_LONG
 """
 
 import argparse
@@ -103,13 +113,48 @@ def load_frames(frame_dir, patient, frame_paths, workers=16):
     return torch.stack(frames)
 
 
-@torch.no_grad()
-def infer_video(cfg, model, frames, batch_size, gpu, amp, features=False):
-    """
-    Per-second task probabilities; with ``features=True`` also the clip embedding
-    the heads read (CLS token(s), flattened) concatenated with the mean patch token.
-    """
-    n = frames.shape[0]
+EXTERNAL_DIRS = {"grasp": "grasp", "sar": "sar_rarp50", "esad": "esad"}
+
+
+def external_meta(frame_dir, dataset):
+    """meta.json of a prepare_external.py dataset; ``frame_dir`` may be the dataset dir or its parent."""
+    frame_dir = Path(frame_dir)
+    if not (frame_dir / "meta.json").exists():
+        frame_dir = frame_dir / EXTERNAL_DIRS[dataset]
+    return frame_dir, json.loads((frame_dir / "meta.json").read_text())
+
+
+def external_videos(meta, split):
+    splits = meta["splits"]
+    if split == "all":
+        return [v for s in ("train", "val", "test") for v in splits.get(s, [])]
+    return list(splits.get(split, []))
+
+
+def load_jpg(path, size=224):
+    """uint8 CHW RGB, as TAPIS validation: cv2 short side -> size (INTER_LINEAR), center crop."""
+    import cv2
+
+    from tapis.datasets import cv2_transform
+
+    img = cv2.imread(str(path))
+    assert img is not None, path
+    # scale() resizes the uint8 image and returns it as float32 with integer values: back to uint8 is exact.
+    img = cv2_transform.scale(size, img).astype(np.uint8)
+    h, w = img.shape[:2]
+    y, x = int(np.ceil((h - size) / 2)), int(np.ceil((w - size) / 2))
+    img = img[y : y + size, x : x + size, ::-1]  # BGR -> RGB
+    return torch.from_numpy(np.ascontiguousarray(img.transpose(2, 0, 1)))
+
+
+def load_jpgs(paths, workers=16):
+    """All 1 fps jpgs of a video as one uint8 [N, 3, 224, 224] tensor (normalized per batch on GPU)."""
+    with ThreadPoolExecutor(workers) as ex:
+        return torch.stack(list(ex.map(load_jpg, paths)))
+
+
+def clip_indices(n, cfg, static=False):
+    """[n, NUM_FRAMES] frame indices of the clip of every second (``static``: center frame only)."""
     seq_len = cfg.DATA.NUM_FRAMES * cfg.DATA.SAMPLING_RATE
     seqs = torch.tensor(
         [
@@ -117,6 +162,20 @@ def infer_video(cfg, model, frames, batch_size, gpu, amp, features=False):
             for i in range(n)
         ]
     )
+    if static:
+        seqs = torch.arange(n).unsqueeze(1).expand_as(seqs).contiguous()
+    return seqs
+
+
+@torch.no_grad()
+def infer_video(cfg, model, frames, batch_size, gpu, amp, features=False, static=False, preprocess=None):
+    """
+    Per-second task probabilities; with ``features=True`` also the clip embedding
+    the heads read (CLS token(s), flattened) concatenated with the mean patch token.
+    ``preprocess`` maps each B,C,T,H,W clip batch on the GPU (e.g. uint8 -> normalized float).
+    """
+    n = frames.shape[0]
+    seqs = clip_indices(n, cfg, static)
     frames = frames.cuda(gpu, non_blocking=True)
     if hasattr(model, "reset_memory_bank"):
         model.reset_memory_bank()
@@ -126,6 +185,8 @@ def infer_video(cfg, model, frames, batch_size, gpu, amp, features=False):
     for start in range(0, n, batch_size):
         idx = seqs[start : start + batch_size].cuda(gpu)
         clips = frames[idx].permute(0, 2, 1, 3, 4).contiguous()  # B,T,C,H,W -> B,C,T,H,W
+        if preprocess is not None:
+            clips = preprocess(clips)
         with torch.autocast("cuda", dtype=torch.float16, enabled=amp):
             preds = model([clips])
         if isinstance(preds, tuple):
@@ -156,11 +217,22 @@ def main():
     parser.add_argument("--shard", default="0/1", help="i/n: process every n-th patient starting at i")
     parser.add_argument("--encoder-ckpt", help="take the weights from this file (cfg still from --run/--ckpt)")
     parser.add_argument("--normalize", action="store_true", help="(x - DATA.MEAN) / DATA.STD, as in GraSP training")
+    parser.add_argument(
+        "--dataset",
+        default="orsi",
+        choices=["orsi", *EXTERNAL_DIRS],
+        help="external datasets read <frame-dir>/meta.json and <video>/labels.npz from tools/prepare_external.py",
+    )
+    parser.add_argument("--static", action="store_true", help="clip = center frame repeated NUM_FRAMES times")
     args = parser.parse_args()
 
     run = Path(args.run).resolve()
     cfg, model = load_cfg_and_model(run / args.ckpt, args.gpu, args.encoder_ckpt)
-    patients = args.patients or patients_for_split(cfg, args.split)
+    if args.dataset == "orsi":
+        patients = args.patients or patients_for_split(cfg, args.split)
+    else:
+        ext_dir, ext_meta = external_meta(args.frame_dir, args.dataset)
+        patients = args.patients or external_videos(ext_meta, args.split)
     shard, n_shards = map(int, args.shard.split("/"))
     out_dir = Path(args.out) if args.out else run / "untrimmed" / Path(args.ckpt).stem / args.split
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -179,6 +251,10 @@ def main():
     meta["features"] = args.features
     meta["encoder_ckpt"] = args.encoder_ckpt
     meta["normalize"] = args.normalize
+    if args.dataset != "orsi" or args.static:  # Orsi defaults keep the historical meta.json
+        meta["dataset"] = args.dataset
+        meta["static"] = args.static
+        meta["frame_dir"] = str(ext_dir) if args.dataset != "orsi" else args.frame_dir
     if shard == 0:
         (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
     print(json.dumps(meta, indent=2), flush=True)
@@ -189,14 +265,29 @@ def main():
             print(f"{patient}: exists, skipping", flush=True)
             continue
         t0 = time.time()
-        labels = pd.read_csv(os.path.join(args.frame_dir, patient, "Label", f"{patient}_all_labels.csv"))
-        frames = load_frames(args.frame_dir, patient, labels["frame_path"].tolist())
-        if args.normalize:
-            mean = torch.tensor(cfg.DATA.MEAN).view(1, 3, 1, 1)
-            std = torch.tensor(cfg.DATA.STD).view(1, 3, 1, 1)
-            frames = (frames - mean) / std
+        preprocess = None
+        if args.dataset == "orsi":
+            labels = pd.read_csv(os.path.join(args.frame_dir, patient, "Label", f"{patient}_all_labels.csv"))
+            frames = load_frames(args.frame_dir, patient, labels["frame_path"].tolist())
+            if args.normalize:
+                mean = torch.tensor(cfg.DATA.MEAN).view(1, 3, 1, 1)
+                std = torch.tensor(cfg.DATA.STD).view(1, 3, 1, 1)
+                frames = (frames - mean) / std
+        else:
+            lab = np.load(ext_dir / patient / "labels.npz")
+            labels = pd.DataFrame({"second": lab["second"], "frame_id": lab["frame_id"]})
+            frames = load_jpgs(lab["frame_path"].tolist())
+            mean = torch.tensor(cfg.DATA.MEAN).view(1, 3, 1, 1, 1).cuda(args.gpu)
+            std = torch.tensor(cfg.DATA.STD).view(1, 3, 1, 1, 1).cuda(args.gpu)
+
+            def preprocess(clips):
+                clips = clips.float() / 255.0
+                return (clips - mean) / std if args.normalize else clips
+
         t1 = time.time()
-        probs = infer_video(cfg, model, frames, args.batch_size, args.gpu, args.amp, args.features)
+        probs = infer_video(
+            cfg, model, frames, args.batch_size, args.gpu, args.amp, args.features, args.static, preprocess
+        )
         del frames
         torch.cuda.empty_cache()
         feats = probs.pop("features", None)

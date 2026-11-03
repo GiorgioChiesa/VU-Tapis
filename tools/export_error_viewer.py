@@ -172,7 +172,7 @@ def write_html(out, pairs, kinds_of, n_items, title):
 <style>body{{font-family:sans-serif;margin:16px;max-width:1200px}} td,th{{padding:2px 8px}}
 tr.corretto td{{background:#e6f4ea}} tr.scambio td{{background:#fde7e7}} tr.falso_allarme td{{background:#fff4e0}}
 tr.mancato td{{background:#eee}} tr.duplicato td{{background:#f3e8fd}} img{{max-width:100%}}</style></head><body>
-<h1>{title}</h1><p><a href="README.md">README.md</a> · {n_items} inferenze ·
+<h1>{title}</h1><p><a href="README.md">README.md</a> · <a href="../EVENTI.md">descrizione degli eventi</a> · {n_items} inferenze ·
 <a href="confusion_matrix.png">confusion matrix eventi</a> · <a href="confusion_matrix_phases.png">fasi</a></p>
 <img src="confusion_matrix.png"><h2>Cartelle reale--predetto</h2>
 <table><tr><th>cartella</th><th>tipo</th><th>n</th></tr>{rows}</table></body></html>""")

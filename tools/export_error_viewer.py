@@ -37,6 +37,7 @@ import sys
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -192,31 +193,22 @@ def write_pair_html(d, items):
 {cards}</body></html>""")
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--temporal-root", default="outputs/orsi/TEMPORAL/cv_ft_dilate3")
-    parser.add_argument("--frame-dir", default="/home/gchie/workspace/data/orsi_tensors")
-    parser.add_argument("--out", required=True)
-    parser.add_argument("--variant", default="caps_chain")
-    parser.add_argument("--alpha", type=float, default=0.1)
-    parser.add_argument("--phase-smooth", type=int, default=1)
-    parser.add_argument("--gate-floor", type=float, default=0.2)
-    parser.add_argument("--delta", type=float, default=5.0)
-    parser.add_argument("--workers", type=int, default=16)
-    parser.add_argument("--no-frames", action="store_true", help="only matrices and counts")
-    args = parser.parse_args()
+def collect(temporal_root, frame_dir, variant="caps_chain", alpha=0.1, phase_smooth=1, gate_floor=0.2, delta=5.0,
+            out=Path(".")):
+    """
+    Matched items of every fold (see module docstring) plus, per video, what is needed
+    to describe a clip: ``videos[p] = {labels, dets, gts, ph_gt, ph_hat, fold, clip}``.
+    Counts are checked against the ``constraints_nms5.json`` of each fold.
+    """
+    key = f"{variant}|a={alpha:g}|s={phase_smooth}|f={gate_floor:g}"
+    fold_dirs = sorted(Path(temporal_root).glob("fold*"))
 
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
-    key = f"{args.variant}|a={args.alpha:g}|s={args.phase_smooth}|f={args.gate_floor:g}"
-    fold_dirs = sorted(Path(args.temporal_root).glob("fold*"))
-
-    items, checks, fold_metrics, class_ap = [], [], {}, defaultdict(list)
+    items, checks, fold_metrics, class_ap, videos = [], [], {}, defaultdict(list), {}
     names = ph_names = None
     ph_true, ph_pred = [], []
     for fd in fold_dirs:
         fold = fd.name.removeprefix("fold")
-        prep = prepare(fd / "val", args.frame_dir)
+        prep = prepare(fd / "val", frame_dir)
         if names is None:
             names, ph_names = prep.names, prep.ph_names
         assert prep.names == names and prep.ph_names == ph_names, f"{fd}: class order differs"
@@ -224,13 +216,13 @@ def main():
         op = res["best_f1_5s"]
         for c, a in res["per_class_ap_5s"].items():
             class_ap[c].append(a)
-        fold_metrics[fd.name] = {**metrics(fd), "threshold": op["threshold"], f"{args.variant}:F1@5": op["f1"]}
+        fold_metrics[fd.name] = {**metrics(fd), "threshold": op["threshold"], f"{variant}:F1@5": op["f1"]}
         n_tp = n_fp = n_gt = 0
         for p in prep.patients:
-            dets = [d for d in detections(prep, p, args.variant, args.alpha, args.phase_smooth, args.gate_floor)
+            dets = [d for d in detections(prep, p, variant, alpha, phase_smooth, gate_floor)
                     if d[2] >= op["threshold"] and d[0] not in prep.bg]
             gts = [g for g in prep.gts[p] if g[0] not in prep.bg]
-            labels = pd.read_csv(Path(args.frame_dir) / p / "Label" / f"{p}_all_labels.csv",
+            labels = pd.read_csv(Path(frame_dir) / p / "Label" / f"{p}_all_labels.csv",
                                  usecols=["second", "frame_path"])
             # a few CSVs repeat a second: predictions follow the rows, times are the `second` values
             assert (labels["second"].to_numpy() == prep.preds[p]["second"]).all(), p
@@ -238,7 +230,9 @@ def main():
             ph_hat = prep.preds[p]["probs_phases"].argmax(1)
             ph_true.append(ph_gt[: len(ph_hat)])
             ph_pred.append(ph_hat[: len(ph_gt)])
-            for it in match_video(dets, gts, args.delta):
+            videos[p] = dict(labels=labels, dets=dets, gts=gts, ph_gt=ph_gt, ph_hat=ph_hat, fold=fold,
+                             clip=json.loads((fd / "val" / "meta.json").read_text()))
+            for it in match_video(dets, gts, delta):
                 n_tp += it["kind"] == "corretto"
                 n_fp += it["kind"] != "corretto" and it["pred"] is not None
                 n_gt += it["true"] is not None and it["kind"] != "duplicato"
@@ -265,6 +259,32 @@ def main():
         print(f"{fd.name}: tp {n_tp}/{op['tp']} fp {n_fp}/{op['fp']} gt {n_gt}/{op['n_gt']} th {op['threshold']}",
               flush=True)
     assert all(c["ok"] for c in checks), "counts differ from eval_constraints: see summary.json"
+    return SimpleNamespace(items=items, checks=checks, fold_metrics=fold_metrics, class_ap=class_ap, videos=videos,
+                           names=names, ph_names=ph_names, ph_true=ph_true, ph_pred=ph_pred, key=key,
+                           fold_dirs=fold_dirs)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--temporal-root", default="outputs/orsi/TEMPORAL/cv_ft_dilate3")
+    parser.add_argument("--frame-dir", default="/home/gchie/workspace/data/orsi_tensors")
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--variant", default="caps_chain")
+    parser.add_argument("--alpha", type=float, default=0.1)
+    parser.add_argument("--phase-smooth", type=int, default=1)
+    parser.add_argument("--gate-floor", type=float, default=0.2)
+    parser.add_argument("--delta", type=float, default=5.0)
+    parser.add_argument("--workers", type=int, default=16)
+    parser.add_argument("--no-frames", action="store_true", help="only matrices and counts")
+    args = parser.parse_args()
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    col = collect(args.temporal_root, args.frame_dir, args.variant, args.alpha, args.phase_smooth, args.gate_floor,
+                  args.delta, out)
+    items, checks, fold_metrics, class_ap = col.items, col.checks, col.fold_metrics, col.class_ap
+    names, ph_names, ph_true, ph_pred = col.names, col.ph_names, col.ph_true, col.ph_pred
+    key, fold_dirs = col.key, col.fold_dirs
 
     # ---- confusion matrices -------------------------------------------------------
     ev = [i for i, n in enumerate(names) if n.lower() != "idle"]

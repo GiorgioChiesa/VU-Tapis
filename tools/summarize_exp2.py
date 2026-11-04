@@ -13,7 +13,8 @@ Families group the 32 Orsi event classes by what happens at the onset (see FAMIL
 phase change, ``EXP2/analysis/oracle_phase_boundary.json``) and of the others, per run.
 
 Experiment 3 (``--exp EXP3``): arms ``outputs/orsi/EXP3/<arm>`` against F_base (``B*``) or FT_gstatic
-(``FTB*``) of Experiment 2.
+(``FTB*``) of Experiment 2. Experiment 4 (``--exp EXP4``): offset arms ``O*`` and the k control ``K*``
+against F_base; ``O*agnostic5`` also against ``K5`` (same k, with and without the offset head).
 
 Example:
     python tools/summarize_exp2.py [--exp EXP3] [--wandb]
@@ -51,8 +52,10 @@ LABELS = {
     "FT_gstatic": "FT clip fine-tunata + frame GraSP", "FT_base": "FT clip + frame fine-tunati",
     "B1_head": "B1 testa di confine (loss)", "B2_add": "B2 + fusione add", "B3_transition": "B3 + fusione transition",
     "B4_oracle_boundary": "B4 confini veri in input (limite sup.)",
+    "O1_agnostic3": "O1 offset agnostico, R 3", "O2_class3": "O2 offset per classe, R 3", "K5": "K5 dilate5 senza offset",
+    "O3_agnostic5": "O3 dilate5 + offset agnostico, R 5",
 }
-METRICS = ["mAP@1", "mAP@5", "mAP@30", "tight", "loose", "F1@5", "FA/h", "phase_acc", "cc_mAP@5", "cc_F1@5",
+METRICS = ["mAP@1", "mAP@2", "mAP@5", "mAP@30", "tight", "loose", "F1@5", "FA/h", "phase_acc", "cc_mAP@5", "cc_F1@5",
            "bnd_AP@5", "oth_AP@5"]
 BOUNDARY = ROOT / "EXP2/analysis/oracle_phase_boundary.json"
 
@@ -80,9 +83,15 @@ def references(arm, exp="EXP2"):
     (['F_base', 'T_base', 'FT_gstatic'], [])
     >>> references("B2_add"), references("FTB2_add"), references("F_base", exp="EXP3")
     (['F_base'], ['FT_gstatic'], [])
+    >>> references("O3_agnostic5", exp="EXP4"), references("K5", exp="EXP4"), references("FTO1_agnostic3", exp="EXP4")
+    (['F_base', 'K5'], ['F_base'], ['FT_gstatic'])
     """
-    if arm == "2.1_H*" or (exp == "EXP3" and arm in ("F_base", "FT_gstatic")):
+    if arm == "2.1_H*" or (exp in ("EXP3", "EXP4") and arm in ("F_base", "FT_gstatic")):
         return []
+    if exp == "EXP4":
+        if arm.startswith("FT"):
+            return ["FT_gstatic"]
+        return ["F_base"] + (["K5"] if arm.endswith("5") and arm != "K5" else [])
     if arm.startswith("FTB"):
         return ["FT_gstatic"]
     if arm.startswith("B"):
@@ -107,7 +116,7 @@ def run_metrics(val, bnd=frozenset()):
     rep = json.loads((val / "report_nms5.json").read_text())
     nms = rep["spotting_nms"]
     op = nms["operating_points"]["delta_5"]["best_f1"]
-    m = {f"mAP@{d}": nms["map"][str(d)] for d in (1, 5, 30)}
+    m = {f"mAP@{d}": nms["map"][str(d)] for d in (1, 2, 5, 30)}
     m.update(tight=nms["avg_map_tight_1_5s"], loose=nms["avg_map_loose_5_30s"], **{"F1@5": op["f1"]},
              **{"FA/h": op["false_alarms_per_hour"]}, phase_acc=rep["phases_untrimmed"]["accuracy"])
     cpath = val / "constraints_nms5.json"
@@ -163,7 +172,7 @@ def summarize(data, exp="EXP2"):
         if ref not in data:
             continue
         common = sorted(set(runs) & set(data[ref]))
-        for k in ("mAP@5", "cc_mAP@5", "F1@5", "phase_acc", "bnd_AP@5", "oth_AP@5"):
+        for k in ("mAP@1", "mAP@2", "mAP@5", "tight", "cc_mAP@5", "F1@5", "phase_acc", "bnd_AP@5", "oth_AP@5"):
             a = [runs[r][0].get(k) for r in common]
             b = [data[ref][r][0].get(k) for r in common]
             if len(common) >= 5 and None not in a + b:
@@ -190,6 +199,14 @@ def markdown(table, wil, fams, exp="EXP2"):
             + (f"{dc['delta']:+.3f} ({dc['p']:.3f})" if dc else "–")
             + "".join(f" | {f(k)} | " + (f"{w['delta']:+.3f} ({w['p']:.3f})" if (w := wil.get(f"{arm}|{ref}|{k}")) else "–")
                       for k in ("bnd_AP@5", "oth_AP@5")) + " |")
+    lines += ["", "| Braccio | rif. | mAP@1 | Δ (p) | mAP@2 | Δ (p) | tight 1–5 s | Δ (p) |", "|---|---|---|---|---|---|---|---|"]
+    for arm, t in table.items():
+        for ref in references(arm, exp) or ["–"]:
+            cells = []
+            for k in ("mAP@1", "mAP@2", "tight"):
+                w = wil.get(f"{arm}|{ref}|{k}")
+                cells.append(f"{t[k][0]:.3f} | " + (f"{w['delta']:+.3f} ({w['p']:.3f})" if w else "–"))
+            lines.append(f"| {LABELS.get(arm, arm)} | {ref} | " + " | ".join(cells) + " |")
     fam_names = list(FAMILIES) + ["altro"]
     lines += ["", "| Braccio | " + " | ".join(fam_names) + " |", "|---|" + "---|" * len(fam_names)]
     for arm, f in fams.items():
@@ -199,7 +216,7 @@ def markdown(table, wil, fams, exp="EXP2"):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--exp", default="EXP2", choices=["EXP2", "EXP3"])
+    ap.add_argument("--exp", default="EXP2", choices=["EXP2", "EXP3", "EXP4"])
     ap.add_argument("--out", help="default: outputs/orsi/<exp>")
     ap.add_argument("--wandb", action="store_true")
     args = ap.parse_args()

@@ -50,6 +50,13 @@ onsets within 2 s of a phase change) spotting the event and segmenting the phase
   --oracle-boundary    ground-truth phase changes (dilated +/- k s, no phase identity) appended to
                        the input: upper bound of knowing *when* the phase changes
 
+Experiment 4 (Orsi only): T-DEED-style displacement head for fine localisation.
+  --offset-head agnostic|class
+                       1 (any class) or C (per class) channels regressing onset - t (s) on the seconds
+                       within --offset-radius (default k) of an onset (SmoothL1, --offset-weight);
+                       at inference every event score moves to t + offset (max) before the NMS. Val npz:
+                       `probs_steps` displaced, `probs_steps_raw` and `offsets` for analysis.
+
 Example:
     python tools/train_hybrid.py --context G4 --causal --target dilate --k 3 --cv-fold 0/5 \
         --feat-dir outputs/orsi/LONG/control/totale/untrimmed/grasp_LONG/all \
@@ -313,6 +320,67 @@ def boundary_loss(logits, y, m, gamma):
     return total
 
 
+# ---- Experiment 4: offset (displacement) head, T-DEED style ----------------------------
+def offset_targets(length, events, n_classes, radius, per_class):
+    """
+    Displacement ``d = onset - t`` (s) to the nearest onset within ``radius`` s and its mask, ``[T, K]``:
+    one column per class (``per_class``) or one column for the nearest onset of any class.
+
+    >>> d, m = offset_targets(8, [(1, 3.0), (0, 6.0)], 2, 1, per_class=False)
+    >>> d[:, 0].tolist(), m[:, 0].astype(int).tolist()
+    ([0.0, 0.0, 1.0, 0.0, -1.0, 1.0, 0.0, -1.0], [0, 0, 1, 1, 1, 1, 1, 1])
+    >>> d, m = offset_targets(8, [(1, 3.0), (0, 6.0)], 2, 1, per_class=True)
+    >>> m.astype(int).T.tolist()
+    [[0, 0, 0, 0, 0, 1, 1, 1], [0, 0, 1, 1, 1, 0, 0, 0]]
+    """
+    k_cols = n_classes if per_class else 1
+    d = np.zeros((length, k_cols), dtype=np.float32)
+    best = np.full((length, k_cols), np.inf, dtype=np.float32)
+    t = np.arange(length)
+    for c, t0 in events:
+        t0, k = int(round(t0)), (c if per_class else 0)
+        dist = np.abs(t - t0).astype(np.float32)
+        upd = (dist <= radius) & (dist < best[:, k])
+        d[upd, k] = (t0 - t)[upd]
+        best[upd, k] = dist[upd]
+    return d, np.isfinite(best).astype(np.float32)
+
+
+def offset_loss(preds, d, m):
+    """SmoothL1 of the predicted displacements (``[B, K, T]`` per stage) on the masked seconds."""
+    total = 0.0
+    for o in preds:
+        total = total + (F.smooth_l1_loss(o, d, reduction="none", beta=1.0) * m).sum() / torch.clamp(m.sum(), min=1.0)
+    return total
+
+
+def displace_scores(probs, d, radius, fg, bg):
+    """
+    Move every per-second event score to ``t + d`` (clipped to +/- ``radius``, rounded) keeping the
+    maximum, then recompute the background column; ``d`` is ``[T, 1]`` or ``[T, C]``.
+
+    >>> p = np.zeros((6, 2)); p[2, 1] = 0.9; p[3, 1] = 0.8; p[:, 0] = 1 - p[:, 1]
+    >>> d = np.zeros((6, 1)); d[2, 0] = 0.6; d[3, 0] = 0.2
+    >>> out = displace_scores(p, d, 3, [1], [0])
+    >>> out[:, 1].round(2).tolist(), out[:, 0].round(2).tolist()
+    ([0.0, 0.0, 0.0, 0.9, 0.0, 0.0], [1.0, 1.0, 1.0, 0.1, 1.0, 1.0])
+    >>> bool(np.allclose(displace_scores(p, np.zeros((6, 1)), 3, [1], [0]), p))
+    True
+    """
+    n = len(probs)
+    out = np.zeros_like(probs)
+    t = np.arange(n)
+    for c in fg:
+        dc = d[:, c] if d.shape[1] > 1 else d[:, 0]
+        target = np.clip(np.rint(t + np.clip(dc, -radius, radius)), 0, n - 1).astype(int)
+        col = np.zeros(n, dtype=probs.dtype)
+        np.maximum.at(col, target, probs[:, c])
+        out[:, c] = col
+    if bg:
+        out[:, list(bg)] = 1.0 - out[:, fg].max(1, keepdims=True)
+    return out
+
+
 def weighted_losses(outs, y_phase, y_event, m_event, fg, gamma, smooth_w, phase_w):
     """`train_temporal.losses` with the phase terms (CE + T-MSE) scaled by ``phase_w``."""
     if phase_w == 1.0:
@@ -345,14 +413,17 @@ class HybridModel(nn.Module):
     returned inside ``aux``); ``fuse = (classes, opened)`` adds to the logits of the boundary event
     ``classes`` a_c * boundary logit and, when ``opened`` (phase opened by each class) is given,
     b_c * log P(opened phase at t + BOUNDARY_LEAD). a, b are learned, initialised at 0.
+
+    Experiment 4: ``n_offset`` displacement channels (1 or one per class), after the auxiliary
+    channels and before the boundary one; `offsets(aux)` extracts them.
     """
 
     def __init__(self, context, dim_in, n_phases, n_events, causal=False, n_aux=0, phase_prior=None, boundary=False,
-                 fuse=None, **kwargs):
+                 fuse=None, n_offset=0, **kwargs):
         super().__init__()
-        self.n_phases, self.n_events = n_phases, n_events
-        self.context = build_context(context, dim_in, n_phases + n_events + n_aux + int(boundary), causal=causal,
-                                     n_phases=n_phases, **kwargs)
+        self.n_phases, self.n_events, self.n_aux, self.n_offset = n_phases, n_events, n_aux, n_offset
+        self.context = build_context(context, dim_in, n_phases + n_events + n_aux + n_offset + int(boundary),
+                                     causal=causal, n_phases=n_phases, **kwargs)
         self.phase_cond = None
         if phase_prior is not None:
             w = torch.as_tensor(phase_prior, dtype=torch.float32).clamp(1e-3, 1 - 1e-3)
@@ -365,6 +436,10 @@ class HybridModel(nn.Module):
             if opened is not None:
                 self.register_buffer("fuse_phase", torch.as_tensor(opened, dtype=torch.long))
                 self.fuse_trans = nn.Parameter(torch.zeros(len(classes)))
+
+    def offsets(self, a):
+        """Displacement channels ``[B, n_offset, T]`` of the extra outputs ``a``."""
+        return a[:, self.n_aux : self.n_aux + self.n_offset]
 
     def fuse_boundary(self, p, e, b):
         """Event logits ``e`` [B, E, T] + the boundary terms on the fused classes."""
@@ -392,6 +467,17 @@ class HybridModel(nn.Module):
 
     def forward(self, x):
         return [(p, e) for p, e, _ in self.forward_full(x)]
+
+
+@torch.no_grad()
+def predict_offset(model, x, bg, fg, radius):
+    """
+    `predict` with the event scores moved by the predicted displacements (`displace_scores`):
+    ``(displaced events, phases, raw events, displacements [T, K])``.
+    """
+    ev, ph = predict(model, x, bg, fg)
+    d = model.offsets(model.forward_full(x)[-1][2])[0].T.cpu().numpy()
+    return displace_scores(ev, d, radius, fg, bg), ph, ev, d.astype(np.float32)
 
 
 @torch.no_grad()
@@ -462,13 +548,20 @@ def parse_args(argv=None):
                         help="feed the phase-change channel into the boundary event classes (needs --boundary-head)")
     parser.add_argument("--oracle-boundary", action="store_true",
                         help="ground-truth phase changes (dilated +/- k s) as input (upper bound)")
+    # Experiment 4
+    parser.add_argument("--offset-head", default="none", choices=["none", "agnostic", "class"],
+                        help="displacement head: one channel (nearest onset of any class) or one per class")
+    parser.add_argument("--offset-weight", type=float, default=1.0, help="weight of the displacement loss")
+    parser.add_argument("--offset-radius", type=int, help="seconds around an onset with a displacement target (default k)")
     args = parser.parse_args(argv)
     if len(args.datasets) > 1:
         parser.error("one --datasets at a time; use --aux-mode joint for multi-dataset training")
     exp2 = args.aux_mode != "none" or args.phase_cond or args.oracle_phase or args.phase_weight != 1.0
-    exp3 = args.boundary_head or args.oracle_boundary
-    if (exp2 or exp3) and args.datasets != ["orsi"]:
-        parser.error("Experiment 2 and 3 options apply to --datasets orsi")
+    exp34 = args.boundary_head or args.oracle_boundary or args.offset_head != "none"
+    if (exp2 or exp34) and args.datasets != ["orsi"]:
+        parser.error("Experiment 2-4 options apply to --datasets orsi")
+    if args.offset_radius is None:
+        args.offset_radius = args.k
     if args.boundary_fuse != "none" and not args.boundary_head:
         parser.error("--boundary-fuse needs --boundary-head")
     if (args.aux_mode == "none") != (not args.aux_sources):
@@ -544,8 +637,13 @@ def main(argv=None):
             b_classes = [c for c in b_classes if c in opened]
             fuse = (b_classes, [opened[c] for c in b_classes] if args.boundary_fuse == "transition" else None)
         print(f"boundary classes (train fold): {[names[c] for c in b_classes]}", flush=True)
+    n_offset = {"none": 0, "agnostic": 1, "class": len(names)}[args.offset_head]
+    if n_offset:
+        for d in data.values():
+            d["yo"], d["mo"] = offset_targets(len(d["x"]), d["events"], len(names), args.offset_radius,
+                                              per_class=args.offset_head == "class")
     model = HybridModel(args.context, len(mu), len(ph_names), len(names), args.causal, n_aux=n_aux, phase_prior=prior,
-                        boundary=args.boundary_head, fuse=fuse, dropout=args.dropout).to(device)
+                        boundary=args.boundary_head, fuse=fuse, n_offset=n_offset, dropout=args.dropout).to(device)
     n_params = count_parameters(model)
     print(f"{args.context}{' causal' if args.causal else ''}: {n_params / 1e6:.3f} M parameters", flush=True)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -561,6 +659,12 @@ def main(argv=None):
             torch.from_numpy(d["y"][sl]).T[None].to(device),
             torch.from_numpy(d["m"][sl]).T[None].to(device),
         )
+
+    def predict_events(p):
+        """``(events, phases[, raw events, displacements])`` of video ``p``; displaced with --offset-head."""
+        if n_offset:
+            return predict_offset(model, tensors(p)[0], bg, fg, args.offset_radius)
+        return predict(model, tensors(p)[0], bg, fg)
 
     def aux_step(key):
         """Loss of one auxiliary video (joint mode): trunk + its task channels only."""
@@ -632,13 +736,17 @@ def main(argv=None):
             start = random.randint(0, max(0, n - args.crop))
             x, yp, ye, me = tensors(p, start, start + args.crop)
             x = F.dropout1d(x, args.feat_dropout, training=True) if args.feat_dropout else x
-            if args.boundary_head:
+            if args.boundary_head or n_offset:
                 full = model.forward_full(x)
                 loss = weighted_losses([(a, b) for a, b, _ in full], yp, ye, me, fg, args.gamma, args.smooth_weight,
                                        args.phase_weight)
-                yb, mb = (torch.from_numpy(data[p][k][start : start + args.crop]).T[None].to(device)
-                          for k in ("yb", "mb"))
-                loss = loss + args.boundary_weight * boundary_loss([a[:, -1:] for _, _, a in full], yb, mb, args.gamma)
+                crop = lambda k: torch.from_numpy(data[p][k][start : start + args.crop]).T[None].to(device)
+                if args.boundary_head:
+                    loss = loss + args.boundary_weight * boundary_loss([a[:, -1:] for _, _, a in full], crop("yb"),
+                                                                       crop("mb"), args.gamma)
+                if n_offset:
+                    loss = loss + args.offset_weight * offset_loss([model.offsets(a) for _, _, a in full], crop("yo"),
+                                                                   crop("mo"))
             else:
                 loss = weighted_losses(model(x), yp, ye, me, fg, args.gamma, args.smooth_weight, args.phase_weight)
             opt.zero_grad()
@@ -657,7 +765,7 @@ def main(argv=None):
                          for p in split["val"]]
                     )
                 )
-            preds = {p: predict(model, tensors(p)[0], bg, fg) for p in split["val"]}
+            preds = {p: predict_events(p)[:2] for p in split["val"]}
             row.update({f"val/{k}": v for k, v in quick_eval(preds, data, bg, len(names)).items()})
             log.append(row)
             print(
@@ -685,11 +793,15 @@ def main(argv=None):
             aux_sources=args.aux_sources, phase_cond=args.phase_cond, oracle_phase=args.oracle_phase,
             phase_weight=args.phase_weight, boundary_head=args.boundary_head, boundary_fuse=args.boundary_fuse,
             oracle_boundary=args.oracle_boundary, boundary_classes=[names[c] for c in b_classes],
+            offset_head=args.offset_head, offset_radius=args.offset_radius,
         )
         (pred_dir / "meta.json").write_text(json.dumps(meta, indent=2))
-        preds = {p: predict(model, tensors(p)[0], bg, fg) for p in split[s]}
+        full_preds = {p: predict_events(p) for p in split[s]}
+        preds = {p: v[:2] for p, v in full_preds.items()}
         for p, (ev, ph) in preds.items():
             extra = {"probs_boundary": predict_boundary(model, tensors(p)[0])} if args.boundary_head else {}
+            if n_offset:
+                extra.update(probs_steps_raw=full_preds[p][2].astype(np.float32), offsets=full_preds[p][3])
             np.savez_compressed(
                 pred_dir / f"{p}.npz",
                 second=data[p]["second"],

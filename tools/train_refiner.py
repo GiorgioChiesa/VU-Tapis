@@ -29,6 +29,9 @@ Stages:
   --stage train      trains the refiner of --arm with --seed and refines the detections of
                      ``F_base/seed<seed>/fold<i>``; writes ``<exp>/<arm>/seed<s>/fold<i>/val/detections.json``,
                      ``refiner.pt`` and ``train_log.json``; also ``<exp>/R0/...`` (identity: every time kept).
+  --stage refine-cc  the refiner of --stage train (same arm, seed, fold, not retrained) applied to the F_base
+                     detections after the caps + order-chain decoding of `tools/eval_constraints.py`
+                     (``caps_chain|a=0.1|s=1|f=0.2``); writes ``<exp>/<arm>_cc/...`` and ``<exp>/R0_cc/...``.
 
 Example:
     python tools/train_refiner.py --stage positions --fold 0/5
@@ -36,6 +39,8 @@ Example:
 """
 
 import argparse
+import contextlib
+import io
 import json
 import random
 import sys
@@ -291,6 +296,69 @@ def hit_score(err):
     return float((np.mean(err <= 1) + np.mean(err <= 2)) / 2)
 
 
+def refine_detections(model, bank, dets, nsec, norm, thr, min_score, device):
+    """Move every detection with score >= ``min_score`` to its window's argmax (score kept)."""
+    out_dets, r0_dets, moved = {}, {}, []
+    for p, dd in dets.items():
+        idx = [i for i, (c, t, s) in enumerate(dd) if s >= min_score]
+        new = [list(map(float, d)) for d in dd]
+        if idx:
+            pos = np.stack([window_positions(float(dd[i][1]), bank.per_second, nsec[p]) for i in idx])
+            x = norm(np.stack([bank.window(p, ps) for ps in pos]))
+            c = np.array([dd[i][0] for i in idx])
+            t_hat = np.array([float(dd[i][1]) for i in idx])
+            pr = predict(model, x, c, device)
+            t_new = refine_times(pr, pos, t_hat, thr)
+            for k, i in enumerate(idx):
+                new[i][1] = float(t_new[k])
+            moved.extend((t_new - t_hat).tolist())
+        out_dets[p] = [[int(c), t, s] for c, t, s in new]
+        r0_dets[p] = [[int(c), float(t), float(s)] for c, t, s in dd]
+    return out_dets, r0_dets, np.asarray(moved)
+
+
+def write_detections(d, patients, lengths, bg, names, dets):
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "detections.json").write_text(json.dumps({"patients": patients, "lengths": lengths, "bg": list(bg),
+                                                   "n_classes": len(names), "detections": dets}))
+
+
+CC_KEY = ("caps_chain", 0.1, 1, 0.2)  # eval_constraints variant, alpha, phase smoothing (s), gate floor
+
+
+def cc_detections(seed, fold_i):
+    """F_base detections after the caps + order-chain decoding of `tools/eval_constraints.py` (times = seconds)."""
+    from eval_constraints import detections, prepare
+
+    val = ROOT / "EXP2/F_base" / f"seed{seed}" / f"fold{fold_i}" / "val"
+    with contextlib.redirect_stdout(io.StringIO()):
+        prep = prepare(val, "/home/gchie/workspace/data/orsi_tensors")
+    dets = {p: detections(prep, p, *CC_KEY) for p in prep.patients}
+    lengths = {p: len(prep.preds[p]["second"]) for p in prep.patients}
+    return dets, lengths, prep
+
+
+def stage_refine_cc(args):
+    """Apply the refiner trained by --stage train (same arm, seed, fold) to the caps + chain detections."""
+    fi, split, bg, names = fold_meta(args.fold)
+    device = torch.device(f"cuda:{args.gpu}")
+    run_dir = EXP / args.arm / f"seed{args.seed}" / f"fold{fi}"
+    ck = torch.load(run_dir / "refiner.pt", map_location="cpu", weights_only=False)
+    mu, sd, thr = ck["mu"], ck["sd"], ck["thr"]
+    norm = lambda x: ((x.astype(np.float32) - mu) / sd).astype(np.float32)  # noqa: E731
+    dets, lengths, prep = cc_detections(args.seed, fi)
+    assert list(prep.names) == list(names) and tuple(prep.bg) == tuple(bg), "class order differs"
+    bank = FeatureBank(args.arm, fi, split["val"])
+    nsec = {p: n_seconds(p) for p in split["val"]}
+    model = Refiner(len(mu), len(names)).to(device)
+    model.load_state_dict(ck["model"])
+    out_dets, r0_dets, moved = refine_detections(model, bank, dets, nsec, norm, thr, args.min_score, device)
+    for arm, dd in ((f"{args.arm}_cc", out_dets), ("R0_cc", r0_dets)):
+        write_detections(EXP / arm / f"seed{args.seed}" / f"fold{fi}" / "val", list(prep.patients), lengths, bg, names, dd)
+    print(f"{args.arm}_cc seed{args.seed} fold{fi}: refined {len(moved)}, moved {np.mean(moved != 0):.2f}, "
+          f"mean |move| {np.mean(np.abs(moved)):.2f} s", flush=True)
+
+
 def stage_train(args):
     fi, split, bg, names = fold_meta(args.fold)
     torch.manual_seed(args.seed)
@@ -349,28 +417,10 @@ def stage_train(args):
 
     # ---- refine F_base detections of the val videos -------------------------------
     dets, lengths, meta = fbase_detections(args.seed, fi, bg)
-    out_dets, r0_dets, moved, n_ref = {}, {}, [], 0
-    for p, dd in dets.items():
-        idx = [i for i, (c, t, s) in enumerate(dd) if s >= args.min_score]
-        new = [list(map(float, d)) for d in dd]
-        if idx:
-            pos = np.stack([window_positions(float(dd[i][1]), bank.per_second, nsec[p]) for i in idx])
-            x = norm(np.stack([bank.window(p, ps) for ps in pos]))
-            c = np.array([dd[i][0] for i in idx])
-            t_hat = np.array([float(dd[i][1]) for i in idx])
-            pr = predict(model, x, c, device)
-            t_new = refine_times(pr, pos, t_hat, thr)
-            for k, i in enumerate(idx):
-                new[i][1] = float(t_new[k])
-            moved.extend((t_new - t_hat).tolist())
-            n_ref += len(idx)
-        out_dets[p] = [[int(c), t, s] for c, t, s in new]
-        r0_dets[p] = [[int(c), float(t), float(s)] for c, t, s in dd]
+    out_dets, r0_dets, moved = refine_detections(model, bank, dets, nsec, norm, thr, args.min_score, device)
+    n_ref = len(moved)
     for arm, dd in ((args.arm, out_dets), ("R0", r0_dets)):
-        d = EXP / arm / f"seed{args.seed}" / f"fold{fi}" / "val"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "detections.json").write_text(json.dumps({"patients": meta["patients"], "lengths": lengths,
-                                                         "bg": list(bg), "n_classes": len(names), "detections": dd}))
+        write_detections(EXP / arm / f"seed{args.seed}" / f"fold{fi}" / "val", meta["patients"], lengths, bg, names, dd)
     run_dir = EXP / args.arm / f"seed{args.seed}" / f"fold{fi}"
     torch.save({"model": model.state_dict(), "mu": mu, "sd": sd, "thr": thr, "args": vars(args)}, run_dir / "refiner.pt")
     moved = np.asarray(moved)
@@ -388,7 +438,7 @@ def stage_train(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--stage", required=True, choices=["positions", "train"])
+    ap.add_argument("--stage", required=True, choices=["positions", "train", "refine-cc"])
     ap.add_argument("--fold", default="0/5")
     ap.add_argument("--arm", default="R1", choices=list(ARMS))
     ap.add_argument("--seed", type=int, default=0, help="refiner seed = F_base seed it refines")
@@ -403,7 +453,7 @@ def main():
     ap.add_argument("--weight-decay", type=float, default=1e-2)
     ap.add_argument("--gpu", type=int, default=2)
     args = ap.parse_args()
-    stage_positions(args) if args.stage == "positions" else stage_train(args)
+    {"positions": stage_positions, "train": stage_train, "refine-cc": stage_refine_cc}[args.stage](args)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,5 @@
+features       shape=(3936, 1536) dtype=float16 max_abs=0.000e+00 mean_abs=0.000e+00 bit_equal=True allclose(1e-2)=True |ref|mean=2.144e-01
+frame_id       shape=(3936,) equal=True
+probs_phases   shape=(3936, 11) dtype=float32 max_abs=0.000e+00 mean_abs=0.000e+00 bit_equal=True allclose(1e-2)=True |ref|mean=9.091e-02
+probs_steps    shape=(3936, 21) dtype=float32 max_abs=0.000e+00 mean_abs=0.000e+00 bit_equal=True allclose(1e-2)=True |ref|mean=4.762e-02
+second         shape=(3936,) equal=True

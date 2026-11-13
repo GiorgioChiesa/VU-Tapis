@@ -486,15 +486,37 @@ def predict_boundary(model, x):
     return torch.sigmoid(model.forward_full(x)[-1][2][:, -1:])[0].T.cpu().numpy().astype(np.float32)
 
 
+def crop_start(n, crop, mode="start"):
+    """
+    First second of a training crop of ``crop`` s in a video of ``n`` s.
+
+    ``start``: uniform start, the original sampler; second ``t`` is covered with probability
+    about ``min(t + 1, n - t, crop) / (n - crop + 1)``, so both ends of the video are rarely seen.
+    ``center``: crop centred on a uniform second and clipped to the video; every second is covered
+    with probability at least about ``crop / (2 n)``.
+
+    >>> random.seed(0); crop_start(100, 200), crop_start(100, 200, "center")
+    (0, 0)
+    >>> all(0 <= crop_start(1000, 300, "center") <= 700 for _ in range(200))
+    True
+    """
+    if mode == "start":
+        return random.randint(0, max(0, n - crop))
+    c = random.randint(0, n - 1)
+    return min(max(0, c - crop // 2), max(0, n - crop))
+
+
 @torch.no_grad()
 def latency(model, x, device, repeats=3):
     """Seconds of GPU compute to process ``x`` (one full video), best of ``repeats``."""
     best = float("inf")
     for _ in range(repeats):
-        torch.cuda.synchronize(device)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
         t = time.perf_counter()
         model(x)
-        torch.cuda.synchronize(device)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
         best = min(best, time.perf_counter() - t)
     return best
 
@@ -515,11 +537,15 @@ def parse_args(argv=None):
     parser.add_argument("--dropout", type=float, default=0.5)
     parser.add_argument("--feat-dropout", type=float, default=0.5)
     parser.add_argument("--crop", type=int, default=4096)
+    parser.add_argument("--crop-mode", default="start", choices=["start", "center"],
+                        help="start: crop start ~ U[0, n - crop] (default; the first and last seconds of a video are "
+                             "almost never trained on); center: crop centred on a uniform second, clipped to the video")
     parser.add_argument("--gamma", type=float, default=2.0)
     parser.add_argument("--smooth-weight", type=float, default=0.15)
     parser.add_argument("--causal", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument("--device", help="torch device, e.g. cpu (default: cuda:<gpu>)")
     parser.add_argument("--eval-every", type=int, default=10)
     parser.add_argument("--cv-fold", help="i/n: video-level CV over all patients (GraSP features only)")
     parser.add_argument("--wandb", action="store_true", help="log to Weights & Biases (aggregate scalars only)")
@@ -609,7 +635,7 @@ def main(argv=None):
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    device = torch.device(f"cuda:{args.gpu}")
+    device = torch.device(args.device or f"cuda:{args.gpu}")
 
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -733,7 +759,7 @@ def main(argv=None):
                 opt.step()
                 continue
             n = len(data[p]["x"])
-            start = random.randint(0, max(0, n - args.crop))
+            start = crop_start(n, args.crop, args.crop_mode)
             x, yp, ye, me = tensors(p, start, start + args.crop)
             x = F.dropout1d(x, args.feat_dropout, training=True) if args.feat_dropout else x
             if args.boundary_head or n_offset:

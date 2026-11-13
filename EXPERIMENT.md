@@ -35,4 +35,12 @@ Stop rule: one grid (3 arms x 10 runs), no hyper-parameter search on the test fo
       A3 meets the rule, close the "deeper phase model" branch and hand the posteriors to Esp6 decoding.
       A3 is dropped if its CPU smoke test exceeds 3x the A2 time per epoch.
 Budget: CPU only (user holds 2 GPUs), <= 8 threads, <= 8 h wall clock for the grid; 0 GPU hours.
-Result:
+Result: (raw, per-video mean over 10 runs; summary.json, commit of this result)
+  F_base   F1@50 52.9 edit 45.0 macroF1 0.764 acc 0.875 seg_ratio 2.23 pooled F1@50 46.1
+  A1       F1@50 50.8 edit 42.1 macroF1 0.767 acc 0.880 seg_ratio 2.40 pooled F1@50 43.8 rule 2/10 -> not adopted
+  A2       F1@50 72.7 edit 71.7 macroF1 0.768 acc 0.877 seg_ratio 1.12 pooled F1@50 70.2 rule 10/10 -> adopted
+  A3       F1@50 75.5 edit 75.7 macroF1 0.760 acc 0.870 seg_ratio 0.98 pooled F1@50 74.2 rule 10/10 -> adopted
+  + Esp6 P1_default (5029200): F_base 78.9 / A1 79.3 / A2 79.5 / A3 78.8 (F1@50); vs F_base+P1 video-level
+    Wilcoxon (n=50, seed-averaged): A1 +0.4 p 0.52, A2 +0.6 p 0.41, A3 -0.1 p 0.46.
+  Video level vs F_base: A2 +19.7 (48/50, p 4e-14), A3 +22.5 (47/50, p 2e-13), A1 -2.1 (25/50, p 0.42).
+  Cost: A1 22.8 min/run CPU, A2 38.5 min/run CPU (2 threads), A3 12.6 min/run on GPU 0 (deviation: 2.1 GPU h).

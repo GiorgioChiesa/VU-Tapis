@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revisione etichette</title>
+<link rel="stylesheet" href="label_review.css">
+</head>
+<body>
+<header>
+  <h1>Revisione etichette Orsi</h1>
+  <span id="summary"></span>
+</header>
+
+<section id="table-view">
+  <div class="filters">
+    <label>Classe reale <select id="f-true"></select></label>
+    <label>Classe predetta <select id="f-pred"></select></label>
+    <label>Corretto <select id="f-correct">
+      <option value="">tutti</option><option value="1">corretti</option><option value="0">errati</option>
+    </select></label>
+    <label>Confidenza <input id="f-cmin" type="number" min="0" max="1" step="0.05" value="0"> –
+      <input id="f-cmax" type="number" min="0" max="1" step="0.05" value="1"></label>
+    <label>Paziente <select id="f-patient"></select></label>
+    <label>Fold <select id="f-fold"></select></label>
+    <label>Tipo <select id="f-type">
+      <option value="">tutti</option><option value="event">evento</option><option value="control">controllo null</option>
+    </select></label>
+    <label>Stato <select id="f-status">
+      <option value="">tutti</option><option value="todo">da fare</option><option value="confirmed">confermato</option>
+      <option value="modified">modificato</option><option value="skipped">saltato</option>
+    </select></label>
+    <button id="f-reset" type="button">Azzera filtri</button>
+    <button id="start" type="button" class="primary">Etichetta</button>
+  </div>
+  <p class="note">I controlli null sono le 10 righe Idle per paziente usate nel training. Il filtro
+    "a più di 30 s da un evento" del training confronta <code>frame_id</code> con 30, quindi in realtà
+    esclude solo circa ±0.5 s attorno agli eventi: alcuni controlli possono cadere vicino a un evento.</p>
+  <p id="count"></p>
+  <div class="table-wrap">
+    <table id="items">
+      <thead><tr>
+        <th data-k="patient">Paziente</th><th data-k="fold">Fold</th><th data-k="second">Tempo</th>
+        <th data-k="type">Tipo</th><th data-k="trueName">Classe reale</th><th data-k="predName">Classe predetta</th>
+        <th data-k="conf">Conf.</th><th data-k="p_true">P(reale)</th><th data-k="correct">Corretto</th>
+        <th data-k="status">Stato</th><th data-k="newName">Revisione</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<section id="label-view" hidden>
+  <div class="label-top">
+    <span id="progress"></span>
+    <span id="item-title"></span>
+    <span id="saved-msg"></span>
+  </div>
+  <div class="label-main">
+    <div id="grid"></div>
+    <aside>
+      <img id="preview" alt="">
+      <dl id="info"></dl>
+      <div class="help">
+        <b>Tasti</b>: lettera/cifra = classe · ←/→ = keyframe ±1 frame (0.25 s) ·
+        Shift+←/→ = ±4 frame (1 s) · Invio = conferma e avanti · Spazio = salta ·
+        Backspace = indietro · Esc = tabella
+      </div>
+      <ol id="legend"></ol>
+    </aside>
+  </div>
+</section>
+<script src="label_review.js"></script>
+</body>
+</html>

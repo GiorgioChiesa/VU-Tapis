@@ -21,6 +21,7 @@ Usage (CPU, OMP_NUM_THREADS=1, one process per worker):
     python tools/exp6_decode_cv.py --runs outputs/orsi/EXP6/F_base/seed0 outputs/orsi/EXP6/F_base/seed1 \\
         --out outputs/orsi/EXP6/decode --workers 8
     python tools/exp6_decode_cv.py ... --summarize-only        # rebuild the summary from units/*.json
+    python tools/exp6_decode_cv.py ... --videolevel            # video-level stats from labels/ (no decoding)
 Outputs stay on the server: ``units/<run>__fold<k>__<variant>.json`` (aggregates and chosen
 parameters) and ``labels/<run>/<variant>/<video>.npy`` (decoded test labels).
 """
@@ -240,6 +241,156 @@ def markdown(s):
     return "\n".join(lines)
 
 
+VL_METRICS = ("F1@50", "F1@25", "F1@10", "edit", "acc", "macro_F1", "boundary_F1")
+VL_POOLED = ("pooled_F1@50", "pooled_F1@25", "pooled_F1@10", "pooled_acc", "pooled_macro_F1", "pooled_boundary_F1")
+VL_MAIN = ("P0_argmax", "P1_default", "P2_free_tuned", "P3_tuned")
+
+
+def run_names(runs):
+    """``[(run dir, run name)]`` with the names used for ``units/`` and ``labels/`` (as in ``main``)."""
+    common = os.path.commonpath([str(Path(r).resolve()) for r in runs])
+    return [(r, os.path.relpath(Path(r).resolve(), Path(common).parent) if len(runs) > 1 else Path(r).name)
+            for r in runs]
+
+
+def _wilcoxon(x, r):
+    d = np.asarray(x) - np.asarray(r)
+    return float(wilcoxon(x, r).pvalue) if np.any(d != 0) else 1.0
+
+
+def summarize_videolevel(runs, out, variants):
+    """
+    Video-level re-analysis from the saved decoded labels (``labels/<run>/<variant>/<video>.npy``), no
+    re-decoding. The runs (seeds) share the same outer folds, so the run x fold units of ``summary.json``
+    are not independent. Here, per variant and video, the per-video metric is averaged over the runs;
+    paired two-sided Wilcoxon vs ``P0_argmax`` over the videos (n = 50) and over the outer folds (n = 5,
+    per fold the mean of the run-averaged video metrics). Also pooled metrics (counts summed over all
+    videos of a run, as ``tapis/evaluate/segment_eval.py`` and MS-TCN), averaged over the runs.
+    Writes ``summary_videolevel.{json,md}``.
+    """
+    out = Path(out)
+    named = run_names(runs)
+    gts, folds, names = {}, {}, None
+    for run, name in named:
+        videos, names = load(run)
+        for v, d in videos.items():
+            assert folds.setdefault(v, d["fold"]) == d["fold"], "a video has different folds across runs"
+        gts[name] = {v: d["gt"] for v, d in videos.items()}
+    C = len(names)
+    vids = sorted(folds)
+    fold_ids = sorted(set(folds.values()))
+    fold_of = np.array([folds[v] for v in vids])
+    units = {}
+    for f in (out / "units").glob("*.json"):
+        u = json.loads(f.read_text())
+        units[(u["run"], u["fold"], u["variant"])] = u
+    per, pooled, check = {}, {}, 0.0
+    for var in [v for v in variants if v in VARIANTS]:
+        if not all((out / "labels" / name / var).is_dir() for _, name in named):
+            print(f"skip {var}: labels missing")
+            continue
+        per[var] = {sc: {m: np.zeros((len(named), len(vids))) for m in VL_METRICS} for sc in ("all", "noidle")}
+        pooled[var] = {}
+        for i, (_, name) in enumerate(named):
+            mv = {"all": [], "noidle": []}
+            for j, v in enumerate(vids):
+                lab = np.load(out / "labels" / name / var / f"{v}.npy").astype(int)
+                for sc in ("all", "noidle"):
+                    m = pd_.video_metrics(lab, gts[name][v], C, ignore_idle=sc == "noidle")
+                    mv[sc].append(m)
+                    for k in VL_METRICS:
+                        per[var][sc][k][i, j] = m[k]
+            pooled[var][name] = {sc: {k: pd_.aggregate(mv[sc], C)[k] for k in VL_POOLED} for sc in ("all", "noidle")}
+            # cross-check: per-fold mean of the recomputed per-video F1@50 = saved unit value
+            for k in fold_ids:
+                u = units.get((name, k, var))
+                if u is not None:
+                    check = max(check, abs(per[var]["all"]["F1@50"][i, fold_of == k].mean() - u["all"]["F1@50"]))
+    assert check < 1e-6, f"recomputed metrics differ from units/: {check}"
+    res = {"videos": len(vids), "runs": [n for _, n in named], "folds": fold_ids, "reference": REF,
+           "max_abs_diff_vs_units_F1@50": check, "variants": {}}
+    for var in per:
+        e = {}
+        for sc in ("all", "noidle"):
+            e[sc] = {}
+            for k in VL_METRICS:
+                x = per[var][sc][k].mean(0)          # run-averaged, one value per video
+                r = per[REF][sc][k].mean(0)
+                d = x - r
+                xf = np.array([x[fold_of == f].mean() for f in fold_ids])
+                rf = np.array([r[fold_of == f].mean() for f in fold_ids])
+                e[sc][k] = {"mean": float(x.mean()), "median": float(np.median(x)),
+                            "delta_mean": float(d.mean()), "delta_median": float(np.median(d)),
+                            "n_improved": int((d > 0).sum()), "n_worse": int((d < 0).sum()),
+                            "n_tied": int((d == 0).sum()), "wilcoxon_p_videos": _wilcoxon(x, r),
+                            "fold_delta_mean": float((xf - rf).mean()),
+                            "fold_n_improved": int((xf > rf).sum()), "wilcoxon_p_folds": _wilcoxon(xf, rf),
+                            "per_video_sorted_ids": x.tolist()}
+            e[sc]["pooled"] = {k: {"mean_runs": float(np.mean([pooled[var][n][sc][k] for _, n in named])),
+                                   "per_run": [pooled[var][n][sc][k] for _, n in named],
+                                   "delta": float(np.mean([pooled[var][n][sc][k] - pooled[REF][n][sc][k]
+                                                           for _, n in named]))} for k in VL_POOLED}
+            us = [units[(n, f, var)][sc]["pooled_F1@50"] for _, n in named for f in fold_ids if (n, f, var) in units]
+            e[sc]["pooled_within_unit_F1@50_mean"] = float(np.mean(us)) if us else None
+        res["variants"][var] = e
+    (out / "summary_videolevel.json").write_text(json.dumps(res, indent=1))
+    (out / "summary_videolevel.md").write_text(markdown_videolevel(res))
+    print(markdown_videolevel(res, main_only=True))
+
+
+def markdown_videolevel(s, main_only=False):
+    nv, nf = s["videos"], len(s["folds"])
+    L = [f"Video-level re-analysis (from saved labels, no re-decoding). Per video the metric is averaged "
+         f"over the {len(s['runs'])} runs (the seeds share the folds). Paired two-sided Wilcoxon vs "
+         f"{s['reference']}: over videos (n = {nv}) and over outer folds (n = {nf}, fold mean of the "
+         f"run-averaged video metric; with n = 5 the smallest attainable p is 0.0625). Pooled = counts summed "
+         f"over all {nv} videos of a run, then mean over runs. Max |diff| vs units/ F1@50: "
+         f"{s['max_abs_diff_vs_units_F1@50']:.1e}.", ""]
+    names = [v for v in s["variants"] if not main_only or v in VL_MAIN]
+    for sc, title in (("all", "with Idle"), ("noidle", "without Idle")):
+        L += [f"### F1@50, {title}", "",
+              "| variant | mean | median delta | improved/worse/tied | p videos | mean fold delta | folds improved "
+              "| p folds | pooled F1@50 (delta) |",
+              "|---|---|---|---|---|---|---|---|---|"]
+        for v in names:
+            m, pl = s["variants"][v][sc]["F1@50"], s["variants"][v][sc]["pooled"]["pooled_F1@50"]
+            if v == s["reference"]:
+                L.append(f"| {v} | {m['mean']:.1f} | - | - | - | - | - | - | {pl['mean_runs']:.1f} |")
+                continue
+            L.append(f"| {v} | {m['mean']:.1f} | {m['delta_median']:+.1f} | "
+                     f"{m['n_improved']}/{m['n_worse']}/{m['n_tied']} | {m['wilcoxon_p_videos']:.1e} | "
+                     f"{m['fold_delta_mean']:+.1f} | {m['fold_n_improved']}/{nf} | {m['wilcoxon_p_folds']:.4f} | "
+                     f"{pl['mean_runs']:.1f} ({pl['delta']:+.1f}) |")
+        L.append("")
+        if main_only:
+            break
+    if main_only:
+        return "\n".join(L)
+    others = [k for k in VL_METRICS if k != "F1@50"]
+    L += ["### Other metrics, with Idle: median per-video delta vs P0_argmax [improved/worse], Wilcoxon p (videos)",
+          "", "| variant | " + " | ".join(others) + " |", "|---" * (len(others) + 1) + "|"]
+    for v in names:
+        if v == s["reference"]:
+            continue
+        cells = []
+        for k in others:
+            m = s["variants"][v]["all"][k]
+            nd = 1 if k.startswith("F1") or k == "edit" else 3
+            cells.append(f"{m['delta_median']:+.{nd}f} [{m['n_improved']}/{m['n_worse']}] p={m['wilcoxon_p_videos']:.1e}")
+        L.append(f"| {v} | " + " | ".join(cells) + " |")
+    for sc, title in (("all", "with Idle"), ("noidle", "without Idle")):
+        L += ["", f"### Pooled metrics (counts over all videos of a run, mean of the runs), {title}", "",
+              "| variant | " + " | ".join(VL_POOLED) + " | mean over units of within-unit pooled F1@50 |",
+              "|---" * (len(VL_POOLED) + 2) + "|"]
+        for v in names:
+            e = s["variants"][v][sc]
+            cells = [f"{e['pooled'][k]['mean_runs']:.1f}" if "F1@" in k else f"{e['pooled'][k]['mean_runs']:.3f}"
+                     for k in VL_POOLED]
+            L.append(f"| {v} | " + " | ".join(cells) + f" | {e['pooled_within_unit_F1@50_mean']:.1f} |")
+    L.append("")
+    return "\n".join(L)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--runs", nargs="+", required=True, help="dirs with phase_posteriors/")
@@ -247,8 +398,13 @@ def main():
     ap.add_argument("--variants", nargs="*", default=list(VARIANTS))
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--summarize-only", action="store_true")
+    ap.add_argument("--videolevel", action="store_true",
+                    help="only write summary_videolevel.{json,md} from the saved labels/ (no decoding)")
     args = ap.parse_args()
     out = Path(args.out)
+    if args.videolevel:
+        summarize_videolevel(args.runs, out, args.variants)
+        return
     (out / "units").mkdir(parents=True, exist_ok=True)
     if not args.summarize_only:
         common = os.path.commonpath([str(Path(r).resolve()) for r in args.runs])

@@ -85,3 +85,19 @@ Esp6a, oracle arm 2.3 (fold 0, seed 0): GPU 0.902, CPU start-crop 0.905 (reprodu
   CPU centre-crop 0.912 (+0.007). Recall Idle 0.000 -> 0.991; Specimen_and_instrument_removal 0.000 ->
   0.000. Over all 100 GPU oracle videos (2 seeds) acc 0.936 / 0.940; error share Specimen 0.33,
   Idle 0.15-0.16, VU-anastomosis 0.11-0.12.
+
+Audit follow-up (2026-11-13): the two seeds share the outer folds, so the 10 run x fold units are not
+independent. Video-level re-analysis from the saved labels (no re-decoding; per-fold means match units/
+exactly):
+  python tools/exp6_decode_cv.py --runs outputs/orsi/EXP6/F_base/seed0 outputs/orsi/EXP6/F_base/seed1 \
+      --out outputs/orsi/EXP6/decode --videolevel
+Per video the metric is averaged over the 2 seeds; paired two-sided Wilcoxon vs P0_argmax over the 50
+videos and over the 5 folds (smallest attainable p = 0.0625). F1@50 with Idle:
+  variant        mean   median delta  improved/50  p (videos)  p (folds)  pooled F1@50
+  P0_argmax      52.9   -             -            -           -          45.5
+  P1_default     78.9   +27.0         50           1.8e-15     0.0625     78.2
+  P2_free_tuned  80.1   +28.1         50           1.8e-15     0.0625     79.5
+  P3_tuned       80.9   +28.4         50           1.8e-15     0.0625     80.4
+Pooled = segment counts summed over all 50 videos of a seed, mean of the 2 seeds (the 46.1 quoted above
+for P0 is the mean over units of the within-unit pooled value). Full tables:
+outputs/orsi/EXP6/decode/summary_videolevel.{md,json}.

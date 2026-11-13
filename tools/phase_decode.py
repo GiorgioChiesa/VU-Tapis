@@ -611,7 +611,7 @@ def main():
     ap.add_argument("--post-dir", required=True, help="phase_posteriors directory")
     ap.add_argument("--decoder", default="hsmm", choices=sorted(DECODERS))
     ap.add_argument("--param", nargs="*", default=[], help="decoder parameters key=value")
-    ap.add_argument("--prior-dir", help="fit priors on every video of this directory instead of leave-fold-out")
+    ap.add_argument("--prior-dir", help="fit priors on every video of this directory instead of leave-fold-out. WARNING: it must hold training videos only, never the evaluated (--post-dir / test) videos: priors fitted on test labels leak the ground truth")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     params = dict(parse_param(p) for p in args.param)

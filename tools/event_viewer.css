@@ -1,0 +1,31 @@
+/* Event view of the error viewer (tools/export_event_viewer.py). */
+body { font-family: sans-serif; margin: 16px; max-width: 1240px; color: #0b0b0b; background: #fcfcfb; }
+h1 small { font-weight: normal; color: #52514e; }
+table.ev td, table.ev th { padding: 3px 10px; text-align: right; border-bottom: 1px solid #e6e5e1; }
+table.ev td:first-child, table.ev th:first-child { text-align: left; }
+.player { padding-bottom: 6px; border-bottom: 1px solid #e6e5e1; }
+.player video { width: 448px; max-width: 100%; display: block; background: #000; }
+.pctl { margin: 4px 0; font-size: 13px; }
+.pctl button { font: inherit; margin-left: 2px; cursor: pointer; }
+.pctl button.on { font-weight: bold; }
+#now { margin-left: 12px; color: #52514e; }
+.note { font-size: 12px; color: #52514e; margin: 2px 0; }
+.bar { margin: 10px 0; font-size: 13px; }
+.flt { margin-right: 12px; cursor: pointer; }
+.clip { display: flex; flex-wrap: wrap; gap: 14px; margin: 18px 0; padding-top: 12px; border-top: 1px solid #e6e5e1; }
+.clip.hidden { display: none; }
+.clip.playing .grid-wrap { outline: 3px solid #2a78d6; }
+.grid-wrap { position: relative; width: 672px; max-width: 100%; line-height: 0; }
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); }
+.grid img { width: 100%; aspect-ratio: 1; display: block; background: #222; }
+.grid img.center { outline: 3px solid #ffd200; outline-offset: -3px; }
+.pred { position: absolute; top: 0; left: 0; z-index: 2; max-width: 90%; line-height: 1.3; font-size: 12px;
+        color: #fff; background: rgba(0, 0, 0, .68); border-left: 5px solid; padding: 3px 8px; }
+.meta { flex: 1; min-width: 300px; font-size: 13px; line-height: 1.6; }
+.to-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+body.to-off .to-svg, body.to-off .to-txt { display: none; }
+.to-lo { display: none; } body.to-low .to-lo { display: inline; }
+.to-txt { color: #333; }
+.to-bar { position: fixed; top: 8px; right: 8px; z-index: 10; background: #fff; border: 1px solid #bbb; border-radius: 6px;
+          padding: 6px 10px; font: 13px sans-serif; box-shadow: 0 1px 4px #0003; }
+.to-bar button { font: inherit; cursor: pointer; }

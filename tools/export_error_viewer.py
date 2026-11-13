@@ -106,7 +106,8 @@ def folder_name(it, names):
 
 
 def to_jpg(t):
-    return Image.fromarray((t.clamp(0, 1) * 255).byte().permute(1, 2, 0).numpy())
+    # orsi_tensors hold OpenCV frames in BGR order (check_webapp/main.py never converts them): flip to RGB
+    return Image.fromarray((t.flip(0).clamp(0, 1) * 255).byte().permute(1, 2, 0).numpy())
 
 
 def export_item(it, frame_dir, num_frames, sampling_rate, seq_mode):

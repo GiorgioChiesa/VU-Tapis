@@ -54,4 +54,34 @@ Stop rule: one pass of the grid below, no extra variants after seeing test-fold 
 bug is found after the run, fix and re-run everything once, and say so in the note.
 Budget: ~3 h wall clock, CPU only (<= 8 processes x 1 thread), no GPU hours.
 
-Result: (raw numbers, filled after the run)
+Result (2026-11-13, commit 6f3d6b6, data: F_base posteriors exported from EXP2 seed0/seed1, 50 videos,
+0 unmapped label rows; command run exactly as:
+  OMP_NUM_THREADS=1 python tools/exp6_decode_cv.py --runs outputs/orsi/EXP6/F_base/seed0 \
+      outputs/orsi/EXP6/F_base/seed1 --out outputs/orsi/EXP6/decode --workers 8
+140 units, 25 min wall clock. Full tables: outputs/orsi/EXP6/decode/summary.{md,json}.)
+Deviation: a smoke run on seed0 (4 default variants) showed that modal_order broke a median tie
+(Right vs Left lateral dissection, both 0.5) by class id, i.e. against the 30/50 majority. Fixed
+(tie broken by the mean position) before the full run; everything was run once after the fix.
+
+Esp6b, with Idle, mean over 10 units (delta vs P0; runs with F1@50 gain >= 10; rule):
+  P0_argmax           F1@50 52.9  edit 45.0  macroF1 0.764  acc 0.875  ratio 2.23  (pooled F1@50 46.1)
+  P0_ma15             70.0 (+17.1) edit 67.4 macroF1 +0.001 acc +0.000 ratio 1.16  9/10  WIN
+  P0_ma_tuned         77.2 (+24.3) edit 78.1 macroF1 -0.001 acc +0.000 ratio 0.91 10/10  WIN
+  P1_default          78.9 (+26.0) edit 79.5 macroF1 +0.000 acc +0.002 ratio 0.89 10/10  WIN
+  P1_tuned            78.8 (+25.9) edit 80.2 macroF1 -0.0105 acc -0.003 ratio 0.85 10/10 fail (macroF1)
+  P1_perphase         76.7 (+23.8) edit 77.9 macroF1 -0.025 acc -0.010 ratio 0.85 10/10  fail
+  P2_learned_default  76.9 (+24.0) edit 76.7 macroF1 +0.002 acc +0.001 ratio 0.94 10/10  WIN
+  P2_learned_tuned    80.0 (+27.1) edit 80.4 macroF1 +0.002 acc +0.003 ratio 0.87 10/10  WIN
+  P2_order_default    78.7 (+25.8) edit 80.3 macroF1 -0.025 acc -0.019 ratio 0.81 10/10  fail
+  P2_order_tuned      78.8 (+25.9) edit 79.7 macroF1 -0.026 acc -0.019 ratio 0.81 10/10  fail
+  P2_free_default     77.1 (+24.1) edit 76.6 macroF1 +0.001 acc +0.001 ratio 0.93 10/10  WIN
+  P2_free_tuned       80.1 (+27.2) edit 80.1 macroF1 +0.000 acc +0.003 ratio 0.86 10/10  WIN
+  P3_default          78.1 (+25.2) edit 78.2 macroF1 +0.003 acc +0.001 ratio 0.90 10/10  WIN
+  P3_tuned            80.9 (+28.0) edit 80.7 macroF1 +0.002 acc +0.002 ratio 0.85 10/10  WIN
+  Wilcoxon p for F1@50 = 0.002 (minimum, n = 10) for every variant. Boundary F1 +-5 s: 0.189 (P0) to
+  0.268 (P3_tuned). Tuned values at the grid edge: P3 penalty 50 (10/10), moving-average window 121
+  (10/10), HSMM temp 4 and dur_weight 2 (most units).
+Esp6a, oracle arm 2.3 (fold 0, seed 0): GPU 0.902, CPU start-crop 0.905 (reproduced within 0.015),
+  CPU centre-crop 0.912 (+0.007). Recall Idle 0.000 -> 0.991; Specimen_and_instrument_removal 0.000 ->
+  0.000. Over all 100 GPU oracle videos (2 seeds) acc 0.936 / 0.940; error share Specimen 0.33,
+  Idle 0.15-0.16, VU-anastomosis 0.11-0.12.

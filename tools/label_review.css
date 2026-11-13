@@ -21,7 +21,7 @@ tr.wrong td:nth-child(6) { color: var(--warn); }
 .st-confirmed { color: var(--ok); } .st-modified { color: var(--accent); font-weight: 600; } .st-skipped { color: var(--muted); }
 .label-top { display: flex; gap: 24px; font-weight: 600; margin-bottom: 6px; }
 #saved-msg { color: var(--warn); }
-.label-main { display: flex; gap: 16px; align-items: flex-start; }
+.label-main { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 #grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; width: min(62vw, calc(100vh - 70px)); flex: none; }
 #grid img { width: 100%; aspect-ratio: 1; display: block; border: 2px solid transparent; cursor: pointer; }
 #grid img.orig { border: 2px dashed var(--key); }

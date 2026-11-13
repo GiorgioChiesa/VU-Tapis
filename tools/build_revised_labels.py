@@ -135,17 +135,46 @@ def events_lookup_of(dfs):
     return lk
 
 
+# explicit merges of ``Orsi.collapse_event_dfs`` (tapis/datasets/orsi.py); left/right are merged too
+COLLAPSE = {
+    "instrument_swap:_removal": "removal_of_robotic_instruments",
+    "hemolock_clip_on_right_pedicle": "metal_clip_on_right_pedicle",
+    "hemolock_clip_on_left_pedicle": "metal_clip_on_left_pedicle",
+    "insert_gauze": "insert_hemostatic_agens",
+    "cutting_the_needles": "removing_needles",
+}
+
+
+def collapse_key(name):
+    """
+    Name key under which ``collapse_event_dfs`` merges events.
+
+    >>> collapse_key("Incision peritoneum - left") == collapse_key("Incision_peritoneum_-_right")
+    True
+    >>> collapse_key("Instrument swap: removal") == collapse_key("Removal of robotic instruments")
+    True
+    """
+    n = str(name).strip().lower().replace(" ", "_")
+    n = COLLAPSE.get(n, n)
+    return n.replace("left", "").replace("right", "")
+
+
 def find_source_row(df, rec, meta):
-    """Index of the CSV row an item comes from: the row of its second with its class."""
+    """
+    Index of the CSV row an item comes from: among the rows of its second (Idle or not as the
+    item), the one with the class's global id, else the one whose name collapses to the class,
+    else the only one.
+    """
     at = df.index[df["second"] == rec["original_second"]]
     idle_gid = meta["class_global_ids"][meta["idle"]]
     is_event = rec["original_class"] != meta["idle"]
     cand = [i for i in at if (df.at[i, "event_id"] != idle_gid) == is_event]
-    exact = [i for i in cand if df.at[i, "event_id"] == meta["class_global_ids"][rec["original_class"]]]
-    if len(exact) == 1:
-        return exact[0]
-    if len(cand) == 1:  # collapsed class: the CSV keeps the raw name
-        return cand[0]
+    for match in (lambda i: df.at[i, "event_id"] == meta["class_global_ids"][rec["original_class"]],
+                  lambda i: collapse_key(df.at[i, "event_name"]) == collapse_key(meta["class_csv_names"][rec["original_class"]]),
+                  lambda i: True):
+        hit = [i for i in cand if match(i)]
+        if len(hit) == 1:
+            return hit[0]
     raise LookupError(f"{rec['id']}: {len(cand)} candidate rows at second {rec['original_second']}")
 
 

@@ -138,6 +138,18 @@ def test_control_to_event_and_event_to_idle():
     assert ev(new, 15) == ["Event_B"] and ev(new, 10) == ["Idle"]
 
 
+def test_source_row_of_collapsed_class_in_shared_second():
+    df = toy_csv()
+    extra = df[df.second == 10].copy()
+    extra[["event_id", "event_name", "classes_id", "classes_name"]] = [99, "Event left_A", 4, "grpL"]
+    df2 = pd.concat([df, extra], ignore_index=True)  # second 10: raw B + a raw event that collapses to A
+    meta = dict(META, class_csv_names=["Idle", "Event right_A", "Event_B"])
+    i = brl.find_source_row(df2, rec(10, 1, 1, 0), meta)
+    assert df2.at[i, "event_id"] == 99
+    i = brl.find_source_row(df2, rec(10, 2, 2, 0), meta)
+    assert df2.at[i, "event_id"] == 12
+
+
 def test_skip_changes_nothing():
     new, n = build([rec(5, 1, 2, +4, skipped=True)])
     orig = toy_csv()

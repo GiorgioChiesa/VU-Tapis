@@ -6,6 +6,8 @@ For each second of a video the clip is built exactly as in training/validation
 (`Orsi.__getitem__`): `utils.get_sequence` with the checkpoint's DATA.SEQ_MODE,
 NUM_FRAMES and SAMPLING_RATE over the rows of `{patient}_all_labels.csv`, frames
 loaded from the pre-computed `Video_1fps/*.pt` tensors and fed as CTHW in fp32.
+The .pt tensors are stored BGR (OpenCV order); ``--flip-channels`` feeds them as RGB
+to encoders trained on RGB.
 
 Outputs one `{patient}.npz` per video with the per-second probabilities of every
 task (`probs_steps`, `probs_phases`, ...) plus `second` and `frame_id`. These
@@ -224,6 +226,11 @@ def main():
         help="external datasets read <frame-dir>/meta.json and <video>/labels.npz from tools/prepare_external.py",
     )
     parser.add_argument("--static", action="store_true", help="clip = center frame repeated NUM_FRAMES times")
+    parser.add_argument(
+        "--flip-channels",
+        action="store_true",
+        help="orsi only: reverse the channel order of the .pt frames (stored BGR) before normalisation",
+    )
     args = parser.parse_args()
 
     run = Path(args.run).resolve()
@@ -251,6 +258,8 @@ def main():
     meta["features"] = args.features
     meta["encoder_ckpt"] = args.encoder_ckpt
     meta["normalize"] = args.normalize
+    if args.flip_channels:  # absent key = historical (unflipped, BGR) features
+        meta["flip_channels"] = True
     if args.dataset != "orsi" or args.static:  # Orsi defaults keep the historical meta.json
         meta["dataset"] = args.dataset
         meta["static"] = args.static
@@ -269,6 +278,8 @@ def main():
         if args.dataset == "orsi":
             labels = pd.read_csv(os.path.join(args.frame_dir, patient, "Label", f"{patient}_all_labels.csv"))
             frames = load_frames(args.frame_dir, patient, labels["frame_path"].tolist())
+            if args.flip_channels:
+                frames = frames.flip(1)  # BGR -> RGB
             if args.normalize:
                 mean = torch.tensor(cfg.DATA.MEAN).view(1, 3, 1, 1)
                 std = torch.tensor(cfg.DATA.STD).view(1, 3, 1, 1)

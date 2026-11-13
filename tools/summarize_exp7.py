@@ -113,6 +113,7 @@ def main():
         table[v] = {"n_runs": len(rr), **{k: [float(np.mean([m[k] for m in rr.values()])),
                                               float(np.std([m[k] for m in rr.values()]))] for k in KEYS}}
         table[v]["per_phase_F1"] = np.nanmean([m["per_phase_F1"] for m in rr.values()], 0).tolist()
+        table[v]["runs"] = {f"{s}/{f}": {k: m[k] for k in KEYS} for (s, f), m in sorted(rr.items())}
     vs_ref = {v: paired(rr, runs[REF]) for v, rr in runs.items() if v != REF and REF in runs}
     times = {}
     for arm in sorted({v.split("@")[0] for v in runs} - {REF}):

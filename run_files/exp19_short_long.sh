@@ -19,7 +19,7 @@ EVAL="--fractional-gt --ignore-dir $LAB1 --classes short:$SHORT long:$LONG"
 COMMON=(--ref-run $MAIN/outputs/orsi/LONG/control/totale --init-ckpt $MAIN/data/pretrained_models/train/LONG.pyth
         --targets dilate3 --seeds 0 1)
 # arms L and S differ from A0 by: revised labels, 20 Idle per patient (gap 30 s), ORSI_AUG augmentation
-SET=(ENDOVIS_DATASET.ADD_IDLE 20 DATA.IDLE_GAP_SEC 30.0 ORSI_AUG.ENABLE True)
+SET=(ENDOVIS_DATASET.ADD_IDLE 20 DATA.IDLE_GAP_SEC 30.0 ORSI_AUG.ENABLE True ORSI_AUG.RAND_AUG rand-m5-n2)
 
 case "${1:-}" in
   a0)

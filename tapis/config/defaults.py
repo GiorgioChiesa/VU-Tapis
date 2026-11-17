@@ -617,6 +617,33 @@ _C.DATA.FRAME_DIR = ""
 # event. <= 0 keeps the historical rule (30 compared with frame_id differences, i.e. ~0.5 s).
 _C.DATA.IDLE_GAP_SEC = -1.0
 
+# Orsi only: clip-consistent training augmentation (tapis/datasets/clip_augment.py). Every random
+# parameter is drawn once per clip and applied to all its frames. Off by default.
+_C.ORSI_AUG = CfgNode()
+_C.ORSI_AUG.ENABLE = False
+_C.ORSI_AUG.FLIP_P = 0.5
+_C.ORSI_AUG.CROP_P = 1.0
+_C.ORSI_AUG.CROP_SCALE = [0.6, 1.0]  # area fraction of the random crop, resized back
+_C.ORSI_AUG.ROT_P = 0.5
+_C.ORSI_AUG.ROT_DEG = 10.0
+_C.ORSI_AUG.COLOR_P = 0.8
+_C.ORSI_AUG.BRIGHTNESS = 0.3
+_C.ORSI_AUG.CONTRAST = 0.3
+_C.ORSI_AUG.SATURATION = 0.3
+_C.ORSI_AUG.RAND_AUG = "rand-m7-n4"  # "" disables
+_C.ORSI_AUG.RAND_AUG_P = 1.0
+_C.ORSI_AUG.BLUR_P = 0.2
+_C.ORSI_AUG.BLUR_SIGMA = [0.5, 2.0]
+_C.ORSI_AUG.SMOKE_P = 0.2
+_C.ORSI_AUG.SMOKE_ALPHA = [0.1, 0.5]
+_C.ORSI_AUG.SMOKE_CONTRAST = [0.6, 0.9]
+_C.ORSI_AUG.SPECULAR_P = 0.2
+_C.ORSI_AUG.SPECULAR_N = [1, 4]
+_C.ORSI_AUG.ERASE_P = 0.25
+# Training only: the clip centre moves uniformly by up to this many label rows around the keyframe
+# (the label stays the keyframe's). 1 fps: rows = s; 4 fps: rows = 0.25 s.
+_C.ORSI_AUG.TEMPORAL_JITTER_ROWS = 0
+
 # Eigenvalues for PCA jittering. Note PCA is RGB based.
 _C.DATA.TRAIN_PCA_EIGVAL = [0.225, 0.224, 0.229]
 

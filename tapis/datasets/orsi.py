@@ -674,7 +674,7 @@ class Orsi(torch.utils.data.Dataset):
             return self._getitem_grid(clip, df)
 
         seq = utils.get_sequence(
-            df["frame_id"].to_list().index(clip["frame_id"]),
+            self._jittered_center(df["frame_id"].to_list().index(clip["frame_id"]), len(df)),
             self._seq_len,
             self._sample_rate,
             num_frames=len(df),
@@ -698,6 +698,7 @@ class Orsi(torch.utils.data.Dataset):
         #     imgs, _, _ = self._images_and_boxes_preprocessing_cv2(imgs, boxes=None, image=None)
         # else:
         imgs = imgs.permute(3, 0, 1, 2)  # convert to CTHW
+        imgs = self._augment(imgs)
         # imgs = utils.pack_pathway_output(self.cfg, imgs)
 
         # convert label to numeric if needed
@@ -725,6 +726,28 @@ class Orsi(torch.utils.data.Dataset):
 
         return [imgs], all_labels, extra_data, frame_identifier
 
+    def _aug_on(self):
+        aug = getattr(self.cfg, "ORSI_AUG", None)
+        return self._split == "train" and aug is not None and aug.ENABLE
+
+    def _jittered_center(self, idx, n):
+        """Keyframe row index, moved by ORSI_AUG.TEMPORAL_JITTER_ROWS when training with ORSI_AUG."""
+        if not self._aug_on():
+            return idx
+        from tapis.datasets.clip_augment import temporal_shift
+
+        return min(max(idx + temporal_shift(int(self.cfg.ORSI_AUG.TEMPORAL_JITTER_ROWS)), 0), n - 1)
+
+    def _augment(self, imgs):
+        """CTHW float clip -> same, with one ORSI_AUG parameter set for all frames (train only)."""
+        if not self._aug_on():
+            return imgs
+        from tapis.datasets import clip_augment
+
+        x = imgs.permute(1, 0, 2, 3).float()  # T,C,H,W
+        p = clip_augment.sample_params(self.cfg.ORSI_AUG, x.shape[-2], x.shape[-1])
+        return clip_augment.apply(x, p).permute(1, 0, 2, 3).contiguous()
+
     def _frames_array(self, patient):
         """Memory-mapped uint8 [N, 3, H, W] frame cache of ``patient`` (one handle per worker)."""
         cache = self.__dict__.setdefault("_frame_arrays", {})
@@ -744,7 +767,7 @@ class Orsi(torch.utils.data.Dataset):
         grid = df.drop_duplicates("frame_id")
         ids = grid["frame_id"].to_numpy()
         seq = utils.get_sequence(
-            int(np.searchsorted(ids, clip["frame_id"])),
+            self._jittered_center(int(np.searchsorted(ids, clip["frame_id"])), len(ids)),
             self._seq_len,
             self._sample_rate,
             num_frames=len(ids),
@@ -754,6 +777,7 @@ class Orsi(torch.utils.data.Dataset):
         arr = self._frames_array(clip["patient_name"])
         imgs = torch.from_numpy(np.ascontiguousarray(arr[rows])).float() / 255.0  # T,C,H,W
         imgs = imgs.permute(1, 0, 2, 3)  # CTHW
+        imgs = self._augment(imgs)
         all_labels, extra_data = {}, {}
         for task in self._frame_tasks:
             col = {"steps": "event", "actions": "event", "phases": "phase"}.get(task, task)

@@ -17,7 +17,9 @@ SHORT=Grasping_catheter_tip,Clip_or_coagulate_vas_deferens_-_right,Identificatio
 LONG=Start_dissection,Incision_of_Denonvilliers_fascia,Transection_of_the_urethra,Stitch_in_bladder
 EVAL="--fractional-gt --ignore-dir $LAB1 --classes short:$SHORT long:$LONG"
 COMMON=(--ref-run $MAIN/outputs/orsi/LONG/control/totale --init-ckpt $MAIN/data/pretrained_models/train/LONG.pyth
-        --set ENDOVIS_DATASET.ADD_IDLE 20 DATA.IDLE_GAP_SEC 30 --targets dilate3 --seeds 0 1)
+        --targets dilate3 --seeds 0 1)
+# arms L and S differ from A0 by: revised labels, 20 Idle per patient (gap 30 s), ORSI_AUG augmentation
+SET=(ENDOVIS_DATASET.ADD_IDLE 20 DATA.IDLE_GAP_SEC 30.0 ORSI_AUG.ENABLE True)
 
 case "${1:-}" in
   a0)
@@ -34,10 +36,12 @@ case "${1:-}" in
   L)
     mkdir -p results/L
     $PY tools/cv_finetune.py --gpus 2 3 --name exp19_L "${COMMON[@]}" --label-dir $LAB1 \
+      --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 2 \
       --out results/L/LONG/cv_ft --temporal-out results/L/TEMPORAL --eval-args "$EVAL" ;;
   S0)
     mkdir -p results/S
     $PY tools/cv_finetune.py --gpus 3 --folds 0 --name exp19_S "${COMMON[@]}" --label-dir $LAB4 \
+      --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 1 \
       --fps 4 --fps-frame-dir $FR4 --temporal-args "--k-sec 3 --crop 16384" \
       --out results/S/LONG/cv_ft --temporal-out results/S/TEMPORAL --eval-args "$EVAL" ;;
   *) echo "usage: $0 a0|L|S0" >&2; exit 2 ;;

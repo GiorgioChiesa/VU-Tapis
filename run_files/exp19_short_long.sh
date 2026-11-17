@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # EXP-19 (short vs long context on revised labels). Usage, from the worktree root, inside tmux:
 #   bash run_files/exp19_short_long.sh a0   # step 4: A0 (cv_ft_dilate3) on the revised ground truth, CPU
-#   bash run_files/exp19_short_long.sh L    # step 5: arm L, 5 folds, GPUs 2 3
-#   bash run_files/exp19_short_long.sh S0   # step 6: arm S pilot, fold 0, GPU 3
+#   bash run_files/exp19_short_long.sh L      # step 5: arm L, 5 folds, GPUs 2 3
+#   bash run_files/exp19_short_long.sh A0aug  # A0 retrained with ORSI_AUG only (original labels, 10 Idle)
+#   bash run_files/exp19_short_long.sh S0     # step 6: arm S pilot, fold 0, GPU 3
+#   bash run_files/exp19_short_long.sh S      # step 7: arm S, folds 1-4 (only if the pilot gate passes)
+# GPUS and FOLDS (space-separated) override the GPUs / folds of L, A0aug and S, e.g. GPUS=2 FOLDS="0 3".
 # Every step is resumable (.done markers of cv_finetune.py, existing reports are kept).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -35,14 +38,27 @@ case "${1:-}" in
     touch results/A0/.done ;;
   L)
     mkdir -p results/L
-    $PY tools/cv_finetune.py --gpus 2 3 --name exp19_L "${COMMON[@]}" --label-dir $LAB1 \
+    $PY tools/cv_finetune.py --gpus ${GPUS:-2 3} --folds ${FOLDS:-0 1 2 3 4} --name exp19_L "${COMMON[@]}" --label-dir $LAB1 \
       --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 2 \
       --out results/L/LONG/cv_ft --temporal-out results/L/TEMPORAL --eval-args "$EVAL" ;;
+  A0aug)
+    # A0 setup (original labels, ADD_IDLE 10, original Idle gap) + the augmentation of arm L;
+    # evaluated on the revised ground truth like every arm: A0aug - A0 = augmentation, L - A0aug = labels + Idle
+    mkdir -p results/A0aug
+    $PY tools/cv_finetune.py --gpus ${GPUS:-2 3} --folds ${FOLDS:-0 1 2 3 4} --name exp19_A0aug "${COMMON[@]}" \
+      --set ORSI_AUG.ENABLE True ORSI_AUG.RAND_AUG rand-m5-n2 ORSI_AUG.TEMPORAL_JITTER_ROWS 2 \
+      --out results/A0aug/LONG/cv_ft --temporal-out results/A0aug/TEMPORAL --eval-args "$EVAL --label-dir $LAB1" ;;
   S0)
     mkdir -p results/S
     $PY tools/cv_finetune.py --gpus 3 --folds 0 --name exp19_S "${COMMON[@]}" --label-dir $LAB4 \
       --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 1 \
       --fps 4 --fps-frame-dir $FR4 --temporal-args "--k-sec 3 --crop 16384" \
       --out results/S/LONG/cv_ft --temporal-out results/S/TEMPORAL --eval-args "$EVAL" ;;
-  *) echo "usage: $0 a0|L|S0" >&2; exit 2 ;;
+  S)
+    mkdir -p results/S
+    $PY tools/cv_finetune.py --gpus ${GPUS:-3} --folds ${FOLDS:-1 2 3 4} --name exp19_S "${COMMON[@]}" --label-dir $LAB4 \
+      --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 1 \
+      --fps 4 --fps-frame-dir $FR4 --temporal-args "--k-sec 3 --crop 16384" \
+      --out results/S/LONG/cv_ft --temporal-out results/S/TEMPORAL --eval-args "$EVAL" ;;
+  *) echo "usage: $0 a0|L|A0aug|S0|S" >&2; exit 2 ;;
 esac

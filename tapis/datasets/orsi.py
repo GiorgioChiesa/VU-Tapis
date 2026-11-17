@@ -219,6 +219,16 @@ class Orsi(torch.utils.data.Dataset):
 
     def _locate_label_file(self, patient):
         candidates = []
+        label_dir = getattr(self.cfg.DATA, "LABEL_DIR", "")
+        if label_dir:
+            candidates = [
+                os.path.join(label_dir, patient, f"{patient}_all_labels.csv"),
+                os.path.join(label_dir, patient, self.label_folder, f"{patient}_all_labels.csv"),
+            ]
+            for path in candidates:
+                if os.path.exists(path):
+                    return path
+            raise FileNotFoundError(f"No label CSV for '{patient}' in DATA.LABEL_DIR. Searched: {candidates}")
         if self.label_dir:
             candidates += [
                 os.path.join(
@@ -251,6 +261,8 @@ class Orsi(torch.utils.data.Dataset):
             dfs.append(df)
 
         self.dfs = pd.concat(dfs, ignore_index=True)
+        if "ignore" in self.dfs.columns:
+            self.dfs["ignore"] = self.dfs["ignore"].fillna(0).astype(int)
 
         if self.exclude_event_names:
             exclude = self.exclude_event_names
@@ -261,6 +273,11 @@ class Orsi(torch.utils.data.Dataset):
             ].reset_index(drop=True)
         else:
             self.filtered_dfs = self.dfs.copy()
+
+        if "ignore" in self.filtered_dfs.columns:  # rows inside an ignore window are never samples
+            n_ign = int((self.filtered_dfs["ignore"] == 1).sum())
+            self.filtered_dfs = self.filtered_dfs[self.filtered_dfs["ignore"] != 1].reset_index(drop=True)
+            print(f"Dropped {n_ign} rows with ignore=1 from {self._split} samples")
 
         if getattr(self.cfg.ENDOVIS_DATASET, "ADD_IDLE", 0) > 0:
             self.filtered_dfs = self.filtered_dfs[
@@ -407,6 +424,8 @@ class Orsi(torch.utils.data.Dataset):
         )
 
         idle_seconds_needed = 30
+        gap_sec = float(getattr(self.cfg.DATA, "IDLE_GAP_SEC", -1.0))
+        per_patient = {}
         idle_frames = []
         selected_frame_ids = set()
 
@@ -419,26 +438,27 @@ class Orsi(torch.utils.data.Dataset):
                 continue
 
             patient_df = patient_df.sort_values("frame_id").reset_index(drop=True)
-            idle_rows = (
-                patient_df[patient_df["event_name"].str.strip().str.lower() == "idle"]
-                .sample(frac=1, random_state=1)
-                .reset_index(drop=True)
-            )
+            idle_pool = patient_df[patient_df["event_name"].str.strip().str.lower() == "idle"]
+            if "ignore" in idle_pool.columns:
+                idle_pool = idle_pool[idle_pool["ignore"] != 1]
+            idle_rows = idle_pool.sample(frac=1, random_state=1).reset_index(drop=True)
 
             if idle_rows.empty:
                 continue
 
+            # historical rule: frame_id units (~60 per s); with DATA.IDLE_GAP_SEC > 0: seconds
+            pos_col, gap = ("second", gap_sec) if gap_sec > 0 else ("frame_id", idle_seconds_needed)
             non_idle_events = patient_df[
                 patient_df["event_name"].str.strip().str.lower() != "idle"
-            ]["frame_id"].values
+            ][pos_col].values
 
             valid_idle_rows = []
             for _, row in idle_rows.iterrows():
-                frame_id = row["frame_id"]
+                frame_id = row[pos_col]
 
                 too_close = False
                 for event_frame_id in non_idle_events:
-                    if abs(event_frame_id - frame_id) <= idle_seconds_needed:
+                    if abs(event_frame_id - frame_id) <= gap:
                         too_close = True
                         break
 
@@ -474,11 +494,18 @@ class Orsi(torch.utils.data.Dataset):
             #         selected_frame_ids.add(best_candidate["frame_id"])
 
             idle_frames.extend(valid_idle_rows)
+            per_patient[patient_name] = len(valid_idle_rows)
 
         if idle_frames:
             idle_df = pd.DataFrame(idle_frames)
             self.filtered_dfs = pd.concat([self.filtered_dfs, idle_df], ignore_index=True)
             print(f"Added {len(idle_frames)} Idle frames to {self._split} dataset")
+            if gap_sec > 0:
+                counts = list(per_patient.values())
+                print(
+                    f"Idle per patient ({self._split}, gap {gap_sec:g} s): min {min(counts)} max {max(counts)} "
+                    f"over {len(counts)} patients"
+                )
 
     def _select_center_label(self, patient, frame_ids, seq):
         n = len(frame_ids)
@@ -643,6 +670,8 @@ class Orsi(torch.utils.data.Dataset):
         clip = target_df.iloc[idx]
 
         df = self.dfs[self.dfs["patient_id"] == clip["patient_id"]]
+        if int(getattr(self.cfg.DATA, "FPS", 1)) != 1:
+            return self._getitem_grid(clip, df)
 
         seq = utils.get_sequence(
             df["frame_id"].to_list().index(clip["frame_id"]),
@@ -695,6 +724,42 @@ class Orsi(torch.utils.data.Dataset):
         frame_identifier = clip["frame_path"]
 
         return [imgs], all_labels, extra_data, frame_identifier
+
+    def _frames_array(self, patient):
+        """Memory-mapped uint8 [N, 3, H, W] frame cache of ``patient`` (one handle per worker)."""
+        cache = self.__dict__.setdefault("_frame_arrays", {})
+        if patient not in cache:
+            fps = int(self.cfg.DATA.FPS)
+            cache[patient] = np.load(
+                os.path.join(self.cfg.DATA.FRAME_DIR, patient, f"frames_{fps}fps.npy"), mmap_mode="r"
+            )
+        return cache[patient]
+
+    def _getitem_grid(self, clip, df):
+        """
+        Clip of a DATA.FPS > 1 label row: NUM_FRAMES rows of the patient's frame grid (unique
+        frame_id, i.e. one row per 1 / FPS s), frames from the uint8 cache, same value range
+        (x / 255) and layout as the .pt path.
+        """
+        grid = df.drop_duplicates("frame_id")
+        ids = grid["frame_id"].to_numpy()
+        seq = utils.get_sequence(
+            int(np.searchsorted(ids, clip["frame_id"])),
+            self._seq_len,
+            self._sample_rate,
+            num_frames=len(ids),
+            mode=self._seq_mode,
+        )
+        rows = ids[seq]
+        arr = self._frames_array(clip["patient_name"])
+        imgs = torch.from_numpy(np.ascontiguousarray(arr[rows])).float() / 255.0  # T,C,H,W
+        imgs = imgs.permute(1, 0, 2, 3)  # CTHW
+        all_labels, extra_data = {}, {}
+        for task in self._frame_tasks:
+            col = {"steps": "event", "actions": "event", "phases": "phase"}.get(task, task)
+            all_labels[task] = int(clip.get(f"{col}_id", -1)) if col == "classes" else clip.get(f"{col}_id", -1)
+            extra_data[f"{task}_name"] = clip.get(f"{col}_name", "unknown")
+        return [imgs], all_labels, extra_data, f"{clip['frame_path']}#{int(clip['frame_id'])}"
 
     def keyframe_mapping(self, video_idx, sec_idx, sec):
         return round(sec / 60)

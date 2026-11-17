@@ -26,6 +26,13 @@ Predictions for the validation and test videos are written in the same format as
 `infer_untrimmed.py` (`probs_steps`, `probs_phases`, `second`, `meta.json`), so
 `tools/eval_untrimmed.py` and `tools/eval_constraints.py` evaluate them unchanged.
 
+Other label sets and frame rates (defaults reproduce the historical runs): ``--label-dir`` takes
+targets from revised CSVs (default: the encoder run's DATA.LABEL_DIR, else the originals);
+``--fps`` is the feature rate (default: the features' ``meta.json``, else 1): event times are seconds
+and land on row ``round(t * fps)``, ``--k`` counts rows unless ``--k-sec`` gives it in seconds, and
+the quick evaluation keeps its NMS window and tolerances in seconds. Rows with ``ignore=1`` get no
+event loss and their window is left out of the quick evaluation. ``--fractional-gt`` uses ``time_s``.
+
 Example:
     python tools/train_temporal.py \
         --feat-dir outputs/orsi/LONG/control/totale/untrimmed/checkpoint_best_steps/all \
@@ -47,7 +54,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from eval_constraints import read_phase_labels
-from eval_untrimmed import build_label_table, global_to_local, idle_index, load_cfg
+from eval_untrimmed import (
+    build_label_table,
+    global_to_local,
+    gt_time,
+    idle_index,
+    ignore_windows,
+    label_dir_of,
+    load_cfg,
+    load_labels,
+)
 from tapis.evaluate import spotting_eval as se
 
 # events stamped on the last frame where the object is visible (protocol: removals)
@@ -164,11 +180,33 @@ def predict(model, x, bg, fg):
     return ev, F.softmax(ph, 1)[0].T.cpu().numpy()
 
 
-def quick_eval(preds, data, bg, n_classes, nms_window=5.0):
+def ignore_rows(length, intervals, fps=1):
+    """
+    Boolean [length] mask of the rows whose time (row / fps) falls in an ignore interval.
+
+    >>> ignore_rows(8, [(0.875, 1.625)], 4).astype(int).tolist()
+    [0, 0, 0, 0, 1, 1, 1, 0]
+    >>> ignore_rows(5, [(1.5, 2.5)], 1).astype(int).tolist()
+    [0, 0, 1, 0, 0]
+    """
+    t = np.arange(length) / fps
+    out = np.zeros(length, dtype=bool)
+    for lo, hi in intervals:
+        out |= (t >= lo) & (t <= hi)
+    return out
+
+
+def quick_eval(preds, data, bg, n_classes, nms_window=5.0, fps=1):
     """Aggregate spotting / phase metrics on held-out videos (same definitions as eval_untrimmed)."""
-    dets = {p: se.decode_events(ev, nms_window, 0.0, background_classes=bg) for p, (ev, _) in preds.items()}
+    dets = {
+        p: se.drop_ignored(
+            [(c, t / fps, s) for c, t, s in se.decode_events(ev, se.window_frames(nms_window, fps), 0.0, background_classes=bg)],
+            data[p].get("ignore", []),
+        )
+        for p, (ev, _) in preds.items()
+    }
     gts = {p: data[p]["events"] for p in preds}
-    durations = {p: float(len(data[p]["x"])) for p in preds}
+    durations = {p: float(len(data[p]["x"])) / fps for p in preds}
     res = se.spotting_map(dets, gts, (1, 2, 3, 4, 5, 10, 15, 20, 25, 30), n_classes, ignore_classes=bg)
     op = se.best_f1_threshold(dets, gts, 5, durations, np.round(np.arange(0.05, 1.0, 0.05), 2), bg)
     y = np.concatenate([data[p]["phase"] for p in preds])
@@ -192,7 +230,11 @@ def main():
     parser.add_argument("--frame-dir", default="/home/gchie/workspace/data/orsi_tensors")
     parser.add_argument("--out", required=True)
     parser.add_argument("--target", default="asym", choices=["point", "dilate", "gauss", "asym"])
-    parser.add_argument("--k", type=int, default=3)
+    parser.add_argument("--k", type=int, default=3, help="target half width in rows")
+    parser.add_argument("--k-sec", type=float, help="target half width in seconds (overrides --k: round(k_sec * fps))")
+    parser.add_argument("--label-dir", help="revised labels <dir>/RARPxx/RARPxx_all_labels.csv (default: run's)")
+    parser.add_argument("--fps", type=float, help="feature rows per second (default: features meta.json, else 1)")
+    parser.add_argument("--fractional-gt", action="store_true", help="event times from time_s instead of second")
     parser.add_argument("--sigma", type=float, default=2.0)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=5e-4)
@@ -246,22 +288,30 @@ def main():
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
 
-    table, ids = build_label_table(cfg, patients, args.frame_dir, out)
+    fps = args.fps or fmeta.get("fps", 1)
+    label_dir = label_dir_of(cfg, args.label_dir)
+    k_rows = int(round(args.k_sec * fps)) if args.k_sec is not None else args.k
+    ign = ignore_windows(args.frame_dir, label_dir, patients, fps)
+    table, ids = build_label_table(cfg, patients, args.frame_dir, out, label_dir)
     g2l, names = global_to_local(run, "steps", ids["steps"])
     g2l_ph, ph_names = global_to_local(run, "phases", ids["phases"])
     bg = idle_index(names)
     fg = [c for c in range(len(names)) if c not in bg]
     offset = {i for i, n in enumerate(names) if n.lower() in OFFSET_EVENTS}
     events = table[(table["event_name"].str.strip().str.lower() != "idle") & table["event_id"].isin(g2l)]
+    if "ignore" in events:
+        events = events[events["ignore"].fillna(0).astype(int) != 1]
 
     data = {}
     for p in patients:
         npz = np.load(feat_dir / f"{p}.npz")
         x = npz["features"].astype(np.float32)
-        ph = read_phase_labels(args.frame_dir, p, g2l_ph)
-        ev = [(g2l[r.event_id], float(r.second)) for r in events[events["patient_name"] == p].itertuples()]
-        y, m = event_targets(len(x), ev, len(names), args.target, args.k, args.sigma, offset)
-        data[p] = {"x": x, "phase": ph, "y": y, "m": m, "second": npz["second"], "events": ev}
+        ph = read_phase_labels(args.frame_dir, p, g2l_ph, label_dir, fps)
+        ev = [(g2l[r.event_id], gt_time(r, args.fractional_gt)) for r in events[events["patient_name"] == p].itertuples()]
+        y, m = event_targets(len(x), [(c, t * fps) for c, t in ev], len(names), args.target, k_rows, args.sigma, offset)
+        if ign[p]:
+            m[ignore_rows(len(x), ign[p], fps)] = 0.0
+        data[p] = {"x": x, "phase": ph, "y": y, "m": m, "second": npz["second"], "events": ev, "ignore": ign[p]}
     mu = np.concatenate([data[p]["x"] for p in split["train"]]).mean(0)
     sd = np.concatenate([data[p]["x"] for p in split["train"]]).std(0) + 1e-6
 
@@ -333,7 +383,7 @@ def main():
                     )
                 )
             preds = {p: predict(model, tensors(p)[0], bg, fg) for p in split["val"]}
-            row.update({f"val/{k}": v for k, v in quick_eval(preds, data, bg, len(names)).items()})
+            row.update({f"val/{k}": v for k, v in quick_eval(preds, data, bg, len(names), fps=fps).items()})
             log.append(row)
             print(
                 f"epoch {epoch + 1}: train {row['train/loss']:.4f} val {row['val/loss']:.4f} "
@@ -356,6 +406,8 @@ def main():
             fmeta, split=s, patients=split[s], train_patients=split["train"], temporal_model=str(out),
             target=args.target, cv_fold=args.cv_fold,
         )
+        if label_dir or fps != 1 or args.fractional_gt or args.k_sec is not None:
+            meta.update(fps=fps, label_dir=label_dir, fractional_gt=args.fractional_gt, k_rows=k_rows)
         (pred_dir / "meta.json").write_text(json.dumps(meta, indent=2))
         preds = {p: predict(model, tensors(p)[0], bg, fg) for p in split[s]}
         for p, (ev, ph) in preds.items():
@@ -366,7 +418,7 @@ def main():
                 probs_phases=ph.astype(np.float32),
             )
         if wb is not None:
-            wb.summary.update({f"final_{s}/{k}": v for k, v in quick_eval(preds, data, bg, len(names)).items()})
+            wb.summary.update({f"final_{s}/{k}": v for k, v in quick_eval(preds, data, bg, len(names), fps=fps).items()})
     if wb is not None:
         wb.finish()
     print(f"done: {out}")

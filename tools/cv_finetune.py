@@ -16,6 +16,13 @@ and shuffled with Random(1234), fold i = every 5th starting at i):
 Folds are distributed over the given GPUs (one fold at a time per GPU). Every step
 writes a `.done` marker, so the script can be relaunched and resumes.
 
+Variants (defaults reproduce the historical run): ``--label-dir`` trains and evaluates on other
+label CSVs (DATA.LABEL_DIR); ``--fps 4 --fps-frame-dir DIR`` fine-tunes and extracts features on the
+4 fps frame cache (DATA.FPS / DATA.FRAME_DIR, ``--label-dir`` must then be the grid labels);
+``--set KEY VALUE ...`` overrides config keys (e.g. ``ENDOVIS_DATASET.ADD_IDLE 20``);
+``--targets``, ``--seeds``, ``--temporal-args`` and ``--eval-args`` shape the temporal heads and
+their evaluation (seed s > 0 writes ``cv_ft_<target>_s<s>``).
+
 Example:
     nohup setsid python tools/cv_finetune.py --gpus 0 1 > outputs/untrimmed_logs/cv_finetune.log 2>&1 &
 """
@@ -24,6 +31,7 @@ import argparse
 import os
 import queue
 import random
+import shlex
 import subprocess
 import sys
 import threading
@@ -83,6 +91,24 @@ def host_paths(ens, data_dir):
     for key in ("FRAME_LIST_DIR", "ANNOTATION_DIR"):
         ens[key] = f"{data_dir}/coco"
     ens["VAL_COCO_ANNS"] = f"{data_dir}/coco/all_merged.json"
+
+
+def apply_overrides(cfg, pairs):
+    """
+    ``KEY.SUB VALUE`` pairs onto the nested config dict (values parsed as YAML).
+
+    >>> apply_overrides({"A": {"B": 1}}, ["A.B", "20", "A.C", "[1, 2]"])
+    {'A': {'B': 20, 'C': [1, 2]}}
+    """
+    if len(pairs) % 2:
+        raise ValueError(f"--set needs KEY VALUE pairs: {pairs}")
+    for key, val in zip(pairs[::2], pairs[1::2]):
+        node = cfg
+        *parents, leaf = key.split(".")
+        for k in parents:
+            node = node.setdefault(k, {})
+        node[leaf] = yaml.safe_load(val)
+    return cfg
 
 
 def wait_gpu_free(gpu, max_used_mib=1500, poll=60):
@@ -145,6 +171,12 @@ def fold_job(i, args, base_cfg, all_folds, gpu, splits):
     cfg["WANDB_ENABLE"] = args.wandb
     cfg["WANDB_API"] = ""  # login comes from ~/.netrc; never store the key in configs/logs
     cfg["TRAIN"]["CHECKPOINT_FILE_PATH"] = args.init_ckpt
+    if args.label_dir:
+        cfg["DATA"]["LABEL_DIR"] = args.label_dir
+    if args.fps != 1:
+        cfg["DATA"]["FPS"] = args.fps
+        cfg["DATA"]["FRAME_DIR"] = args.fps_frame_dir
+    apply_overrides(cfg, args.set)
     cfg_path = root / "config.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
 
@@ -156,28 +188,35 @@ def fold_job(i, args, base_cfg, all_folds, gpu, splits):
         logs / "finetune.log", gpu, root / ".finetune.done")
     # 2. features of all videos
     feat_dir = root / "untrimmed" / "checkpoint_best_steps" / "all"
+    fps_args = (["--fps", args.fps, "--label-dir", args.label_dir, "--frame-dir", args.fps_frame_dir]
+                if args.fps != 1 else ["--frame-dir", f"{args.data_dir}/orsi_tensors"])
     run([PY, "-W", "ignore", "tools/infer_untrimmed.py", "--run", root, "--ckpt", "checkpoint_best_steps.pyth",
-         "--split", "all", "--features", "--frame-dir", f"{args.data_dir}/orsi_tensors", "--gpu", 0],
+         "--split", "all", "--features", *fps_args, "--gpu", 0],
         logs / "features.log", gpu, root / ".features.done")
     # per-clip MViT on the held-out videos
     evals = [(feat_dir, held_out, "mvit")]
     # 3. temporal heads
-    for name, extra in TARGETS.items():
-        out = REPO / args.temporal_out / f"cv_ft_{name}" / f"fold{i}"
-        run([PY, "-W", "ignore", "tools/train_temporal.py", "--feat-dir", feat_dir, *extra, "--cv-fold", f"{i}/5",
-             "--out", out, "--gpu", 0, *(["--wandb"] if args.wandb else [])],
-            logs / f"temporal_{name}.log", gpu, root / f".temporal_{name}.done")
-        evals.append((out / "val", None, name))
+    for target in args.targets:
+        for seed in args.seeds:
+            name = target + (f"_s{seed}" if seed else "")
+            seed_args = ["--seed", seed] if seed else []
+            out = REPO / args.temporal_out / f"cv_ft_{name}" / f"fold{i}"
+            run([PY, "-W", "ignore", "tools/train_temporal.py", "--feat-dir", feat_dir, *TARGETS[target], "--cv-fold",
+                 f"{i}/5", "--out", out, "--gpu", 0, *seed_args, *shlex.split(args.temporal_args),
+                 *(["--wandb"] if args.wandb else [])],
+                logs / f"temporal_{name}.log", gpu, root / f".temporal_{name}.done")
+            evals.append((out / "val", None, name))
     # 4. evaluation
     for pred_dir, patients, name in evals:
         pts = ["--patients", *patients] if patients else []
+        ev_args = shlex.split(args.eval_args)
         run([PY, "-W", "ignore", "tools/eval_untrimmed.py", "--pred-dir", pred_dir,
-             "--frame-dir", f"{args.data_dir}/orsi_tensors", *pts],
+             "--frame-dir", f"{args.data_dir}/orsi_tensors", *pts, *ev_args],
             logs / f"eval_{name}.log", gpu, root / f".eval_{name}.done")
         if name != "mvit":
             run([PY, "-W", "ignore", "tools/eval_constraints.py", "--pred-dir", pred_dir,
                  "--frame-dir", f"{args.data_dir}/orsi_tensors", "--alpha", "0.1", "--phase-smooth", "1",
-                 "--gate-floor", "0.2"],
+                 "--gate-floor", "0.2", *ev_args],
                 logs / f"constraints_{name}.log", gpu, root / f".constraints_{name}.done")
     print(f"[gpu{gpu}] fold {i} complete", flush=True)
 
@@ -194,7 +233,17 @@ def main():
     parser.add_argument("--temporal-out", default="outputs/orsi/TEMPORAL")
     parser.add_argument("--inner-val", type=int, default=5)
     parser.add_argument("--no-wandb", dest="wandb", action="store_false")
+    parser.add_argument("--label-dir", default="", help="DATA.LABEL_DIR: <dir>/RARPxx/RARPxx_all_labels.csv")
+    parser.add_argument("--fps", type=int, default=1, help="DATA.FPS (>1 needs --fps-frame-dir and grid labels)")
+    parser.add_argument("--fps-frame-dir", help="DATA.FRAME_DIR: <dir>/RARPxx/frames_<fps>fps.npy")
+    parser.add_argument("--set", nargs="*", default=[], help="KEY VALUE config overrides, e.g. ENDOVIS_DATASET.ADD_IDLE 20")
+    parser.add_argument("--targets", nargs="+", default=list(TARGETS), choices=list(TARGETS))
+    parser.add_argument("--seeds", type=int, nargs="+", default=[0], help="temporal-head seeds")
+    parser.add_argument("--temporal-args", default="", help="extra train_temporal.py arguments (one string)")
+    parser.add_argument("--eval-args", default="", help="extra eval_untrimmed/eval_constraints arguments (one string)")
     args = parser.parse_args()
+    if args.fps != 1 and not (args.fps_frame_dir and args.label_dir):
+        parser.error("--fps > 1 needs --fps-frame-dir and --label-dir")
 
     base_cfg = torch.load(REPO / args.ref_run / args.ref_ckpt, map_location="cpu", weights_only=False)["cfg"]
     ens = yaml.safe_load(base_cfg)["ENDOVIS_DATASET"]
@@ -207,6 +256,7 @@ def main():
     check_cfg = load_cfg(REPO / args.ref_run, args.ref_ckpt)
     check_cfg.defrost()
     check_cfg.ENDOVIS_DATASET.FRAME_DIR = check_cfg.ENDOVIS_DATASET.ORSI_ROOT_DIR = f"{args.data_dir}/orsi_tensors"
+    check_cfg.DATA.LABEL_DIR = args.label_dir
     check_cfg.OUTPUT_DIR = str(REPO / args.out)
     (REPO / args.out).mkdir(parents=True, exist_ok=True)
     splits = {}

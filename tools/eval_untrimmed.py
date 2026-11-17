@@ -16,6 +16,17 @@ Reported (aggregate only, nothing per patient leaves the json):
     `nms` (per-class peak picking) and `argmax` (naive frame-wise classifier);
   * phases as dense labels: frame accuracy, macro F1 and frame-wise mAP.
 
+Options for other label sets and frame rates (defaults reproduce the historical evaluation):
+  * ``--label-dir``: ground truth from ``<label-dir>/RARPxx/RARPxx_all_labels.csv`` (e.g. the
+    revised labels of `build_revised_labels.py`); default: the run's DATA.LABEL_DIR, else the
+    original CSVs. Rows with ``ignore=1`` drop their ground-truth events, and detections falling
+    in an ignore window are discarded (for every decoder);
+  * ``--fps``: rows per second of the predictions (default: ``meta.json`` ``fps``, else 1). All
+    tolerances and the NMS window stay in seconds;
+  * ``--fractional-gt``: ground-truth time = the ``time_s`` column instead of the row's second;
+  * ``--classes NAME:c1,c2,...``: extra metrics restricted to a class subset (repeatable);
+  * ``--report-dir`` / ``--tag``: where the report (and the label-table scratch files) go.
+
 Example:
     python tools/eval_untrimmed.py \
         --pred-dir outputs/orsi/LONG/control/totale/untrimmed/checkpoint_best_steps/val \
@@ -56,7 +67,7 @@ def load_cfg(run, ckpt):
     return cfg
 
 
-def build_label_table(cfg, patients, frame_dir, out_dir):
+def build_label_table(cfg, patients, frame_dir, out_dir, label_dir=None):
     """
     Rows the training pipeline would use for `patients`, with *global* ids after collapsing.
 
@@ -68,6 +79,8 @@ def build_label_table(cfg, patients, frame_dir, out_dir):
     a fixed seed, so the Idle rows of `patients` are the same as in a split of their own.
     """
     cfg.defrost()
+    if label_dir is not None:
+        cfg.DATA.LABEL_DIR = label_dir
     cfg.ENDOVIS_DATASET.FRAME_DIR = frame_dir
     if "ORSI_ROOT_DIR" in cfg.ENDOVIS_DATASET:
         cfg.ENDOVIS_DATASET.ORSI_ROOT_DIR = frame_dir
@@ -96,6 +109,84 @@ def global_to_local(run, task, split_ids):
     return dict(zip(dist["id"], range(len(dist)))), [str(n).strip() for n in dist["name"]]
 
 
+def load_labels(frame_dir, label_dir, patient):
+    """Label CSV of ``patient``: ``<label_dir>/P/P_all_labels.csv`` if ``label_dir``, else the original."""
+    if label_dir:
+        return pd.read_csv(Path(label_dir) / patient / f"{patient}_all_labels.csv")
+    return pd.read_csv(Path(frame_dir) / patient / "Label" / f"{patient}_all_labels.csv")
+
+
+def label_dir_of(cfg, label_dir=None):
+    """``--label-dir`` if given, else the run's DATA.LABEL_DIR ("" = original labels)."""
+    if label_dir is not None:
+        return label_dir
+    return getattr(cfg.DATA, "LABEL_DIR", "") if "DATA" in cfg else ""
+
+
+def ignore_windows(frame_dir, label_dir, patients, fps=1):
+    """``{patient: [(lo, hi), ...]}`` ignore intervals (s) from the ``ignore`` column (none without it)."""
+    out = {}
+    for p in patients:
+        lab = load_labels(frame_dir, label_dir, p) if label_dir else None
+        if lab is None or "ignore" not in lab:
+            out[p] = []
+            continue
+        times = lab.loc[lab["ignore"].fillna(0).astype(int) == 1, "second"].drop_duplicates()
+        out[p] = se.ignore_intervals(times.to_numpy(), fps)
+    return out
+
+
+def gt_time(row, fractional):
+    t = getattr(row, "time_s", None) if fractional else None
+    return float(row.second if t is None or pd.isna(t) else t)
+
+
+def parse_class_groups(specs, names):
+    """
+    ``["short:A,B", "C"]`` -> ``{"short": [iA, iB], "C": [iC]}`` (output indices; unknown names fail).
+    """
+    out = {}
+    idx = {n: i for i, n in enumerate(names)}
+    for spec in specs or []:
+        key, _, lst = spec.rpartition(":") if ":" in spec else (spec, "", spec)
+        cls = [c.strip() for c in lst.split(",") if c.strip()]
+        missing = [c for c in cls if c not in idx]
+        if missing:
+            raise ValueError(f"unknown classes {missing}")
+        out[key or "subset"] = [idx[c] for c in cls]
+    return out
+
+
+def subset_metrics(dets, gts, groups, names, bg, durations, deltas=DELTAS):
+    """Spotting mAP / per-class AP / best F1@5 s restricted to each class group."""
+    out = {}
+    for key, cls in groups.items():
+        ign = tuple(c for c in range(len(names)) if c not in cls or c in bg)
+        res = se.spotting_map(dets, gts, deltas, num_classes=len(names), ignore_classes=ign)
+        op = se.best_f1_threshold(dets, gts, 5, durations, np.round(np.arange(0.05, 1.0, 0.05), 2), ignore_classes=ign)
+        out[key] = {
+            "classes": [names[c] for c in cls],
+            "map": {str(d): v for d, v in res["map"].items()},
+            "avg_map_tight_1_5s": (
+                se.average_map(res["map"], se.TIGHT_DELTAS) if set(se.TIGHT_DELTAS) <= set(res["map"]) else None
+            ),
+            "per_class_ap": {str(d): {names[c]: res["ap"][d][c] for c in res["ap"][d]} for d in (1, 2, 5) if d in res["ap"]},
+            "n_gt": {names[c]: n for c, n in res["n_gt"].items()},
+            "best_f1_5s": op,
+        }
+    return out
+
+
+def phase_rows(frame_dir, label_dir, patient, fps=1):
+    """
+    Rows aligned with the predictions: at 1 fps the original CSV (the frame list inference used),
+    above 1 fps the unique frame_id rows of the ``label_dir`` grid CSV.
+    """
+    if fps == 1:
+        return pd.read_csv(Path(frame_dir) / patient / "Label" / f"{patient}_all_labels.csv")
+    return load_labels(frame_dir, label_dir, patient).drop_duplicates("frame_id").reset_index(drop=True)
+
+
 def idle_index(names):
     """Output indices that mean "no event" (runs trained without Idle have none)."""
     return tuple(i for i, n in enumerate(names) if n.lower() == "idle")
@@ -118,6 +209,12 @@ def main():
     parser.add_argument("--nms-window", type=float, default=5.0, help="NMS half window (s)")
     parser.add_argument("--op-deltas", type=float, nargs="*", default=[2, 5])
     parser.add_argument("--patients", nargs="*", help="Evaluate only these patients (default: all predicted)")
+    parser.add_argument("--label-dir", help="revised labels <dir>/RARPxx/RARPxx_all_labels.csv (default: run's)")
+    parser.add_argument("--fps", type=float, help="rows per second of the predictions (default: meta.json, else 1)")
+    parser.add_argument("--fractional-gt", action="store_true", help="ground truth at time_s, not at the row second")
+    parser.add_argument("--classes", nargs="*", help="NAME:class1,class2,... extra metrics on class subsets")
+    parser.add_argument("--report-dir", help="default: --pred-dir")
+    parser.add_argument("--tag", default="", help="suffix of the report file name")
     args = parser.parse_args()
 
     pred_dir = Path(args.pred_dir).resolve()
@@ -128,11 +225,18 @@ def main():
     missing = set(patients) - set(meta["patients"])
     if missing:
         raise ValueError(f"No predictions for {sorted(missing)}")
-    table, split_ids = build_label_table(cfg, patients, args.frame_dir, pred_dir)
+    fps = args.fps or meta.get("fps", 1)
+    label_dir = label_dir_of(cfg, args.label_dir)
+    report_dir = Path(args.report_dir).resolve() if args.report_dir else pred_dir
+    report_dir.mkdir(parents=True, exist_ok=True)
+    table, split_ids = build_label_table(cfg, patients, args.frame_dir, report_dir, label_dir)
     report = {"meta": meta, "patients": patients, "nms_window": args.nms_window}
+    if label_dir or fps != 1 or args.fractional_gt:  # absent keys = historical evaluation
+        report.update(label_dir=label_dir, fps=fps, fractional_gt=args.fractional_gt)
 
     preds = {p: dict(np.load(pred_dir / f"{p}.npz")) for p in patients}
-    durations = {p: float(len(preds[p]["second"])) for p in patients}
+    durations = {p: float(len(preds[p]["second"])) / fps for p in patients}
+    ign = ignore_windows(args.frame_dir, label_dir, patients, fps)
     report["hours"] = sum(durations.values()) / 3600
 
     # ---- steps as point events -------------------------------------------------
@@ -143,10 +247,17 @@ def main():
     events = table[table["event_name"].str.strip().str.lower() != "idle"]
     unmapped = events[~events["event_id"].isin(g2l)]
     gts = {p: [] for p in patients}
+    n_gt_ignored = 0
     for row in events[events["event_id"].isin(g2l)].itertuples():
-        gts[row.patient_name].append((g2l[row.event_id], float(row.second)))
+        if int(getattr(row, "ignore", 0) or 0) == 1:
+            n_gt_ignored += 1
+            continue
+        gts[row.patient_name].append((g2l[row.event_id], gt_time(row, args.fractional_gt)))
     report["gt_events"] = int(sum(len(v) for v in gts.values()))
     report["gt_events_unmapped"] = int(len(unmapped))
+    if any(ign.values()) or n_gt_ignored:
+        report["ignore"] = {"gt_events_dropped": n_gt_ignored, "windows": int(sum(len(v) for v in ign.values()))}
+    groups = parse_class_groups(args.classes, names)
 
     # sanity check: the trimmed rows used for validation during training
     trimmed_true, trimmed_probs = [], []
@@ -169,12 +280,16 @@ def main():
     thresholds = np.round(np.arange(0.05, 1.0, 0.05), 2)
     for mode in ("nms", "argmax"):
         dets = {
-            p: [
-                (c, float(preds[p]["second"][t]), s)
-                for c, t, s in se.decode_events(
-                    preds[p][f"probs_{task}"], args.nms_window, 0.0, background_classes=bg, mode=mode
-                )
-            ]
+            p: se.drop_ignored(
+                [
+                    (c, float(preds[p]["second"][t]), s)
+                    for c, t, s in se.decode_events(
+                        preds[p][f"probs_{task}"], se.window_frames(args.nms_window, fps), 0.0,
+                        background_classes=bg, mode=mode,
+                    )
+                ],
+                ign[p],
+            )
             for p in patients
         }
         res = se.spotting_map(dets, gts, DELTAS, num_classes=len(names), ignore_classes=bg)
@@ -194,13 +309,15 @@ def main():
             "n_gt": {names[c]: n for c, n in res["n_gt"].items()},
             "operating_points": ops,
         }
+        if groups:
+            report[f"spotting_{mode}"]["groups"] = subset_metrics(dets, gts, groups, names, bg, durations)
 
     # ---- phases as dense per-second labels --------------------------------------
     if "phases" in meta["tasks"]:
         g2l_ph, ph_names = global_to_local(run, "phases", split_ids["phases"])
         y_true, probs = [], []
         for p in patients:
-            labels = pd.read_csv(Path(args.frame_dir) / p / "Label" / f"{p}_all_labels.csv")
+            labels = phase_rows(args.frame_dir, label_dir, p, fps)
             y_true.append(labels["phase_id"].map(g2l_ph).fillna(0).astype(int).to_numpy())
             probs.append(preds[p]["probs_phases"])
         y_true, probs = np.concatenate(y_true), np.concatenate(probs)
@@ -212,7 +329,7 @@ def main():
         }
 
     tag = "" if patients == meta["patients"] else "_" + "-".join(p.removeprefix("RARP") for p in patients)
-    out = pred_dir / f"report{tag}_nms{args.nms_window:g}.json"
+    out = report_dir / f"report{tag}{args.tag}_nms{args.nms_window:g}.json"
     out.write_text(json.dumps(report, indent=2, default=float))
     summary = {
         "trimmed_check": report["trimmed_check"],
@@ -232,6 +349,8 @@ def main():
             },
             "all_dets@5s_FA/h": round(s["operating_points"]["delta_5"]["all_detections"]["false_alarms_per_hour"], 1),
         }
+        for key, g in s.get("groups", {}).items():
+            summary[mode][f"group_{key}_mAP@1/2/5"] = [round(g["map"][str(d)], 3) for d in (1, 2, 5)]
     if "phases_untrimmed" in report:
         summary["phases_untrimmed"] = {k: round(v, 3) for k, v in report["phases_untrimmed"].items()}
     print(json.dumps(summary, indent=2))

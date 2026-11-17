@@ -17,6 +17,9 @@ per-second probabilities written by `tools/infer_untrimmed.py`:
 `phase` is causal-compatible if the smoothing is made causal; `caps` and `chain`
 look at the whole video (offline).
 
+``--label-dir``, ``--fps``, ``--fractional-gt``, ``--classes``, ``--report-dir`` and ``--tag`` work
+as in `eval_untrimmed.py` (ignore windows included; the phase smoothing stays in seconds).
+
 Example:
     python tools/eval_constraints.py \
         --pred-dir outputs/orsi/LONG/control/totale/untrimmed/checkpoint_best_steps/val \
@@ -34,28 +37,46 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np
 import pandas as pd
 
-from eval_untrimmed import DELTAS, build_label_table, global_to_local, idle_index, load_cfg
+from eval_untrimmed import (
+    DELTAS,
+    build_label_table,
+    global_to_local,
+    gt_time,
+    idle_index,
+    ignore_windows,
+    label_dir_of,
+    load_cfg,
+    parse_class_groups,
+    phase_rows,
+    subset_metrics,
+)
 from tapis.evaluate import spotting_eval as se
 from tapis.evaluate import structured_decoding as sd
 
 VARIANTS = ("nms", "phase", "phase_oracle", "caps", "caps_chain", "phase_caps_chain", "oracle_caps_chain")
 
 
-def read_phase_labels(frame_dir, patient, g2l_ph):
-    labels = pd.read_csv(Path(frame_dir) / patient / "Label" / f"{patient}_all_labels.csv", usecols=["phase_id"])
+def read_phase_labels(frame_dir, patient, g2l_ph, label_dir=None, fps=1):
+    """Phase ids aligned with the prediction rows (see `eval_untrimmed.phase_rows`)."""
+    if fps == 1:
+        labels = pd.read_csv(Path(frame_dir) / patient / "Label" / f"{patient}_all_labels.csv", usecols=["phase_id"])
+    else:
+        labels = phase_rows(frame_dir, label_dir, patient, fps)
     return labels["phase_id"].map(g2l_ph).fillna(0).astype(int).to_numpy()
 
 
-def events_by_video(table, patients, g2l, g2l_ph):
+def events_by_video(table, patients, g2l, g2l_ph, fractional=False):
     events = table[table["event_name"].str.strip().str.lower() != "idle"]
     events = events[events["event_id"].isin(g2l)]
+    if "ignore" in events:  # ground truth inside an ignore window is not evaluated
+        events = events[events["ignore"].fillna(0).astype(int) != 1]
     out = {p: [] for p in patients}
     for row in events.itertuples():
-        out[row.patient_name].append((g2l[row.event_id], float(row.second), int(g2l_ph.get(row.phase_id, 0))))
+        out[row.patient_name].append((g2l[row.event_id], gt_time(row, fractional), int(g2l_ph.get(row.phase_id, 0))))
     return out
 
 
-def prepare(pred_dir, frame_dir, patients=None):
+def prepare(pred_dir, frame_dir, patients=None, label_dir=None, fps=None, fractional=False, work_dir=None):
     """
     Everything the decoders need for the saved predictions in ``pred_dir``: priors
     estimated on the run's training patients, ground truth and per-second
@@ -67,24 +88,26 @@ def prepare(pred_dir, frame_dir, patients=None):
     cfg = load_cfg(run, meta["ckpt"])
     patients = patients or meta["patients"]
     task = "steps" if "steps" in meta["tasks"] else "actions"
+    fps = fps or meta.get("fps", 1)
+    label_dir = label_dir_of(cfg, label_dir)
 
     # ---- priors from the training patients -------------------------------------
     train = meta.get("train_patients") or [
         Path(f).name.removesuffix(".csv") for f in cfg.ENDOVIS_DATASET.TRAIN_LISTS
     ]
-    work = pred_dir / "constraints"
-    work.mkdir(exist_ok=True)
-    tr_table, tr_ids = build_label_table(cfg, train, frame_dir, work)
+    work = Path(work_dir) if work_dir else pred_dir / "constraints"
+    work.mkdir(parents=True, exist_ok=True)
+    tr_table, tr_ids = build_label_table(cfg, train, frame_dir, work, label_dir)
     g2l, names = global_to_local(run, task, tr_ids[task])
     g2l_ph, ph_names = global_to_local(run, "phases", tr_ids["phases"])
     bg = idle_index(names)
-    tr_events = events_by_video(tr_table, train, g2l, g2l_ph)
-    lengths = {p: len(read_phase_labels(frame_dir, p, g2l_ph)) for p in train}
+    tr_events = events_by_video(tr_table, train, g2l, g2l_ph, fractional)
+    lengths = {p: len(read_phase_labels(frame_dir, p, g2l_ph, label_dir, fps)) / fps for p in train}
     priors = sd.estimate_priors(tr_events, lengths, len(names), len(ph_names), background_classes=bg)
 
     # ---- evaluation patients ----------------------------------------------------
-    table, _ = build_label_table(cfg, patients, frame_dir, work)
-    ev = events_by_video(table, patients, g2l, g2l_ph)
+    table, _ = build_label_table(cfg, patients, frame_dir, work, label_dir)
+    ev = events_by_video(table, patients, g2l, g2l_ph, fractional)
     preds = {p: dict(np.load(pred_dir / f"{p}.npz")) for p in patients}
     return SimpleNamespace(
         pred_dir=pred_dir,
@@ -98,9 +121,25 @@ def prepare(pred_dir, frame_dir, patients=None):
         priors=priors,
         gts={p: [(c, t) for c, t, _ in ev[p]] for p in patients},
         preds=preds,
-        durations={p: float(len(preds[p]["second"])) for p in patients},
-        gt_phases={p: read_phase_labels(frame_dir, p, g2l_ph) for p in patients},
+        durations={p: float(len(preds[p]["second"])) / fps for p in patients},
+        gt_phases={p: read_phase_labels(frame_dir, p, g2l_ph, label_dir, fps) for p in patients},
+        fps=fps,
+        label_dir=label_dir,
+        ignore=ignore_windows(frame_dir, label_dir, patients, fps),
     )
+
+
+def smooth_rows(smooth_s, fps):
+    """
+    Moving-average window (rows, odd) for ``smooth_s`` seconds; 1 s or less = no smoothing.
+
+    >>> smooth_rows(1, 1), smooth_rows(61, 1), smooth_rows(1, 4), smooth_rows(61, 4)
+    (1, 61, 1, 245)
+    """
+    if smooth_s <= 1:
+        return 1
+    n = int(round(smooth_s * fps))
+    return n if n % 2 else n + 1
 
 
 def detections(prep, p, variant, alpha, smooth_s, floor, nms_window=5.0):
@@ -111,13 +150,13 @@ def detections(prep, p, variant, alpha, smooth_s, floor, nms_window=5.0):
     if "oracle" in variant:
         probs = sd.phase_gate(probs, np.eye(len(prep.ph_names))[prep.gt_phases[p]], m)
     elif variant.startswith("phase"):
-        probs = sd.phase_gate(probs, sd.smooth(prep.preds[p]["probs_phases"], smooth_s), m)
-    dets = se.decode_events(probs, nms_window, 0.0, background_classes=prep.bg)
+        probs = sd.phase_gate(probs, sd.smooth(prep.preds[p]["probs_phases"], smooth_rows(smooth_s, prep.fps)), m)
+    dets = se.decode_events(probs, se.window_frames(nms_window, prep.fps), 0.0, background_classes=prep.bg)
     if "caps" in variant:
         dets = sd.apply_caps(dets, prep.priors["caps"], alpha)
     if "chain" in variant:
         dets = sd.chain_decode(dets, prep.priors["chain"], alpha)
-    return [(c, float(sec[t]), s) for c, t, s in dets if s > 0]
+    return se.drop_ignored([(c, float(sec[t]), s) for c, t, s in dets if s > 0], prep.ignore[p])
 
 
 def main():
@@ -131,9 +170,18 @@ def main():
     parser.add_argument(
         "--gate-floor", type=float, nargs="+", default=[0.0], help="gate = floor + (1 - floor) * compatibility"
     )
+    parser.add_argument("--label-dir", help="revised labels <dir>/RARPxx/RARPxx_all_labels.csv (default: run's)")
+    parser.add_argument("--fps", type=float, help="rows per second of the predictions (default: meta.json, else 1)")
+    parser.add_argument("--fractional-gt", action="store_true", help="ground truth at time_s, not at the row second")
+    parser.add_argument("--classes", nargs="*", help="NAME:class1,class2,... extra metrics on class subsets")
+    parser.add_argument("--report-dir", help="default: --pred-dir")
+    parser.add_argument("--tag", default="", help="suffix of the report file name")
     args = parser.parse_args()
 
-    prep = prepare(args.pred_dir, args.frame_dir, args.patients)
+    report_dir = Path(args.report_dir).resolve() if args.report_dir else None
+    prep = prepare(args.pred_dir, args.frame_dir, args.patients, args.label_dir, args.fps, args.fractional_gt,
+                   (report_dir / "constraints") if report_dir else None)
+    groups = parse_class_groups(args.classes, prep.names)
     pred_dir, meta, patients, names, bg = prep.pred_dir, prep.meta, prep.patients, prep.names, prep.bg
     gts, durations, has_phases = prep.gts, prep.durations, prep.has_phases
 
@@ -165,6 +213,8 @@ def main():
                         "best_f1_5s": op,
                         "per_class_ap_5s": {names[c]: a for c, a in res["ap"][5].items()},
                     }
+                    if groups:
+                        results[key]["groups"] = subset_metrics(dets, gts, groups, names, bg, durations)
 
     report = {
         "meta": meta,
@@ -175,7 +225,9 @@ def main():
         "results": results,
     }
     tag = "" if patients == meta["patients"] else "_" + "-".join(p.removeprefix("RARP") for p in patients)
-    out = pred_dir / f"constraints{tag}_nms{args.nms_window:g}.json"
+    if prep.label_dir or prep.fps != 1 or args.fractional_gt:  # absent keys = historical evaluation
+        report.update(label_dir=prep.label_dir, fps=prep.fps, fractional_gt=args.fractional_gt)
+    out = (report_dir or pred_dir) / f"constraints{tag}{args.tag}_nms{args.nms_window:g}.json"
     out.write_text(json.dumps(report, indent=2, default=float))
 
     print(f"chain ({len(report['chain'])}): {report['chain']}")

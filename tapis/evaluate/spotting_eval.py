@@ -267,3 +267,49 @@ def best_f1_threshold(preds, gts, delta, durations, thresholds, ignore_classes=(
         if best is None or op["f1"] > best["f1"]:
             best = op
     return best
+
+
+# ---- frame rate and ignore windows -------------------------------------------------
+def window_frames(seconds, fps=1):
+    """
+    A half window given in seconds, in rows of a ``fps`` Hz score curve (for `decode_events`).
+
+    >>> window_frames(5, 1), window_frames(5, 4), window_frames(0.75, 4)
+    (5, 20, 3)
+    """
+    return int(np.floor(seconds * fps + 1e-9))
+
+
+def ignore_intervals(times, fps=1):
+    """
+    Merged ``[lo, hi]`` intervals (s) covered by the rows at ``times`` (rows flagged ``ignore``),
+    each row standing for ``[t - 0.5 / fps, t + 0.5 / fps]``.
+
+    >>> ignore_intervals([3, 4, 5, 9], 1)
+    [(2.5, 5.5), (8.5, 9.5)]
+    >>> ignore_intervals([1.0, 1.25, 1.5], 4)
+    [(0.875, 1.625)]
+    """
+    half = 0.5 / fps
+    out = []
+    for t in sorted(float(t) for t in times):
+        if out and t - half <= out[-1][1] + 1e-9:
+            out[-1] = (out[-1][0], t + half)
+        else:
+            out.append((t - half, t + half))
+    return out
+
+
+def drop_ignored(events, intervals, time_index=1):
+    """
+    Events (tuples with their time at ``time_index``) outside every ignore interval; an event
+    exactly on a boundary is dropped.
+
+    >>> drop_ignored([(1, 2.0, 0.9), (1, 3.0, 0.8), (2, 6.0, 0.5)], [(2.5, 5.5)])
+    [(1, 2.0, 0.9), (2, 6.0, 0.5)]
+    """
+    if not intervals:
+        return list(events)
+    lo = np.array([a for a, _ in intervals])
+    hi = np.array([b for _, b in intervals])
+    return [e for e in events if not ((lo <= e[time_index]) & (e[time_index] <= hi)).any()]

@@ -602,6 +602,21 @@ _C.DATA.SAMPLING_RATE = 8
 
 _C.DATA.SEQ_MODE = "center"  # or "before" or "after"
 
+# Orsi only. Label CSVs read from {LABEL_DIR}/{patient}/{patient}_all_labels.csv instead of
+# ENDOVIS_DATASET.ORSI_ROOT_DIR/{patient}/Label/ ("" = original labels). An ``ignore`` column,
+# when present, removes its rows from the training samples and the Idle candidates.
+_C.DATA.LABEL_DIR = ""
+
+# Orsi only. Frame rate of the label rows / frames (1 = Video_1fps .pt tensors). Above 1, clips are
+# built over the unique frame_id rows of the label CSV and frames read from
+# {FRAME_DIR}/{patient}/frames_{FPS}fps.npy (uint8, tools/build_4fps_frames.py).
+_C.DATA.FPS = 1
+_C.DATA.FRAME_DIR = ""
+
+# Orsi only. Minimum distance (s, on the ``second`` column) between an added Idle sample and any
+# event. <= 0 keeps the historical rule (30 compared with frame_id differences, i.e. ~0.5 s).
+_C.DATA.IDLE_GAP_SEC = -1.0
+
 # Eigenvalues for PCA jittering. Note PCA is RGB based.
 _C.DATA.TRAIN_PCA_EIGVAL = [0.225, 0.224, 0.229]
 

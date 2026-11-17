@@ -20,6 +20,11 @@ jpgs are preprocessed like TAPIS validation (cv2 short side -> 224, center crop 
 /255, RGB, then ``--normalize``) and clips are built over consecutive rows. With
 ``--static`` every clip is its center frame repeated NUM_FRAMES times.
 
+With ``--fps F`` (> 1) the rows are the unique ``frame_id`` rows of the grid label CSVs in
+``--label-dir`` (``build_revised_labels.py --out-4hz``) and the frames come from
+``<frame-dir>/RARPxx/frames_{F}fps.npy`` (uint8, ``build_4fps_frames.py``), scaled to [0, 1] on the
+GPU like the .pt tensors; ``second`` then holds ``row / F``. ``--fps 1`` (default) is unchanged.
+
 Example:
     python tools/infer_untrimmed.py --run outputs/orsi/LONG/control/totale \
         --ckpt checkpoint_best_steps.pyth --split val \
@@ -226,6 +231,8 @@ def main():
         help="external datasets read <frame-dir>/meta.json and <video>/labels.npz from tools/prepare_external.py",
     )
     parser.add_argument("--static", action="store_true", help="clip = center frame repeated NUM_FRAMES times")
+    parser.add_argument("--fps", type=int, default=1, help="orsi: rows per second (>1: npy frame cache + grid labels)")
+    parser.add_argument("--label-dir", help="orsi, --fps > 1: grid label CSVs <dir>/RARPxx/RARPxx_all_labels.csv")
     parser.add_argument(
         "--flip-channels",
         action="store_true",
@@ -260,6 +267,10 @@ def main():
     meta["normalize"] = args.normalize
     if args.flip_channels:  # absent key = historical (unflipped, BGR) features
         meta["flip_channels"] = True
+    if args.fps != 1:  # absent keys = historical 1 fps
+        if not args.label_dir:
+            parser.error("--fps > 1 needs --label-dir")
+        meta.update(fps=args.fps, label_dir=args.label_dir, frame_dir=args.frame_dir)
     if args.dataset != "orsi" or args.static:  # Orsi defaults keep the historical meta.json
         meta["dataset"] = args.dataset
         meta["static"] = args.static
@@ -275,7 +286,22 @@ def main():
             continue
         t0 = time.time()
         preprocess = None
-        if args.dataset == "orsi":
+        if args.dataset == "orsi" and args.fps != 1:
+            labels = pd.read_csv(os.path.join(args.label_dir, patient, f"{patient}_all_labels.csv"))
+            labels = labels.drop_duplicates("frame_id").reset_index(drop=True)
+            arr = np.load(os.path.join(args.frame_dir, patient, f"frames_{args.fps}fps.npy"), mmap_mode="r")
+            assert (labels["frame_id"].to_numpy() == np.arange(len(arr))).all(), f"{patient}: grid != frame cache"
+            frames = torch.from_numpy(np.ascontiguousarray(arr))
+            mean = torch.tensor(cfg.DATA.MEAN).view(1, 3, 1, 1, 1).cuda(args.gpu)
+            std = torch.tensor(cfg.DATA.STD).view(1, 3, 1, 1, 1).cuda(args.gpu)
+
+            def preprocess(clips):  # B,C,T,H,W uint8 -> as the .pt path (x / 255, flip, normalize)
+                clips = clips.float() / 255.0
+                if args.flip_channels:
+                    clips = clips.flip(1)
+                return (clips - mean) / std if args.normalize else clips
+
+        elif args.dataset == "orsi":
             labels = pd.read_csv(os.path.join(args.frame_dir, patient, "Label", f"{patient}_all_labels.csv"))
             frames = load_frames(args.frame_dir, patient, labels["frame_path"].tolist())
             if args.flip_channels:

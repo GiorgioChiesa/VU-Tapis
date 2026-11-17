@@ -17,7 +17,7 @@ per-second probabilities written by `tools/infer_untrimmed.py`:
 `phase` is causal-compatible if the smoothing is made causal; `caps` and `chain`
 look at the whole video (offline).
 
-``--label-dir``, ``--fps``, ``--fractional-gt``, ``--classes``, ``--report-dir`` and ``--tag`` work
+``--label-dir``, ``--ignore-dir``, ``--fps``, ``--fractional-gt``, ``--classes``, ``--report-dir`` and ``--tag`` work
 as in `eval_untrimmed.py` (ignore windows included; the phase smoothing stays in seconds).
 
 Example:
@@ -76,7 +76,8 @@ def events_by_video(table, patients, g2l, g2l_ph, fractional=False):
     return out
 
 
-def prepare(pred_dir, frame_dir, patients=None, label_dir=None, fps=None, fractional=False, work_dir=None):
+def prepare(pred_dir, frame_dir, patients=None, label_dir=None, fps=None, fractional=False, work_dir=None,
+            ignore_dir=None):
     """
     Everything the decoders need for the saved predictions in ``pred_dir``: priors
     estimated on the run's training patients, ground truth and per-second
@@ -125,7 +126,7 @@ def prepare(pred_dir, frame_dir, patients=None, label_dir=None, fps=None, fracti
         gt_phases={p: read_phase_labels(frame_dir, p, g2l_ph, label_dir, fps) for p in patients},
         fps=fps,
         label_dir=label_dir,
-        ignore=ignore_windows(frame_dir, label_dir, patients, fps),
+        ignore=ignore_windows(frame_dir, ignore_dir or label_dir, patients),
     )
 
 
@@ -174,13 +175,14 @@ def main():
     parser.add_argument("--fps", type=float, help="rows per second of the predictions (default: meta.json, else 1)")
     parser.add_argument("--fractional-gt", action="store_true", help="ground truth at time_s, not at the row second")
     parser.add_argument("--classes", nargs="*", help="NAME:class1,class2,... extra metrics on class subsets")
+    parser.add_argument("--ignore-dir", help="take the ignore windows from this label dir (default: --label-dir)")
     parser.add_argument("--report-dir", help="default: --pred-dir")
     parser.add_argument("--tag", default="", help="suffix of the report file name")
     args = parser.parse_args()
 
     report_dir = Path(args.report_dir).resolve() if args.report_dir else None
     prep = prepare(args.pred_dir, args.frame_dir, args.patients, args.label_dir, args.fps, args.fractional_gt,
-                   (report_dir / "constraints") if report_dir else None)
+                   (report_dir / "constraints") if report_dir else None, args.ignore_dir)
     groups = parse_class_groups(args.classes, prep.names)
     pred_dir, meta, patients, names, bg = prep.pred_dir, prep.meta, prep.patients, prep.names, prep.bg
     gts, durations, has_phases = prep.gts, prep.durations, prep.has_phases

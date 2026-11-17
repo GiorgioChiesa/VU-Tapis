@@ -24,6 +24,8 @@ Options for other label sets and frame rates (defaults reproduce the historical 
   * ``--fps``: rows per second of the predictions (default: ``meta.json`` ``fps``, else 1). All
     tolerances and the NMS window stay in seconds;
   * ``--fractional-gt``: ground-truth time = the ``time_s`` column instead of the row's second;
+  * ``--ignore-dir``: ignore windows from another label dir (e.g. the 1 fps one for 4 fps runs,
+    so every arm drops the same detections);
   * ``--classes NAME:c1,c2,...``: extra metrics restricted to a class subset (repeatable);
   * ``--report-dir`` / ``--tag``: where the report (and the label-table scratch files) go.
 
@@ -123,16 +125,22 @@ def label_dir_of(cfg, label_dir=None):
     return getattr(cfg.DATA, "LABEL_DIR", "") if "DATA" in cfg else ""
 
 
-def ignore_windows(frame_dir, label_dir, patients, fps=1):
-    """``{patient: [(lo, hi), ...]}`` ignore intervals (s) from the ``ignore`` column (none without it)."""
+def ignore_windows(frame_dir, label_dir, patients):
+    """
+    ``{patient: [(lo, hi), ...]}`` ignore intervals (s) from the ``ignore`` column of the CSVs in
+    ``label_dir`` (none without it); the row spacing (1 or 0.25 s) is read from the CSV, so a 1 fps
+    label dir gives the same windows to 1 fps and 4 fps predictions (``--ignore-dir``).
+    """
     out = {}
     for p in patients:
         lab = load_labels(frame_dir, label_dir, p) if label_dir else None
         if lab is None or "ignore" not in lab:
             out[p] = []
             continue
+        sec = np.unique(lab["second"].to_numpy(dtype=float))
+        rate = 1.0 / float(np.median(np.diff(sec))) if len(sec) > 1 else 1.0
         times = lab.loc[lab["ignore"].fillna(0).astype(int) == 1, "second"].drop_duplicates()
-        out[p] = se.ignore_intervals(times.to_numpy(), fps)
+        out[p] = se.ignore_intervals(times.to_numpy(), rate)
     return out
 
 
@@ -213,6 +221,7 @@ def main():
     parser.add_argument("--fps", type=float, help="rows per second of the predictions (default: meta.json, else 1)")
     parser.add_argument("--fractional-gt", action="store_true", help="ground truth at time_s, not at the row second")
     parser.add_argument("--classes", nargs="*", help="NAME:class1,class2,... extra metrics on class subsets")
+    parser.add_argument("--ignore-dir", help="take the ignore windows from this label dir (default: --label-dir)")
     parser.add_argument("--report-dir", help="default: --pred-dir")
     parser.add_argument("--tag", default="", help="suffix of the report file name")
     args = parser.parse_args()
@@ -236,7 +245,7 @@ def main():
 
     preds = {p: dict(np.load(pred_dir / f"{p}.npz")) for p in patients}
     durations = {p: float(len(preds[p]["second"])) / fps for p in patients}
-    ign = ignore_windows(args.frame_dir, label_dir, patients, fps)
+    ign = ignore_windows(args.frame_dir, args.ignore_dir or label_dir, patients)
     report["hours"] = sum(durations.values()) / 3600
 
     # ---- steps as point events -------------------------------------------------

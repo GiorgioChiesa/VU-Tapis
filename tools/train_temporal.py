@@ -291,7 +291,7 @@ def main():
     fps = args.fps or fmeta.get("fps", 1)
     label_dir = label_dir_of(cfg, args.label_dir)
     k_rows = int(round(args.k_sec * fps)) if args.k_sec is not None else args.k
-    ign = ignore_windows(args.frame_dir, label_dir, patients, fps)
+    ign = ignore_windows(args.frame_dir, label_dir, patients)
     table, ids = build_label_table(cfg, patients, args.frame_dir, out, label_dir)
     g2l, names = global_to_local(run, "steps", ids["steps"])
     g2l_ph, ph_names = global_to_local(run, "phases", ids["phases"])

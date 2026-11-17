@@ -46,3 +46,9 @@ Stop rule:
 Budget: about 2.5 h wall clock, about 3 GPU-hours, at most 2 GPU processes at once.
 
 Result:
+
+- RGB adopted 2026-11-13.
+- mAP@±5 s: 0.459 (BGR) -> 0.486 (RGB), +0.027.
+- phase_caps_chain, RGB vs BGR: mAP@1 0.167 vs 0.145, mAP@10 0.558 vs 0.525, tight 0.363 vs 0.329.
+- Audit verdict: correct, with reservations.
+- `--flip-channels` is already in container via 1a9f8ac.

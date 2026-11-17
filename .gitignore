@@ -79,3 +79,5 @@ detectron2/models
 
 temp.sh
 AGENTS.md
+
+results/logs/*.done

@@ -44,10 +44,16 @@ class SurgeryMeter(object):
         mode (str): `train`, `val`, or `test` mode.
         """
         self.cfg = cfg
-        self.dataset_name = cfg.VAL.DATASET
+        assert mode in ["train", "val", "test"], "Unknown mode: {}".format(mode)
+        if mode == "train":
+            self.dataset_name = cfg.TRAIN.DATASET
+        elif mode == "val":
+            self.dataset_name = cfg.VAL.DATASET
+        else:
+            self.dataset_name = cfg.TEST.DATASET
         self.parallel = cfg.NUM_GPUS > 1
         # if self.parallel:
-        self.join_funct = DATASET_REGISTRY.get(self.dataset_name.capitalize())(cfg,'val',False).frame_num_joining
+        self.join_funct = DATASET_REGISTRY.get(self.dataset_name.capitalize())(cfg, mode, False).frame_num_joining
         self.eval_train = cfg.TRAIN.EVAL_TRAIN
         self.regions = cfg.REGIONS.ENABLE
 
@@ -286,6 +292,7 @@ class SurgeryMeter(object):
                                                                      output_dir=self.output_dir, 
                                                                      img_ann_dict=self.all_names,
                                                                      imgs_folder= None,# self.cfg.ENDOVIS_DATASET.FRAME_DIR ,
+                                                                     streaming = "streaming" in self.dataset_name,
                                                                      **kwargs,
                                                                      )
             

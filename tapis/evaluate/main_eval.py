@@ -7,7 +7,7 @@ import sklearn
 import argparse
 import pandas as pd
 
-from .classification_eval import eval_classification, eval_presence
+from .classification_eval import eval_classification, eval_presence, eval_streaming
 from .detection_eval import eval_detection
 from .semantic_segmentation_eval import eval_segmentation as eval_sem_segmentation
 from .instance_segmentation_eval import eval_segmentation as eval_inst_segmentation
@@ -32,6 +32,7 @@ METRIC_DICT = {'mAP': eval_classification,
                'mIoU': eval_sem_segmentation,
                'mIoU_mAP@0.5': eval_segmentation,
                'mAP_pres': eval_presence,
+               'mAP_streaming': eval_streaming,
                'classification': eval_classification,
                'detection': eval_detection,
                'inst_segmentation': eval_inst_segmentation,
@@ -60,6 +61,8 @@ def eval_task(task, metric, coco_anns, preds, masks_path=None, **kwargs):
         metric_funct = METRIC_DICT[metric]
     except KeyError:
         raise NotImplementedError(f'Metric {metric} is not supported')
+    if kwargs.get("streaming", False):
+        metric_funct = eval_streaming
     
     main_metric, aux_metrics = metric_funct(task, coco_anns, preds, img_ann_dict=img_ann_dict, mask_path=masks_path, **kwargs)
     return main_metric, aux_metrics

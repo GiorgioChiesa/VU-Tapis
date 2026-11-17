@@ -17,6 +17,7 @@ import wandb
 from sklearn.metrics import confusion_matrix
 from matplotlib import pyplot as plt
 import os
+import re
 import logging
 from collections import Counter
 import json
@@ -214,6 +215,237 @@ def eval_classification(task, coco_anns, preds, **kwargs):
     #                  output_dir=kwargs.get("output_dir", "./temp"),
     #                  img_ann_dict=kwargs.get("img_ann_dict", None),
     #                  imgs_folder=kwargs.get("imgs_folder", None))
+
+    return mAP, cat_res_dict
+
+
+def eval_streaming(task, coco_anns, preds, **kwargs):
+    """
+    Evaluate classification with temporal tolerance for streaming mode.
+    A prediction is considered correct if there exists at least one correct label
+    within a temporal window of ±8 frames (16 frames total).
+    
+    Args:
+        task: The task name (e.g., "steps", "phases")
+        coco_anns: COCO annotations dict or list
+        preds: Predictions dict
+        **kwargs: Additional arguments including class_names, output_dir, mode
+        
+    Returns:
+        mAP: Mean average precision
+        cat_res_dict: Dictionary with metrics
+    """
+    if kwargs.get("class_names", None) is not None:
+        classes = kwargs["class_names"]
+    elif isinstance(coco_anns, dict) and f"{task}_categories" in coco_anns:
+        classes = coco_anns[f"{task}_categories"]
+    else:
+        raise ValueError(
+            f"Class names not found for task {task} in coco annotations. Please provide class_names in kwargs."
+        )
+    mode = kwargs.get("mode", "")
+    classes = sorted(classes, key=lambda x: x["id"])
+    num_classes = len(classes)
+    bin_labels = []
+    bin_preds = []
+    ann_preds_dict = {}
+    image_not_found_count = 0
+    temporal_window = 8  # ±8 frames
+
+    if isinstance(coco_anns, dict) and "annotations" in coco_anns and "images" in coco_anns:
+        # Create annotation lookup by image name
+        ann_by_image = {}
+        for idx, ann in enumerate(coco_anns["annotations"]):
+            img_name = ann["image_name"]
+            if img_name not in ann_by_image:
+                ann_by_image[img_name] = []
+            ann_by_image[img_name].append((idx, ann))
+
+        # Create reverse lookup: frame_index -> list of (video, frame_idx, class)
+        # to efficiently find labels in temporal window
+        frame_labels_by_video = {}
+        for img_name, anns_list in ann_by_image.items():
+            video = img_name.split("/")[0]
+            # Extract frame index from image name (assumes format: video/frame_XXX.ext)
+            try:
+                frame_idx = int(img_name.split("/")[-1].split("_")[-1].split(".")[0])
+            except (ValueError, IndexError):
+                # If frame index extraction fails, try alternative approaches
+                frame_idx = 0
+            
+            if video not in frame_labels_by_video:
+                frame_labels_by_video[video] = {}
+            
+            frame_labels_by_video[video][frame_idx] = [ann[task] for _, ann in anns_list]
+
+        # Loop through predictions
+        for img_name, pred_data in tqdm(preds.items()):
+            if img_name not in ann_by_image:
+                continue
+
+            these_probs = pred_data[f"{task}_score_dist"]
+            if len(these_probs) == 0:
+                print(f"Prediction not found for image {img_name}")
+                these_probs = np.zeros((1, num_classes))
+
+            video = img_name.split("/")[0]
+            
+            # Extract frame index from prediction image name
+            try:
+                pred_frame_idx = int(img_name.split("/")[-1].split("_")[-1].split(".")[0])
+            except (ValueError, IndexError):
+                pred_frame_idx = 0
+
+            # Get prediction class
+            pred_class = np.argmax(these_probs)
+            
+            # For each annotation at this frame, check if prediction is correct
+            # considering temporal tolerance
+            if video in frame_labels_by_video:
+                # Collect all labels in the temporal window [pred_frame_idx - window, pred_frame_idx + window]
+                window_labels = []
+                for offset in range(-temporal_window, temporal_window + 1):
+                    check_frame_idx = pred_frame_idx + offset
+                    if check_frame_idx in frame_labels_by_video[video]:
+                        window_labels.extend(frame_labels_by_video[video][check_frame_idx])
+                
+                # Check if prediction matches any label in the temporal window
+                if len(window_labels) > 0:
+                    # For each annotation in the original frame, check temporal tolerance
+                    for idx, ann in ann_by_image[img_name]:
+                        ann_class = int(ann[task])
+                        bin_labels.append(
+                            label_binarize([ann_class], classes=list(range(0, num_classes)))[0]
+                        )
+                        bin_preds.append(these_probs)
+                        
+                        # Check if prediction class matches any label in temporal window
+                        is_correct = pred_class in window_labels
+                        if video in ann_preds_dict:
+                            ann_preds_dict[video].append((ann_class, pred_class if is_correct else -1))
+                        else:
+                            ann_preds_dict[video] = [(ann_class, pred_class if is_correct else -1)]
+                else:
+                    # No labels in temporal window, treat as mismatch
+                    for idx, ann in ann_by_image[img_name]:
+                        ann_class = int(ann[task])
+                        bin_labels.append(
+                            label_binarize([ann_class], classes=list(range(0, num_classes)))[0]
+                        )
+                        bin_preds.append(these_probs)
+                        
+                        if video in ann_preds_dict:
+                            ann_preds_dict[video].append((ann_class, -1))
+                        else:
+                            ann_preds_dict[video] = [(ann_class, -1)]
+            else:
+                # No labels for this video, treat as mismatch
+                for idx, ann in ann_by_image[img_name]:
+                    ann_class = int(ann[task])
+                    bin_labels.append(
+                        label_binarize([ann_class], classes=list(range(0, num_classes)))[0]
+                    )
+                    bin_preds.append(these_probs)
+                    
+                    if video in ann_preds_dict:
+                        ann_preds_dict[video].append((ann_class, -1))
+                    else:
+                        ann_preds_dict[video] = [(ann_class, -1)]
+
+        image_not_found_count = len(coco_anns["annotations"]) - len(bin_labels)
+        print(f"Total images not found in predictions: {image_not_found_count}")
+        print(f"Total for calculating metrics: {len(bin_labels)}")
+    else:
+        bin_labels = label_binarize(coco_anns, classes=list(range(0, num_classes)))
+        bin_preds = preds
+
+    bin_labels = np.array(bin_labels)
+    bin_preds = np.array(bin_preds)
+    cat_res_dict = {}
+
+    saving_dir = os.path.join(kwargs.get("output_dir", "./temp"), "saved_arrays")
+    os.makedirs(saving_dir, exist_ok=True)
+    plt.imsave(os.path.join(saving_dir, f"{mode}_labels_{task}.png"), bin_labels)
+    plt.imsave(os.path.join(saving_dir, f"{mode}_preds_{task}.png"), bin_preds)
+    
+    threshold = 1 / max(int(num_classes * 0.6), 2)
+    plt.imsave(
+        os.path.join(saving_dir, f"{mode}_preds_{task}>{threshold}.png"), bin_preds > threshold
+    )
+    plt.imsave(
+        os.path.join(saving_dir, f"{mode}_preds_{task}_argmax.png"),
+        label_binarize(bin_preds.argmax(axis=1), classes=list(range(0, num_classes))),
+    )
+
+    mAP = np.nanmean(average_precision_score(bin_labels, bin_preds))
+    best_preds = np.argmax(bin_preds, axis=1)
+    best_labels = np.argmax(bin_labels, axis=1)
+    mACC = np.nanmean(balanced_accuracy_score(best_labels, best_preds))
+    mAUC = np.nanmean(roc_auc_score(bin_labels, bin_preds))
+    mf1 = np.nanmean(f1_score(best_labels, best_preds, average="macro"))
+
+    # plot and save ROC curve
+    try:
+        fpr = {}
+        tpr = {}
+        roc_auc = {}
+        for c in range(num_classes):
+            if np.sum(bin_labels[:, c]) == 0 or np.sum(bin_labels[:, c]) == len(bin_labels):
+                continue
+            fpr[c], tpr[c], _ = roc_curve(bin_labels[:, c], bin_preds[:, c])
+            roc_auc[c] = auc(fpr[c], tpr[c])
+
+        if len(fpr) > 0:
+            plt.figure()
+            for c in range(num_classes):
+                if c not in fpr:
+                    continue
+                class_name = classes[c]["name"] if isinstance(classes[c], dict) else str(classes[c])
+                plt.plot(
+                    fpr[c],
+                    tpr[c],
+                    lw=2,
+                    label=f"{class_name} (AUC = {roc_auc[c]:.2f})",
+                )
+            if num_classes > 1:
+                fpr["micro"], tpr["micro"], _ = roc_curve(bin_labels.ravel(), bin_preds.ravel())
+                roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
+                plt.plot(
+                    fpr["micro"],
+                    tpr["micro"],
+                    color="navy",
+                    linestyle=":",
+                    label=f"micro-average (AUC = {roc_auc['micro']:.2f})",
+                )
+            plt.plot([0, 1], [0, 1], linestyle="--", color="gray")
+            plt.xlim([0.0, 1.0])
+            plt.ylim([0.0, 1.0])
+            plt.xlabel("False Positive Rate")
+            plt.ylabel("True Positive Rate")
+            plt.title(f"ROC Curve {mode} {task} (Streaming) -- AUC: {mAUC:.2f}")
+            plt.legend(loc="lower right", fontsize="small")
+            roc_path = os.path.join(
+                kwargs.get("output_dir", "./temp"), f"{mode}_roc_curve_{task}.png"
+            )
+            plt.savefig(roc_path, bbox_inches="tight")
+            plt.close()
+    except Exception as e:
+        print(f"Could not save ROC curve: {e}")
+
+    cat_res_dict.update({f"{task}_mAP": mAP})
+    cat_res_dict.update({f"{task}_f1_score": mf1})
+    cat_res_dict.update({f"{task}_balanced_accuracy": mACC})
+
+    # create confusion matrix
+    save_confusion_matrix(
+        preds=bin_preds,
+        labels=bin_labels,
+        class_name=classes,
+        path=os.path.join(
+            kwargs.get("output_dir", "./temp"), f"{mode}_confusion_matrix_{task}.png"
+        ),
+        normalize="true",
+    )
 
     return mAP, cat_res_dict
 
@@ -514,11 +746,10 @@ def load_frame(frame_path):
         if frame is not None:
             return frame
         else:
-            frame_path = (
-                frame_path.replace("/nas_private/", "/")
-                .replace("/orsi/", "/orsi_tensors/")
-                .replace(".jpg", ".pt")
-            )
+            frame_path = frame_path.replace("/nas_private/", "/")
+            # Unified NAS layout: Orsi/images/RARPxx/[IMAGES/]x.jpg -> orsi_tensors/RARPxx/IMAGES/x.pt
+            frame_path = re.sub(r"/Orsi/images/(RARP\d+)/(?:IMAGES/)?", r"/orsi_tensors/\1/IMAGES/", frame_path)
+            frame_path = frame_path.replace("/orsi/", "/orsi_tensors/").replace(".jpg", ".pt")
             torch_frame = torch.load(frame_path)
             return torch_frame.cpu().numpy().transpose(1, 2, 0)
     except Exception as e:

@@ -50,7 +50,7 @@ CONFIG_PATH="configs/Orsi/$ARCH/TAPIS_$TASK.yaml"
 OUTPUT_DIR="outputs/"$DATASET"/"$TASK"/"$NAME"/totale"
 
 #Change this variables if data is not located in ./data
-FRAME_DIR="/home/gchie/workspace/nas_private/data/orsi"
+FRAME_DIR="/home/gchie/workspace/nas_private/data/Orsi/images"
 FRAME_LIST="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frame_lists"
 ANNOT_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations"
 COCO_ANN_PATH="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations/grasp_long-term_val.json"

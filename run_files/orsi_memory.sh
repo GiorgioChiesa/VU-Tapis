@@ -49,7 +49,7 @@ CONFIG_PATH="configs/Orsi/$ARCH/MEMORY_LONG.yaml"
 OUTPUT_DIR="outputs/"$DATASET"/"$TASK"/"$NAME"/totale"
 
 #Change this variables if data is not located in ./data
-FRAME_DIR="/home/gchie/workspace/nas_private/data/orsi"
+FRAME_DIR="/home/gchie/workspace/nas_private/data/Orsi/images"
 FRAME_LIST="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/frame_lists"
 ANNOT_DIR="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations"
 COCO_ANN_PATH="/scratch/Video_Understanding/GraSP/TAPIS/data/"$DATASET"/annotations/grasp_long-term_val.json"
@@ -79,7 +79,7 @@ VAL.BATCH_SIZE 50 \
 SOLVER.MAX_ITER 300 \
 TRAIN.FREEZE_ENCODER False \
 OUTPUT_DIR $OUTPUT_DIR \
-ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/nas_private/data/orsi \
+ENDOVIS_DATASET.FRAME_DIR /home/gchie/workspace/nas_private/data/Orsi/images \
 ENDOVIS_DATASET.FRAME_LIST_DIR /data/coco \
 ENDOVIS_DATASET.TRAIN_LISTS "[$TRAIN_FOLDS_STR]" \
 ENDOVIS_DATASET.VAL_LISTS "[$VAL_FOLDS_STR]" \

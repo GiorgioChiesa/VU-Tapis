@@ -2,6 +2,7 @@
 
 import csv
 import os
+import re
 import cv2
 import time
 import random
@@ -37,11 +38,18 @@ def remove_ripetition(path):
     return '/'.join(new_parts)
 
 
+# Unified NAS layout (2026-11-03): Orsi/images/RARPxx/x.jpg, with no IMAGES/ level.
+# Old frame lists (data/coco) still say RARPxx/IMAGES/x.jpg, so that level is optional.
+_ORSI_IMAGES = re.compile(r"/Orsi/images/(RARP\d+)/(?:IMAGES/)?")
+
+
 def _resolve_paths(image_path: str) -> dict[str, str]:
     """Resolve all candidate paths from the original image path."""
     image_path = remove_ripetition(image_path)
+    image_path = _ORSI_IMAGES.sub(r"/Orsi/images/\1/", image_path)
     normalized = image_path.replace("/nas_private/", "/")
-    tensor = normalized.replace("/orsi/", "/orsi_tensors/").replace(".jpg", ".pt")
+    tensor = _ORSI_IMAGES.sub(r"/orsi_tensors/\1/IMAGES/", normalized)
+    tensor = tensor.replace("/orsi/", "/orsi_tensors/").replace(".jpg", ".pt")
     return {
         "tensor": tensor,
         "normalized_jpg": normalized,

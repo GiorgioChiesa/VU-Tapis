@@ -137,29 +137,32 @@ python tapis/evaluate.py \
 
 Model weights are not stored in this Git repository. They live in a **private** Hugging Face model repo:
 
-- Repo id: `<hf-user>/vu-tapis-orsi-checkpoints` (private; ask the maintainer for access)
+- Repo id: `SGio16/vu-tapis-orsi-checkpoints` (private; ask the maintainer for access)
 - Weights trained on Orsi data are derived from private clinical data: do not redistribute.
 
 Layout:
 
 ```
-pretrained/                 GraSP-pretrained public weights (e.g. LONG.pyth)
-<exp-id>/<fold>/            fine-tuned checkpoints, one README per folder
-                            (what it is, metric, git commit)
+pretrained/LONG.pyth                      GraSP-pretrained TAPIS/MViT encoder (public data)
+EXP-04_cv_ft/fold{0..4}/                  encoder fine-tuned on Orsi per fold (checkpoint_best_steps.pyth + config.yaml)
+EXP-04_mstcn_dilate3/fold{0..4}/          MS-TCN dilate3 event head (model.pt + args.yaml); best method with cap+chain decoding
+EXP-14_phase_F_base/seed{0,1}/fold{0..4}/ phase model F_base (model.pt + args.yaml)
 ```
 
-Download (after `huggingface-cli login` with an account that has access):
+Each folder has a README with what it is, the metric and the git commit that produced it.
+
+Download (after `hf auth login` with an account that has access):
 
 ```bash
-# whole repo
-hf download <hf-user>/vu-tapis-orsi-checkpoints --local-dir checkpoints/
+# whole repo (~0.9 GB)
+hf download SGio16/vu-tapis-orsi-checkpoints --local-dir checkpoints/
 # one experiment only
-hf download <hf-user>/vu-tapis-orsi-checkpoints --include "EXP-04/*" --local-dir checkpoints/
+hf download SGio16/vu-tapis-orsi-checkpoints --include "EXP-04_mstcn_dilate3/*" --local-dir checkpoints/
 ```
 
 ```python
 from huggingface_hub import snapshot_download
-snapshot_download("<hf-user>/vu-tapis-orsi-checkpoints", allow_patterns=["pretrained/*"], local_dir="checkpoints")
+snapshot_download("SGio16/vu-tapis-orsi-checkpoints", allow_patterns=["pretrained/*"], local_dir="checkpoints")
 ```
 
 Files ending in `.pyth` are tracked with Git LFS (`git lfs install` before cloning).

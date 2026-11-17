@@ -133,6 +133,37 @@ python tapis/evaluate.py \
     --metrics mAP
 ```
 
+## Checkpoints and large files (Hugging Face)
+
+Model weights are not stored in this Git repository. They live in a **private** Hugging Face model repo:
+
+- Repo id: `<hf-user>/vu-tapis-orsi-checkpoints` (private; ask the maintainer for access)
+- Weights trained on Orsi data are derived from private clinical data: do not redistribute.
+
+Layout:
+
+```
+pretrained/                 GraSP-pretrained public weights (e.g. LONG.pyth)
+<exp-id>/<fold>/            fine-tuned checkpoints, one README per folder
+                            (what it is, metric, git commit)
+```
+
+Download (after `huggingface-cli login` with an account that has access):
+
+```bash
+# whole repo
+hf download <hf-user>/vu-tapis-orsi-checkpoints --local-dir checkpoints/
+# one experiment only
+hf download <hf-user>/vu-tapis-orsi-checkpoints --include "EXP-04/*" --local-dir checkpoints/
+```
+
+```python
+from huggingface_hub import snapshot_download
+snapshot_download("<hf-user>/vu-tapis-orsi-checkpoints", allow_patterns=["pretrained/*"], local_dir="checkpoints")
+```
+
+Files ending in `.pyth` are tracked with Git LFS (`git lfs install` before cloning).
+
 ## Common Issues
 
 1. **CUDA OOM**: Reduce `VAL.BATCH_SIZE` or `TRAIN.BATCH_SIZE`

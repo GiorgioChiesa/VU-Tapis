@@ -167,6 +167,42 @@ def test_last_wins_and_skip_does_not_undo():
     assert ev(new, 5) == ["Event_B"]
 
 
+def build_ext(records, stamps=None, ignore_sec=3):
+    df = toy_csv()
+    values = brl.class_values(META, brl.events_lookup_of([df]))
+    eff = brl.effective_revisions(records)
+    new, n = brl.revise_patient(df, sorted(eff.values(), key=lambda r: r["id"]), META, values,
+                                skipped="ignore", times=True)
+    centers, n2 = brl.add_times_and_ignore(new, stamps or {}, ignore_sec)
+    return new, centers, values, {**n, **n2}
+
+
+def test_skip_ignore_removes_event_and_masks_window():
+    new, centers, _, n = build_ext([rec(5, 1, 1, 0, skipped=True)], stamps={"Event_A": [5.3], "Event_B": [9.8]})
+    assert ev(new, 5) == ["Idle"] and new.loc[new.second == 5, "revision"].item() == "skipped"
+    assert centers == [5.3] and n["skipped_removed"] == 1
+    assert list(new.loc[new.ignore == 1, "second"]) == [3, 4, 5, 6, 7, 8]
+    assert new.loc[new.second == 10, "time_s"].item() == 9.8 and n["stamps_matched"] == 1
+
+
+def test_times_of_reviewed_rows_and_4hz_grid():
+    new, centers, values, _ = build_ext([rec(5, 1, 1, +3)])  # 5.75 s, stays on row 6 at 1 fps
+    assert ev(new, 6) == ["Event_A"] and new.loc[new.second == 6, "time_s"].item() == 5.75
+    assert new.loc[new.second == 10, "time_s"].item() == 10.0  # no raw stamp: the second
+    q = brl.to_4hz(new, centers, 3, values[0])
+    assert len(q) == 84 and list(q.columns) == list(new.columns)
+    assert q.loc[q.event_name == "Event_A", "frame_id"].tolist() == [23]
+    assert q.loc[q.event_name == "Event_B", "frame_id"].tolist() == [40]
+    assert (q["ignore"] == 0).all() and q["frame_id"].is_monotonic_increasing
+
+
+def test_4hz_collision_adds_row_and_ignore_on_grid():
+    new, centers, values, _ = build_ext([rec(5, 1, 1, +20), rec(15, 0, 0, 0, skipped=True)])  # A onto B's 10 s
+    q = brl.to_4hz(new, centers, 1, values[0])
+    assert sorted(q.loc[q.frame_id == 40, "event_name"]) == ["Event_A", "Event_B"] and q.attrs["rows_added"] == 1
+    assert q.loc[q.ignore == 1, "second"].tolist() == [14.0, 14.25, 14.5, 14.75, 15.0, 15.25, 15.5, 15.75, 16.0]
+
+
 def test_make_record_validation():
     for bad in [(1, 99, 0), (1, 1, 32), (1, 1, -33)]:
         try:

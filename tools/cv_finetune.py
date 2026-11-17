@@ -164,7 +164,7 @@ def fold_job(i, args, base_cfg, all_folds, gpu, splits):
     ens["VAL_GT_BOX_JSON"] = [f"{p}_coco.json" for p in inner_val]
     ens["TEST_GT_BOX_JSON"] = [f"{p}_coco.json" for p in held_out]
     cfg["OUTPUT_DIR"] = str(root)
-    cfg["NAME"] = f"cv_ft_fold{i}"
+    cfg["NAME"] = f"{args.name}_fold{i}"
     # assert_and_infer_cfg() overwrites CUDA_VISIBLE_DEVICES with GPUIDS: use the physical id
     cfg["GPUIDS"] = [gpu]
     cfg["TEST"]["ENABLE"] = False
@@ -233,6 +233,7 @@ def main():
     parser.add_argument("--temporal-out", default="outputs/orsi/TEMPORAL")
     parser.add_argument("--inner-val", type=int, default=5)
     parser.add_argument("--no-wandb", dest="wandb", action="store_false")
+    parser.add_argument("--name", default="cv_ft", help="run name prefix (cfg NAME = <name>_fold<i>)")
     parser.add_argument("--label-dir", default="", help="DATA.LABEL_DIR: <dir>/RARPxx/RARPxx_all_labels.csv")
     parser.add_argument("--fps", type=int, default=1, help="DATA.FPS (>1 needs --fps-frame-dir and grid labels)")
     parser.add_argument("--fps-frame-dir", help="DATA.FRAME_DIR: <dir>/RARPxx/frames_<fps>fps.npy")

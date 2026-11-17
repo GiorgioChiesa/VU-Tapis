@@ -118,10 +118,15 @@ def load_labels(frame_dir, label_dir, patient):
     return pd.read_csv(Path(frame_dir) / patient / "Label" / f"{patient}_all_labels.csv")
 
 
-def label_dir_of(cfg, label_dir=None):
-    """``--label-dir`` if given, else the run's DATA.LABEL_DIR ("" = original labels)."""
+def label_dir_of(cfg, label_dir=None, meta=None):
+    """
+    ``--label-dir`` if given, else the predictions' ``meta.json`` ``label_dir`` (written for grid
+    runs), else the run's DATA.LABEL_DIR ("" = original labels).
+    """
     if label_dir is not None:
         return label_dir
+    if meta and meta.get("label_dir"):
+        return meta["label_dir"]
     return getattr(cfg.DATA, "LABEL_DIR", "") if "DATA" in cfg else ""
 
 
@@ -235,7 +240,7 @@ def main():
     if missing:
         raise ValueError(f"No predictions for {sorted(missing)}")
     fps = args.fps or meta.get("fps", 1)
-    label_dir = label_dir_of(cfg, args.label_dir)
+    label_dir = label_dir_of(cfg, args.label_dir, meta)
     report_dir = Path(args.report_dir).resolve() if args.report_dir else pred_dir
     report_dir.mkdir(parents=True, exist_ok=True)
     table, split_ids = build_label_table(cfg, patients, args.frame_dir, report_dir, label_dir)

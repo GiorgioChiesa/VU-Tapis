@@ -289,7 +289,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     fps = args.fps or fmeta.get("fps", 1)
-    label_dir = label_dir_of(cfg, args.label_dir)
+    label_dir = label_dir_of(cfg, args.label_dir, fmeta)
     k_rows = int(round(args.k_sec * fps)) if args.k_sec is not None else args.k
     ign = ignore_windows(args.frame_dir, label_dir, patients)
     table, ids = build_label_table(cfg, patients, args.frame_dir, out, label_dir)

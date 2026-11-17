@@ -90,7 +90,7 @@ def prepare(pred_dir, frame_dir, patients=None, label_dir=None, fps=None, fracti
     patients = patients or meta["patients"]
     task = "steps" if "steps" in meta["tasks"] else "actions"
     fps = fps or meta.get("fps", 1)
-    label_dir = label_dir_of(cfg, label_dir)
+    label_dir = label_dir_of(cfg, label_dir, meta)
 
     # ---- priors from the training patients -------------------------------------
     train = meta.get("train_patients") or [

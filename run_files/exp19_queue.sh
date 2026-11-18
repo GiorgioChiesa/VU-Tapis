@@ -18,9 +18,13 @@ DEADLINE=${2:-}
 RUN=run_files/exp19_short_long.sh
 FR4=/home/gchie/workspace/data/orsi_tensors_4fps
 Q=results/queue
+PY=/home/gchie/miniforge3/envs/Vu-Tapis/bin/python
 mkdir -p $Q
 log() { echo "[$(date "+%F %T")] lane gpu$GPU: $*"; }
 log "start (deadline: ${DEADLINE:-none})"
+# W&B run list (time, arm, fold, step, seed, url) rebuilt from the W&B API; never fails the lane
+runs_tsv() { WANDB_SILENT=true timeout 600 $PY tools/wandb_runs_tsv.py >/dev/null 2>&1 || log "wandb_runs.tsv not updated"; }
+runs_tsv
 
 POOL=()
 [ "$(ls $FR4/*/.done 2>/dev/null | wc -l)" -ge 50 ] && POOL+=(S_fold0)
@@ -54,6 +58,7 @@ run_job() {  # $1 = <arm>_fold<i>
   else
     touch "$Q/$1/finished"; log "end $1 (ok)"
   fi
+  runs_tsv
 }
 past_deadline() { [ -n "$DEADLINE" ] && [ "$(date +%s)" -ge "$(date -d "$DEADLINE" +%s)" ]; }
 
@@ -72,4 +77,5 @@ while true; do
   [ -z "$job" ] && continue
   run_job "$job"
 done
+runs_tsv
 log "lane done"

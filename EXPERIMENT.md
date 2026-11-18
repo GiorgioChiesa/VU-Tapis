@@ -36,3 +36,39 @@ Data version: labels data/orsi_labels_revised/v2026-11-17 (+ _4hz), built from a
 1029 review lines (`_review_snapshot/`, BUILD.txt); frames data/orsi_tensors_4fps.
 
 Result:
+
+## EXP-19 augmentation ablation pilot (fold 0)
+
+Hypothesis: part of the full ORSI_AUG set used by arm L (photometric RandAugment, erase, surgical
+smoke/specular, temporal jitter) hurts or does not help spotting; a smaller subset matches or beats L.
+
+Parent: exp/short-long-context (1f691fb), arm L.
+
+Command: `bash run_files/exp19_aug_pilot.sh chain` (GPU 2, tmux session `aug-pilot`), configs in order
+AUG_none, AUG_geo, AUG_geo_photo, AUG_geo_surg, AUG_geo_jit (last only if it starts before the deadline).
+Every config is arm L (revised labels v2026-11-17, ADD_IDLE 20, IDLE_GAP_SEC 30, LONG.pyth init,
+MS-TCN dilate3 heads seeds 0 and 1, caps_chain eval with the L EVAL args), fold 0 only, MAX_SAVE_VIDEO 0:
+- none: ORSI_AUG.ENABLE False, jitter 0
+- geo: flip 0.5, crop 1.0, rotation 0.5 only, jitter 0
+- geo_photo: geo + COLOR_P 0.8 + BLUR_P 0.2, jitter 0
+- geo_surg: geo + SMOKE_P 0.2 + SPECULAR_P 0.2, jitter 0
+- geo_jit: geo + TEMPORAL_JITTER_ROWS 2
+Reference: results/L fold 0 (full ORSI_AUG, jitter 2).
+
+Metric: mAP@1 all classes, fold 0 test, caps_chain|a=0.1|s=1|f=0.2, mean over head seeds 0 and 1;
+mAP@5; short/long group mAP@1/@5; inner-val metric = best val/steps_mAP of the encoder fine-tune
+(W&B), the selection metric of checkpoint_best_steps.
+
+Prediction: no config beats L fold 0 (0.111 mAP@1, 0.507 mAP@5) by >= 0.02 mAP@1; AUG_none is the
+worst on inner-val (>= 0.02 below the 0.665 of L); geo-only configs fall within 0.02 of L on mAP@5.
+
+Decision rule: winner = best mean mAP@1 among configs whose mAP@5 is within 0.02 of the best mAP@5;
+it must beat L fold 0 by >= 0.02 mAP@1. If test and inner-val pick different configs, the inner-val
+choice wins and is flagged.
+
+Stop rule: stop after the four (five) configs on fold 0; no config starts after 2026-11-19 08:00; no
+all-fold confirmation inside this pilot.
+
+Budget: ~3.3 h per config on GPU 2, ~13-17 GPU h.
+
+Result:

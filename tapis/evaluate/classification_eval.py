@@ -226,6 +226,7 @@ def save_missmatches(
     output_dir="./temp",
     img_ann_dict: list = None,
     imgs_folder: str = None,
+    fps: int = 1,
     **kwargs,
 ):
     if img_ann_dict is None:
@@ -288,9 +289,13 @@ def save_missmatches(
     os.makedirs(os.path.dirname(mismatch_path), exist_ok=True)
     with open(mismatch_path, "w") as f:
         json.dump(mismatches, f, indent=4)
+    export_missmatches_per_classes(preds, labels, class_name, task, output_dir)
+    if fps != 1:
+        # the per-video plot and the mismatch videos assume one row per 1 fps frame
+        print(f"DATA.FPS={fps}: skipping the per-video mismatch plot and videos.")
+        return
     maxCounter = Counter([im.split("/")[1] for im in img_ann_dict])
     plot_video_missmatches(mismatches_by_video, task, output_dir, maxCounter=maxCounter, **kwargs)
-    export_missmatches_per_classes(preds, labels, class_name, task, output_dir)
 
     if imgs_folder is not None:
         max_save_video = kwargs.get("max_save_video", 0)

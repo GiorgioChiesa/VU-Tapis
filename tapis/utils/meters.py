@@ -321,6 +321,7 @@ class SurgeryMeter(object):
                                     max_save_video = self.cfg.MAX_SAVE_VIDEO,
                                     time_window = self.cfg.DATA.NUM_FRAMES,
                                     mode = self.cfg.DATA.SEQ_MODE,
+                                    fps = self.cfg.DATA.FPS,
                                     )
             print("All video are saved in {}".format(self.output_dir))
             print("Open a web server to visualize the results: python -m http.server --directory {}".format(self.output_dir))

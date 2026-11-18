@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # EXP-19 GPU queue: one lane per GPU (one job at a time), each lane in its own tmux session:
-#   bash run_files/exp19_queue.sh <gpu> [deadline]   e.g. exp19_queue.sh 0 "2026-11-18 23:59"
+#   bash run_files/exp19_queue.sh <gpu> [deadline]   e.g. exp19_queue.sh 0 "2026-11-19 08:00"
 # Jobs, in priority order: the arm S pilot (S_fold0, once the 4 fps frame cache is complete), then
 # the folds of A0aug and L. Arm S folds 1-4 are never queued here.
 # A GPU is never shared: a lane claims a job only when its GPU has no compute process at all (ours
@@ -20,6 +20,7 @@ FR4=/home/gchie/workspace/data/orsi_tensors_4fps
 Q=results/queue
 mkdir -p $Q
 log() { echo "[$(date "+%F %T")] lane gpu$GPU: $*"; }
+log "start (deadline: ${DEADLINE:-none})"
 
 POOL=()
 [ "$(ls $FR4/*/.done 2>/dev/null | wc -l)" -ge 50 ] && POOL+=(S_fold0)

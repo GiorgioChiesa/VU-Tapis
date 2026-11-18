@@ -392,6 +392,16 @@ def train_epoch(train_loader, model, optimizer, scaler, train_meter, cur_epoch, 
             train_meter.iter_toc()  # measure allreduce for this meter
             stats = train_meter.log_iter_stats(cur_epoch, cur_iter)
             train_meter.iter_tic()
+            if cfg.WANDB_ENABLE and wanbrun is not None:
+                # per-iteration training loss (the json stats only keep one median per epoch)
+                wanbrun.log(
+                    {
+                        "train/loss": final_loss,
+                        **{f"train/loss_{t}": float(v) for t, v in zip(loss_dict, window_loss_items)},
+                        "train/lr": lr,
+                        "train/epoch": cur_epoch + (cur_iter + 1) / data_size,
+                    }
+                )
             # t.set_postfix({"dt_data":stats["dt_data"], "dt_net": stats["dt_net"], "loss": stats["overall_loss"]})
 
             if cfg.SOLVER.MAX_ITER and cur_iter + 1 >= cfg.SOLVER.MAX_ITER:
@@ -405,6 +415,10 @@ def train_epoch(train_loader, model, optimizer, scaler, train_meter, cur_epoch, 
     if cfg.WANDB_ENABLE and stats:
         # add learning rate to stats for better visualization in wandb
         stats.update({"lr": lr})
+        # epoch median of the training loss, as in the train_iter json stats
+        stats["overall_loss"] = train_meter.task_loss.get_tasks_median_sum()
+        for t, m in zip(train_meter.log_tasks, train_meter.task_loss.get_win_median()):
+            stats[f"loss_{t}"] = m
         wandgb_log(stats)
     train_meter.reset()
 

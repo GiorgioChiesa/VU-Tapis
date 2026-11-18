@@ -111,23 +111,38 @@ def apply_overrides(cfg, pairs):
     return cfg
 
 
-def wait_gpu_free(gpu, max_used_mib=1500, poll=60):
-    """Block until the physical GPU has (almost) no memory in use, e.g. a previous job ended."""
+def gpu_busy(gpu, max_used_mib=1500):
+    """Describe what occupies the physical GPU: compute processes (pid and owner) or memory in use.
+
+    Empty string = free. Any compute process counts, ours or another user's, so a GPU is never shared.
+    """
+    def smi(query):
+        return subprocess.run(["nvidia-smi", f"--id={gpu}", query, "--format=csv,noheader,nounits"],
+                              capture_output=True, text=True).stdout.strip()
+
+    procs = []
+    for line in smi("--query-compute-apps=pid").splitlines():
+        pid = line.strip()
+        user = subprocess.run(["ps", "-o", "user=", "-p", pid], capture_output=True, text=True).stdout.strip()
+        procs.append(f"pid {pid} ({user or 'unknown user'})")
+    used = int(smi("--query-gpu=memory.used") or 0)
+    if used >= max_used_mib:
+        procs.append(f"{used} MiB in use")
+    return ", ".join(procs)
+
+
+def wait_gpu_free(gpu, poll=60):
+    """Block until the physical GPU has no compute process and (almost) no memory in use."""
     import time
 
-    announced = False
+    announced = ""
     while True:
-        used = int(
-            subprocess.run(
-                ["nvidia-smi", f"--id={gpu}", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
-                capture_output=True, text=True,
-            ).stdout.strip() or 0
-        )
-        if used < max_used_mib:
+        busy = gpu_busy(gpu)
+        if not busy:
             return
-        if not announced:
-            print(f"[gpu{gpu}] waiting: {used} MiB in use", flush=True)
-            announced = True
+        if busy != announced:
+            print(f"[gpu{gpu}] waiting, GPU busy: {busy}", flush=True)
+            announced = busy
         time.sleep(poll)
 
 
@@ -289,6 +304,8 @@ def main():
     for t in threads:
         t.join()
     print("errors:", errors if errors else "none", flush=True)
+    if errors:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

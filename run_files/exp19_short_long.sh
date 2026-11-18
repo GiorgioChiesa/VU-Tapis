@@ -3,9 +3,9 @@
 #   bash run_files/exp19_short_long.sh a0   # step 4: A0 (cv_ft_dilate3) on the revised ground truth, CPU
 #   bash run_files/exp19_short_long.sh L      # step 5: arm L, 5 folds, GPUs 2 3
 #   bash run_files/exp19_short_long.sh A0aug  # A0 retrained with ORSI_AUG only (original labels, 10 Idle)
-#   bash run_files/exp19_short_long.sh S0     # step 6: arm S pilot, fold 0, GPU 3
+#   bash run_files/exp19_short_long.sh S0     # step 6: arm S pilot, fold 0, GPU 3 (or GPUS)
 #   bash run_files/exp19_short_long.sh S      # step 7: arm S, folds 1-4 (only if the pilot gate passes)
-# GPUS and FOLDS (space-separated) override the GPUs / folds of L, A0aug and S, e.g. GPUS=2 FOLDS="0 3".
+# GPUS and FOLDS (space-separated) override the GPUs / folds of L, A0aug and S (S0: GPUS only), e.g. GPUS=2 FOLDS="0 3".
 # Every step is resumable (.done markers of cv_finetune.py, existing reports are kept).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -50,7 +50,7 @@ case "${1:-}" in
       --out results/A0aug/LONG/cv_ft --temporal-out results/A0aug/TEMPORAL --eval-args "$EVAL --label-dir $LAB1" ;;
   S0)
     mkdir -p results/S
-    $PY tools/cv_finetune.py --gpus 3 --folds 0 --name exp19_S "${COMMON[@]}" --label-dir $LAB4 \
+    $PY tools/cv_finetune.py --gpus ${GPUS:-3} --folds 0 --name exp19_S "${COMMON[@]}" --label-dir $LAB4 \
       --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 1 \
       --fps 4 --fps-frame-dir $FR4 --temporal-args "--k-sec 3 --crop 16384" \
       --out results/S/LONG/cv_ft --temporal-out results/S/TEMPORAL --eval-args "$EVAL" ;;

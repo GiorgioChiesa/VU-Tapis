@@ -208,6 +208,10 @@ _C.VAL.CHECKPOINT_TYPE = "pytorch"
 # Path to saving prediction results file.
 _C.VAL.SAVE_RESULTS_PATH = ""
 
+# fp16 autocast in the per-epoch validation of tools/train_net.py (off: validation runs in fp32,
+# as the checkpoints of every finished run were selected). Faster, but changes the predictions.
+_C.VAL.MIXED_PRECISION = False
+
 
 # -----------------------------------------------------------------------------
 # ResNet options

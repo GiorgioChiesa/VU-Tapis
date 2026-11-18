@@ -498,12 +498,16 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
 
             # assert (not (cfg.REGIONS.ENABLE and cfg.FEATURES.ENABLE)) or len(rpn_ftrs)==len(image_names)==len(boxes), f'Inconsistent lenghts {len(rpn_ftrs)} & {len(image_names)} & {len(boxes)}'
 
-            preds = model(inputs)
+            with torch.autocast("cuda", dtype=torch.float16, enabled=cfg.VAL.MIXED_PRECISION):
+                preds = model(inputs)
             if isinstance(preds, tuple):
                 preds = preds[0]  # 0 = Loss with memory, 1 to don't use memory
             # breakpoint()
             if cfg.NUM_GPUS:
-                preds = {task: preds[task].to("cpu", non_blocking=True) for task in complete_tasks}
+                preds = {
+                    task: (preds[task].float() if cfg.VAL.MIXED_PRECISION else preds[task]).to("cpu", non_blocking=True)
+                    for task in complete_tasks
+                }
                 # Accumula tutti i risultati prima di accedervi
                 torch.cuda.synchronize()  # una sola sync alla fine
 

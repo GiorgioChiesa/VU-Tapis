@@ -108,9 +108,13 @@ def match_events(pred_times, pred_scores, gt_times, delta):
     tp = np.zeros(len(pred_times), dtype=bool)
     offsets = np.full(len(pred_times), np.nan)
     matched_gt = np.zeros(len(gt_times), dtype=bool)
-    for i in np.argsort(-pred_scores, kind="stable"):
-        if len(gt_times) == 0:
-            break
+    if len(gt_times) == 0:
+        return tp, offsets[tp], matched_gt
+    order = np.argsort(-pred_scores, kind="stable")
+    # a prediction farther than delta from every ground-truth event can never match: skipping it
+    # leaves the greedy matching of the others unchanged
+    near = (np.abs(gt_times[None, :] - pred_times[:, None]) <= delta).any(1)
+    for i in order[near[order]]:
         dist = np.abs(gt_times - pred_times[i])
         dist[matched_gt] = np.inf
         j = int(np.argmin(dist))
@@ -234,9 +238,9 @@ def operating_point(preds, gts, delta, durations, threshold=0.0, ignore_classes=
         offsets.extend(off.tolist())
         if len(g_t) and (~tp).any():
             g = np.asarray(g_t)[matched]
-            for t in np.asarray(p_t)[~tp]:
-                if g.size and np.min(np.abs(g - t)) <= delta:
-                    n_dup += 1
+            if g.size:
+                t = np.asarray(p_t)[~tp]
+                n_dup += int((np.abs(g[None, :] - t[:, None]).min(1) <= delta).sum())
     hours = sum(durations.values()) / 3600.0
     precision = n_tp / max(n_tp + n_fp, 1)
     recall = n_tp / max(n_gt, 1)

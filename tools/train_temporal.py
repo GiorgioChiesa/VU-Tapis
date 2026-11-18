@@ -66,6 +66,15 @@ from eval_untrimmed import (
 )
 from tapis.evaluate import spotting_eval as se
 
+# numpy asks the kernel for transparent huge pages on every large array (madvise); with THP defrag
+# on madvise, each fresh allocation can stall in direct compaction (seconds per 60 MB array on a
+# busy host). Only the memory backing changes, never the values.
+try:
+    from numpy._core.multiarray import _set_madvise_hugepage
+except ImportError:  # numpy < 2
+    from numpy.core.multiarray import _set_madvise_hugepage
+_set_madvise_hugepage(False)
+
 # events stamped on the last frame where the object is visible (protocol: removals)
 OFFSET_EVENTS = {"removing_needles", "removal_of_robotic_instruments"}
 
@@ -312,8 +321,10 @@ def main():
         if ign[p]:
             m[ignore_rows(len(x), ign[p], fps)] = 0.0
         data[p] = {"x": x, "phase": ph, "y": y, "m": m, "second": npz["second"], "events": ev, "ignore": ign[p]}
-    mu = np.concatenate([data[p]["x"] for p in split["train"]]).mean(0)
-    sd = np.concatenate([data[p]["x"] for p in split["train"]]).std(0) + 1e-6
+    train_x = np.concatenate([data[p]["x"] for p in split["train"]])
+    mu = train_x.mean(0)
+    sd = train_x.std(0) + 1e-6
+    del train_x
 
     model = TemporalModel(
         len(mu), len(ph_names), len(names), args.channels, args.layers, args.stages, args.causal, args.dropout
@@ -321,16 +332,22 @@ def main():
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
 
-    def tensors(p, start=0, stop=None):
-        d = data[p]
-        sl = slice(start, stop)
-        x = torch.from_numpy((d["x"][sl] - mu) / sd).T[None].to(device)
-        return (
-            x,
-            torch.from_numpy(d["phase"][sl])[None].long().to(device),
-            torch.from_numpy(d["y"][sl]).T[None].to(device),
-            torch.from_numpy(d["m"][sl]).T[None].to(device),
+    # every video normalised and moved to the device once; a crop is a view of it (the same float32
+    # values and memory layout as normalising and copying each crop)
+    on_dev = {
+        p: (
+            torch.from_numpy((d["x"] - mu) / sd).T[None].to(device),
+            torch.from_numpy(d["phase"])[None].long().to(device),
+            torch.from_numpy(d["y"]).T[None].to(device),
+            torch.from_numpy(d["m"]).T[None].to(device),
         )
+        for p, d in data.items()
+    }
+
+    def tensors(p, start=0, stop=None):
+        sl = slice(start, stop)
+        x, yp, ye, me = on_dev[p]
+        return x[..., sl], yp[:, sl], ye[..., sl], me[..., sl]
 
     wb = None
     if args.wandb:

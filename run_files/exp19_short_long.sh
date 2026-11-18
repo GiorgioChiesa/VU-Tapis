@@ -11,6 +11,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 PY=/home/gchie/miniforge3/envs/Vu-Tapis/bin/python
 export PATH=/home/gchie/miniforge3/envs/Vu-Tapis/bin:$PATH
+# numpy madvises huge pages for large arrays; with THP defrag=madvise every fresh array can stall in
+# direct compaction on this host (seconds per 60 MB). Values are unaffected.
+export NUMPY_MADVISE_HUGEPAGE=0
 MAIN=/home/gchie/workspace/thesis_GiorgioChiesa/src/VU-Tapis
 DATA=/home/gchie/workspace/data
 LAB1=$DATA/orsi_labels_revised/v2026-11-17

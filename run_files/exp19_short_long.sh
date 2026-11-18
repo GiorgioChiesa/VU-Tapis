@@ -6,10 +6,14 @@
 #   bash run_files/exp19_short_long.sh S0     # step 6: arm S pilot, fold 0, GPU 3 (or GPUS)
 #   bash run_files/exp19_short_long.sh S      # step 7: arm S, folds 1-4 (only if the pilot gate passes)
 # GPUS and FOLDS (space-separated) override the GPUs / folds of L, A0aug and S (S0: GPUS only), e.g. GPUS=2 FOLDS="0 3".
+# EXTRA_SET="KEY VALUE ..." appends config overrides to the fine-tune of L, A0aug, S0 and S (e.g. "VAL.MIXED_PRECISION True
+# MAX_SAVE_VIDEO 0"); INFER_ARGS="--amp" is passed to the feature extraction (infer_untrimmed.py). Both default to nothing.
 # Every step is resumable (.done markers of cv_finetune.py, existing reports are kept).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PY=/home/gchie/miniforge3/envs/Vu-Tapis/bin/python
+EXTRA_SET=${EXTRA_SET:-}
+INFER_ARGS=${INFER_ARGS:-}
 export PATH=/home/gchie/miniforge3/envs/Vu-Tapis/bin:$PATH
 # numpy madvises huge pages for large arrays; with THP defrag=madvise every fresh array can stall in
 # direct compaction on this host (seconds per 60 MB). Values are unaffected.
@@ -42,26 +46,26 @@ case "${1:-}" in
   L)
     mkdir -p results/L
     $PY tools/cv_finetune.py --gpus ${GPUS:-2 3} --folds ${FOLDS:-0 1 2 3 4} --name exp19_L "${COMMON[@]}" --label-dir $LAB1 \
-      --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 2 \
-      --out results/L/LONG/cv_ft --temporal-out results/L/TEMPORAL --eval-args "$EVAL" ;;
+      --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 2 $EXTRA_SET \
+      --out results/L/LONG/cv_ft --temporal-out results/L/TEMPORAL --infer-args="$INFER_ARGS" --eval-args "$EVAL" ;;
   A0aug)
     # A0 setup (original labels, ADD_IDLE 10, original Idle gap) + the augmentation of arm L;
     # evaluated on the revised ground truth like every arm: A0aug - A0 = augmentation, L - A0aug = labels + Idle
     mkdir -p results/A0aug
     $PY tools/cv_finetune.py --gpus ${GPUS:-2 3} --folds ${FOLDS:-0 1 2 3 4} --name exp19_A0aug "${COMMON[@]}" \
-      --set ORSI_AUG.ENABLE True ORSI_AUG.RAND_AUG rand-m5-n2 ORSI_AUG.TEMPORAL_JITTER_ROWS 2 \
-      --out results/A0aug/LONG/cv_ft --temporal-out results/A0aug/TEMPORAL --eval-args "$EVAL --label-dir $LAB1" ;;
+      --set ORSI_AUG.ENABLE True ORSI_AUG.RAND_AUG rand-m5-n2 ORSI_AUG.TEMPORAL_JITTER_ROWS 2 $EXTRA_SET \
+      --out results/A0aug/LONG/cv_ft --temporal-out results/A0aug/TEMPORAL --infer-args="$INFER_ARGS" --eval-args "$EVAL --label-dir $LAB1" ;;
   S0)
     mkdir -p results/S
     $PY tools/cv_finetune.py --gpus ${GPUS:-3} --folds 0 --name exp19_S "${COMMON[@]}" --label-dir $LAB4 \
-      --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 1 \
+      --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 1 $EXTRA_SET \
       --fps 4 --fps-frame-dir $FR4 --temporal-args "--k-sec 3 --crop 16384" \
-      --out results/S/LONG/cv_ft --temporal-out results/S/TEMPORAL --eval-args "$EVAL" ;;
+      --out results/S/LONG/cv_ft --temporal-out results/S/TEMPORAL --infer-args="$INFER_ARGS" --eval-args "$EVAL" ;;
   S)
     mkdir -p results/S
     $PY tools/cv_finetune.py --gpus ${GPUS:-3} --folds ${FOLDS:-1 2 3 4} --name exp19_S "${COMMON[@]}" --label-dir $LAB4 \
-      --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 1 \
+      --set "${SET[@]}" ORSI_AUG.TEMPORAL_JITTER_ROWS 1 $EXTRA_SET \
       --fps 4 --fps-frame-dir $FR4 --temporal-args "--k-sec 3 --crop 16384" \
-      --out results/S/LONG/cv_ft --temporal-out results/S/TEMPORAL --eval-args "$EVAL" ;;
+      --out results/S/LONG/cv_ft --temporal-out results/S/TEMPORAL --infer-args="$INFER_ARGS" --eval-args "$EVAL" ;;
   *) echo "usage: $0 a0|L|A0aug|S0|S" >&2; exit 2 ;;
 esac

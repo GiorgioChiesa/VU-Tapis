@@ -206,7 +206,7 @@ def fold_job(i, args, base_cfg, all_folds, gpu, splits):
     fps_args = (["--fps", args.fps, "--label-dir", args.label_dir, "--frame-dir", args.fps_frame_dir]
                 if args.fps != 1 else ["--frame-dir", f"{args.data_dir}/orsi_tensors"])
     run([PY, "-W", "ignore", "tools/infer_untrimmed.py", "--run", root, "--ckpt", "checkpoint_best_steps.pyth",
-         "--split", "all", "--features", *fps_args, "--gpu", 0],
+         "--split", "all", "--features", *fps_args, "--gpu", 0, *shlex.split(args.infer_args)],
         logs / "features.log", gpu, root / ".features.done")
     # per-clip MViT on the held-out videos
     evals = [(feat_dir, held_out, "mvit")]
@@ -255,6 +255,7 @@ def main():
     parser.add_argument("--set", nargs="*", default=[], help="KEY VALUE config overrides, e.g. ENDOVIS_DATASET.ADD_IDLE 20")
     parser.add_argument("--targets", nargs="+", default=list(TARGETS), choices=list(TARGETS))
     parser.add_argument("--seeds", type=int, nargs="+", default=[0], help="temporal-head seeds")
+    parser.add_argument("--infer-args", default="", help="extra infer_untrimmed.py arguments (one string), e.g. --amp")
     parser.add_argument("--temporal-args", default="", help="extra train_temporal.py arguments (one string)")
     parser.add_argument("--eval-args", default="", help="extra eval_untrimmed/eval_constraints arguments (one string)")
     args = parser.parse_args()

@@ -328,16 +328,23 @@ def main():
         del frames
         torch.cuda.empty_cache()
         feats = probs.pop("features", None)
+        acts = dict(zip(cfg.TASKS.TASKS, cfg.TASKS.HEAD_ACT))
         for task, p in probs.items():
+            if acts.get(task, "softmax") == "sigmoid":  # independent per-class probabilities
+                assert ((p >= 0) & (p <= 1)).all(), f"{task} outputs are not probabilities"
+                continue
             row_sums = p.sum(axis=1)
             assert np.allclose(row_sums, 1.0, atol=1e-3), f"{task} outputs are not probabilities"
-        np.savez_compressed(
-            target,
-            second=labels["second"].to_numpy(),
-            frame_id=labels["frame_id"].to_numpy(),
-            **{f"probs_{task}": p.astype(np.float32) for task, p in probs.items()},
-            **({"features": feats} if feats is not None else {}),
-        )
+        tmp_target = target.with_name(target.name + ".tmp")  # atomic: a killed run never leaves a partial .npz
+        with open(tmp_target, "wb") as fh:
+            np.savez_compressed(
+                fh,
+                second=labels["second"].to_numpy(),
+                frame_id=labels["frame_id"].to_numpy(),
+                **{f"probs_{task}": p.astype(np.float32) for task, p in probs.items()},
+                **({"features": feats} if feats is not None else {}),
+            )
+        tmp_target.replace(target)
         print(
             f"{patient}: {len(labels)} s, load {t1 - t0:.0f}s, infer {time.time() - t1:.0f}s "
             f"({len(labels) / max(time.time() - t1, 1e-6):.1f} clips/s)",

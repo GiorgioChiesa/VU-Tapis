@@ -153,3 +153,6 @@ Curve: frame mAP 0.18-0.27 across epochs (noisy, 5 videos); train loss 4.42 -> 3
   causal = FCTF convs left padded. Causality checked: perturbing inputs from step 1500 leaves outputs < 1500
   bit-identical for both causal variants (offline SED already changes only from step 1483: its scan is causal).
   Smoke test (2 videos, 2 epochs) ok for the 4 variants.
+
+## Reference re-evaluated with tools/eval_focus8.py (test, 10 videos; 95% CI = per-video bootstrap, 1000)
+(caps = caps_chain here up to 0.01; full numbers in results/reference/v2026-11-19/*_focus8/eval_test.json.)

@@ -18,5 +18,11 @@ for r in ${RUNS:-a3 sed a3_causal sed_causal}; do
     $PY -W ignore tools/train_long_mamba.py --arch $arch "${extra[@]}" --feat-dir $RUN/untrimmed \
       --splits $RUN/splits.json --out $OUT --seed $s >> $OUT/train.log 2>&1
     echo "[$(date "+%F %T")] end $OUT (exit $?)" >> $RUN/long/runs.txt
+    if [ -e $OUT/.done ]; then  # evaluation (CPU): inner val and held-out predictions of the selected epoch
+      for st in inner_val held_out; do
+        CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=2 /home/gchie/miniforge3/envs/Vu-Tapis/bin/python -W ignore tools/eval_focus8.py \
+          --pred-dir $OUT/$st --splits $RUN/splits.json --set $st --out $OUT/eval/$st.json > $OUT/eval_$st.log 2>&1
+      done
+    fi
   done
 done

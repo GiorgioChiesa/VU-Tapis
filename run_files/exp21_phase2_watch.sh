@@ -23,7 +23,7 @@ while [ $((g3 + m0 + lg)) -lt 3 ]; do
   if [ $m0 = 0 ] && [ -e results/M0/fold0/.done ] && ! pgrep -f "exp21_arm.sh M0" >/dev/null; then
     sleep 30
     if [ "$(mem 1)" -lt 500 ]; then
-      tmux new-session -d -s exp21_extM0 "PATIENT_SET=eval bash run_files/exp21_extract.sh M0 1 fwd"; say "M0 done: started M0 eval-set extraction on GPU1"; m0=1
+      tmux new-session -d -s exp21_extM0 "PATIENT_SET=eval bash run_files/exp21_extract.sh M0 1 fwd && bash run_files/exp21_eval.sh results/M0/fold0/untrimmed results/M0/fold0/splits.json"; say "M0 done: started M0 eval-set extraction on GPU1"; m0=1
     fi
   fi
   if [ $lg = 0 ] && [ "$(ls results/M/fold0/untrimmed/*.npz 2>/dev/null | wc -l)" -ge 50 ] \

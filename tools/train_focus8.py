@@ -198,14 +198,14 @@ def lr_at(step, total, warmup, base, end):
     return end + (base - end) * 0.5 * (1 + math.cos(math.pi * min(1.0, q)))
 
 
-def class_weights(videos, w_rows, mode):
+def class_weights(videos, w_rows, mode, max_ratio=10.0):
     if mode == "none":
         return torch.ones(len(F.EVENT_CLASSES))
     y = np.concatenate([v.y for v in videos])
     m = np.concatenate([v.mask for v in videos])
     freq = (w_rows[m, None] * y[m]).sum(0)
     freq = freq / freq.sum()
-    w = 1 / np.sqrt(np.maximum(freq, 1e-6))
+    w = np.minimum(1 / np.sqrt(np.maximum(freq, 1e-6)), max_ratio / np.sqrt(freq.max()))  # absent class: capped
     w = w / (freq * w).sum()
     return torch.tensor(w, dtype=torch.float32)
 

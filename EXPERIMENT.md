@@ -212,3 +212,9 @@ Test (10 held-out videos), with the reference:
 | M enc test | 0.452 | 0.235 | 0.1 | 23.2 |
 | S MViT per clip | 0.512 | 0.401 | 0.2 | 13.9 |
 | S MS-TCN dilate3 s0 | 0.835 | 0.713 | 41.3 | 71.3 |
+
+## Arm M0 fine-tune: summary (inner val only; raw numbers)
+Ran 2026-11-19 14:02-16:19 (25 epochs, exit 0), commit fb694dd, seed 0, GPU1, same splits as M. best.pyth = epoch 24
+(last): inner-val frame mAP 0.259, short 0.369, long 0.148, phase acc 0.540 (M best: 0.270 / 0.394 / 0.146 / 0.489).
+Curve 0.17-0.26. M0 features (held out + inner val only): `PATIENT_SET=eval bash run_files/exp21_extract.sh M0 1 fwd`
+then `bash run_files/exp21_eval.sh results/M0/fold0/untrimmed results/M0/fold0/splits.json` (watcher, 16:20, GPU1).

@@ -125,3 +125,31 @@ videos never loaded). Note: epoch 23 is the second best (0.265), the selection r
 Inner-val frame AP per class at epoch 13: Grasping_catheter_tip 0.478, Clip_vas_def 0.302, SV_arteries 0.394,
 Metal_clip 0.401 | Start_dissection 0.044, Denonvilliers 0.310, Transection 0.024, Stitch_in_bladder 0.208.
 Curve: frame mAP 0.18-0.27 across epochs (noisy, 5 videos); train loss 4.42 -> 3.61.
+
+## Phase 2 (features, encoder-head evaluation, long-context models): commands (run exactly as written)
+- M features (4 Hz, 16-frame centred clips, `--amp`, all heads + 1536-d fp16 latents, resumable per video, atomic
+  writes): tmux exp21_extM_fwd `bash run_files/exp21_extract.sh M 2 fwd` (2026-11-19 14:20, commit 79687fc, GPU2;
+  order: held out, inner val, train); second shard `bash run_files/exp21_extract.sh M 3 rev` started by the watcher
+  `run_files/exp21_phase2_watch.sh` (tmux exp21_p2watch, log results/phase2_watch.log) when GPU3 is free. 113 clips/s,
+  ~5.5 min per video. Output results/M/fold0/untrimmed/RARPxx.npz (probs_steps 9, probs_phases 15,
+  probs_tapis_actions 14, probs_tapis_instruments 7, features 1536).
+- Evaluation: `bash run_files/exp21_eval.sh <pred dir>` -> `<pred dir>/eval/{inner_val,held_out}.json`
+  (tools/eval_focus8.py: target spotting AP at +-1/2/5 s, decoders nms / caps / caps_chain / phase_caps_chain
+  (alpha 0.1, phase smoothing 61 s, gate floor 0.2), priors from the 35 training videos (target events only),
+  per-video bootstrap 95% CI (1000 resamples); phases row acc / macro F1, F1@50 per video at 1 Hz, P0 and P1 =
+  tools/phase_decode.py decode_hysteresis defaults, copied from exp6-phase-decoding 6f3d6b6).
+  Evaluator check: on EXP-19 S MS-TCN dilate3 seed 0 (target columns of the 33-class output) it reproduces the
+  reference exactly for nms (short 0.532/0.722/0.848, long 0.242/0.429/0.611, all per-class AP equal) and for
+  caps_chain short (0.551/0.738/0.871); caps_chain long 0.231/0.433/0.627 vs 0.229/0.428/0.631 (chain priors
+  here use target events only). Test GT counts 9 17 50 123 | 10 9 10 10, as above.
+- Long models: `bash run_files/exp21_long.sh M <gpu>` (tools/train_long_mamba.py, mamba venv; started by the
+  watcher when the 50 feature files exist: a3 + a3_causal on GPU2, sed + sed_causal on GPU3), seeds 0 and 1,
+  crop 16384 rows, 100 epochs, AdamW 5e-4 cosine, feature dropout 0.5, events = Idle + 4 long targets dilated
+  +-1 s (weighted CE, inverse sqrt frequency), phases CE, + 0.15 T-MSE on both heads; selection = inner-val long
+  mAP (nms) averaged over +-1/2/5 s, every 5 epochs.
+  L-A3 = BiMamba2Encoder (d_model 64, 4 layers, d_state 32, headdim 16; tapis/models/mamba2_minimal.py copied from
+  exp7-phase-model, + `bidirectional=False`) + 2 MS-TCN stages (64 ch, 10 layers); causal = forward scan + left
+  padded MS-TCN. L-SED = official SEDMamba MultiStageModel (3 BMSS blocks, G = 64; classifier -> 5 + 15 outputs);
+  causal = FCTF convs left padded. Causality checked: perturbing inputs from step 1500 leaves outputs < 1500
+  bit-identical for both causal variants (offline SED already changes only from step 1483: its scan is causal).
+  Smoke test (2 videos, 2 epochs) ok for the 4 variants.

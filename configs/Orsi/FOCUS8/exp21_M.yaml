@@ -1,0 +1,54 @@
+# EXP-21 arm M (tools/train_focus8.py). Arm M0 = this file with `--set teacher false`.
+# data
+label_dir: /home/gchie/workspace/data/orsi_labels_revised/v2026-11-19_4hz
+split_label_dir: /home/gchie/workspace/data/orsi_labels_revised/v2026-11-19_4hz  # choose_inner_val class check
+frame_dir: /home/gchie/workspace/data/orsi_tensors_4fps
+orsi_tensors: /home/gchie/workspace/data/orsi_tensors
+action_dir: /home/gchie/workspace/nas_private/data/Orsi/action_labels
+teacher_cache_dir: /home/gchie/workspace/data/exp21_cache/teacher
+fps: 4
+num_frames: 16
+# fold rule (cv_finetune.py: Random(1234), shuffled[i::5]; choose_inner_val)
+ref_run: /home/gchie/workspace/thesis_GiorgioChiesa/src/VU-Tapis/outputs/orsi/LONG/control/totale
+ref_ckpt: checkpoint_best_steps.pyth
+fold: 0
+inner_val: 5
+# init: EXP-19 S fold 0 encoder (its cfg gives channel order, MViT, ORSI_AUG); 33-class event head replaced
+init_ckpt: /home/gchie/workspace/wt/short-long-context/results/S/LONG/cv_ft/fold0/checkpoint_best_steps.pyth
+# targets
+sigma_s: 0.5              # gaussian event targets on the 4 Hz grid
+nontarget_margin_s: 1.0   # rows within this of a non-target event are masked from the event loss
+pos_thr: 0.05             # bump >= pos_thr: row sampled as "near target"
+event_class_weight: sqrt_inv   # sqrt_inv | none (inverse sqrt of the sampled class mass)
+teacher: true             # TAPIS teacher heads (actions 14, instruments 7); false = arm M0
+ins_pos_weight: {Clip Applier: 10.0}   # asymmetric BCE: teacher-positive Clip Applier weighs a lot...
+ins_neg_weight: {Clip Applier: 0.1}    # ...a missed detection is not an absence
+# loss weights
+w_events: 2.0
+w_phases: 1.0
+w_actions: 0.5
+w_instruments: 0.5
+# sampling (row weights; resampled every epoch with seed*1000+epoch)
+share_target: 0.5
+share_background: 0.4
+share_nontarget: 0.1
+clips_per_epoch: 8000
+# optimisation (EXP-19 S: adam 1e-4, cosine to 1e-5, wd 1e-4, clip 0.01, AMP, batch 12)
+epochs: 25
+batch_size: 12
+accum_steps: 4
+lr: 1.0e-4
+end_lr: 1.0e-5
+warmup_epochs: 1
+weight_decay: 1.0e-4
+clip_grad_l2norm: 0.01
+amp: true
+augment: true             # ORSI_AUG of the init config (temporal jitter not used)
+seed: 0
+num_workers: 8
+log_every: 50
+keep_every: 5             # also keep epoch_XXX.pyth every N epochs (0 = only best/last)
+# inner validation rows: all rows within val_near_s of a target event + one every val_stride_s
+val_near_s: 3.0
+val_stride_s: 10
+smoke_clips: 48

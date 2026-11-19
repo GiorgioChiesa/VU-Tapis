@@ -8,13 +8,15 @@
 #                                                # no config starts after the deadline (default 2026-11-19 08:00)
 # Outputs: results/AUG_<config>/{LONG/cv_ft,TEMPORAL}/... (layout of results/L), results/AUG_<config>/.done
 # when fold 0 of the config is finished (.done_fold<k> and run_fold<k>.log for fold k > 0). GPUS (default 2) picks the GPU; cv_finetune.py waits while it is busy and
-# its .done markers make every step resumable. EXTRA_SET (default "MAX_SAVE_VIDEO 0") is appended to --set.
+# its .done markers make every step resumable. EXTRA_SET (default "MAX_SAVE_VIDEO 0") is appended to --set;
+# INFER_ARGS (default empty, e.g. "--amp") is passed to the feature extraction (infer_untrimmed.py).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PY=/home/gchie/miniforge3/envs/Vu-Tapis/bin/python
 GPUS=${GPUS:-2}
 FOLD=${FOLD:-0}
 EXTRA_SET=${EXTRA_SET:-MAX_SAVE_VIDEO 0}
+INFER_ARGS=${INFER_ARGS:-}
 export PATH=/home/gchie/miniforge3/envs/Vu-Tapis/bin:$PATH
 export NUMPY_MADVISE_HUGEPAGE=0
 MAIN=/home/gchie/workspace/thesis_GiorgioChiesa/src/VU-Tapis
@@ -54,7 +56,7 @@ run_config() {  # $1 = config; writes results/AUG_$1/.done (fold 0) or .done_fol
   echo "[$(date "+%F %T")] start AUG_$c fold $FOLD (gpu $GPUS): $a" | tee -a $log
   # shellcheck disable=SC2086  # the override strings are word lists
   $PY tools/cv_finetune.py --name exp19_AUG_$c "${COMMON[@]}" --set "${SET_L[@]}" $a $EXTRA_SET \
-    --out $R/LONG/cv_ft --temporal-out $R/TEMPORAL --eval-args "$EVAL" 2>&1 | tee -a $log
+    --out $R/LONG/cv_ft --temporal-out $R/TEMPORAL --infer-args="$INFER_ARGS" --eval-args "$EVAL" 2>&1 | tee -a $log
   if grep -q "FAILED" $log || [ ! -e $R/LONG/cv_ft/fold$FOLD/.constraints_dilate3_s1.done ]; then
     echo "[$(date "+%F %T")] AUG_$c FAILED, see $log" | tee -a $log; return 1
   fi

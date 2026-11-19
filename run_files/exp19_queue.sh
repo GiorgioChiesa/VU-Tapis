@@ -6,6 +6,8 @@
 # Jobs, in priority order (JOBS="..." overrides): arm S folds 2-4 interleaved with the AUG_none folds 1-4 of
 # the augmentation pilot (run_files/exp19_aug_pilot.sh, config none). Job names: <arm>_fold<i>, where arm is
 # S, L, A0aug (run_files/exp19_short_long.sh) or AUG_<config> (run_files/exp19_aug_pilot.sh).
+# Every job gets EXTRA_SET="$JOB_EXTRA_SET" (default "MAX_SAVE_VIDEO 1": one saved reference video per run) and
+# INFER_ARGS="$JOB_INFER_ARGS" (default "--amp": fp16 feature extraction).
 # A GPU is never shared: a lane claims a job only when its GPU has no compute process at all (ours
 # or another user's) and almost no memory in use; otherwise it sleeps and rechecks, so the job goes
 # to another free lane. cv_finetune.py repeats the same check before every step.
@@ -20,13 +22,15 @@ GPU=${1:?usage: $0 <gpu> [deadline]}
 DEADLINE=${2:-}
 START=${3:-}
 AFTER_PID=${AFTER_PID:-}
+export EXTRA_SET=${JOB_EXTRA_SET:-MAX_SAVE_VIDEO 1}
+export INFER_ARGS=${JOB_INFER_ARGS:---amp}
 RUN=run_files/exp19_short_long.sh
 AUG=run_files/exp19_aug_pilot.sh
 Q=results/queue
 PY=/home/gchie/miniforge3/envs/Vu-Tapis/bin/python
 mkdir -p $Q
 log() { echo "[$(date "+%F %T")] lane gpu$GPU: $*"; }
-log "start (start: ${START:-now}, deadline: ${DEADLINE:-none}, after pid: ${AFTER_PID:-none})"
+log "start (start: ${START:-now}, deadline: ${DEADLINE:-none}, after pid: ${AFTER_PID:-none}, EXTRA_SET: $EXTRA_SET, INFER_ARGS: $INFER_ARGS)"
 # W&B run list (time, arm, fold, step, seed, url) rebuilt from the W&B API; never fails the lane
 runs_tsv() { WANDB_SILENT=true timeout 600 $PY tools/wandb_runs_tsv.py >/dev/null 2>&1 || log "wandb_runs.tsv not updated"; }
 runs_tsv

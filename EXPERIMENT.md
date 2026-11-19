@@ -112,3 +112,16 @@ EXP-21 M: 30 clips/s, epoch = 263 s train + 66 s inner val (7027 rows) -> 25 epo
   one unidirectional `mamba_ssm.Mamba` (v1, d_state 16, d_conv 4, expand 2) -> 1x1. The Mamba part is causal, the
   FCTF convs are NOT: measured, an input change at step 300 changes outputs from step 280. Causal variant for the
   online arm: left padding 2*dilation (padding=0 + F.pad(x, (2d, 0))). No bidirectional scan in the official code.
+
+## Arm M fine-tune: summary (inner val only; raw numbers)
+Ran 2026-11-19 11:43-14:00 (2 h 18 min, 25 epochs, exit 0, `.done`), commit 2141846, seed 0, GPU1, labels v2026-11-19_4hz.
+best.pyth = epoch 13 (selected by inner-val frame mAP of the 8 targets, 7027 rows of RARP16 18 32 36 44; held-out
+videos never loaded). Note: epoch 23 is the second best (0.265), the selection rule keeps epoch 13.
+| epoch | frame mAP 8 | short | long | phase acc |
+|---|---|---|---|---|
+| 13 (best) | 0.270 | 0.394 | 0.146 | 0.489 |
+| 23 | 0.265 | 0.406 | 0.125 | 0.532 |
+| 24 (last) | 0.250 | 0.371 | 0.130 | 0.536 |
+Inner-val frame AP per class at epoch 13: Grasping_catheter_tip 0.478, Clip_vas_def 0.302, SV_arteries 0.394,
+Metal_clip 0.401 | Start_dissection 0.044, Denonvilliers 0.310, Transection 0.024, Stitch_in_bladder 0.208.
+Curve: frame mAP 0.18-0.27 across epochs (noisy, 5 videos); train loss 4.42 -> 3.61.

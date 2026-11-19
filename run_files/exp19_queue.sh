@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # EXP-19 GPU queue: one lane per GPU (one job at a time), each lane in its own tmux session:
-#   bash run_files/exp19_queue.sh <gpu> [deadline]   e.g. exp19_queue.sh 0 "2026-11-19 08:00"
-# Jobs, in priority order: the arm S pilot (S_fold0, once the 4 fps frame cache is complete), then
-# the folds of A0aug and L. Arm S folds 1-4 are never queued here.
+#   bash run_files/exp19_queue.sh <gpu> [deadline] [start]   e.g. exp19_queue.sh 0 "2026-11-20 08:00" "2026-11-19 20:00"
+# The lane claims nothing before the optional start time, nor while the optional AFTER_PID process lives
+# (e.g. a job of another launcher on the same GPU, whose GPU can look free between two of its steps).
+# Jobs, in priority order (JOBS="..." overrides): arm S folds 2-4 interleaved with the AUG_none folds 1-4 of
+# the augmentation pilot (run_files/exp19_aug_pilot.sh, config none). Job names: <arm>_fold<i>, where arm is
+# S, L, A0aug (run_files/exp19_short_long.sh) or AUG_<config> (run_files/exp19_aug_pilot.sh).
 # A GPU is never shared: a lane claims a job only when its GPU has no compute process at all (ours
 # or another user's) and almost no memory in use; otherwise it sleeps and rechecks, so the job goes
 # to another free lane. cv_finetune.py repeats the same check before every step.
@@ -15,20 +18,21 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 GPU=${1:?usage: $0 <gpu> [deadline]}
 DEADLINE=${2:-}
+START=${3:-}
+AFTER_PID=${AFTER_PID:-}
 RUN=run_files/exp19_short_long.sh
-FR4=/home/gchie/workspace/data/orsi_tensors_4fps
+AUG=run_files/exp19_aug_pilot.sh
 Q=results/queue
 PY=/home/gchie/miniforge3/envs/Vu-Tapis/bin/python
 mkdir -p $Q
 log() { echo "[$(date "+%F %T")] lane gpu$GPU: $*"; }
-log "start (deadline: ${DEADLINE:-none})"
+log "start (start: ${START:-now}, deadline: ${DEADLINE:-none}, after pid: ${AFTER_PID:-none})"
 # W&B run list (time, arm, fold, step, seed, url) rebuilt from the W&B API; never fails the lane
 runs_tsv() { WANDB_SILENT=true timeout 600 $PY tools/wandb_runs_tsv.py >/dev/null 2>&1 || log "wandb_runs.tsv not updated"; }
 runs_tsv
 
-POOL=()
-[ "$(ls $FR4/*/.done 2>/dev/null | wc -l)" -ge 50 ] && POOL+=(S_fold0)
-for arm in A0aug L; do for i in 0 1 2 3 4; do POOL+=("${arm}_fold$i"); done; done
+read -r -a POOL <<< "${JOBS:-S_fold2 AUG_none_fold1 S_fold3 AUG_none_fold2 S_fold4 AUG_none_fold3 AUG_none_fold4}"
+log "jobs: ${POOL[*]}"
 
 owner() { cat "$Q/$1/gpu" 2>/dev/null; }
 mine() { [ "$(owner "$1")" = "$GPU" ] && [ ! -e "$Q/$1/finished" ] && [ ! -e "$Q/$1/failed" ]; }
@@ -49,8 +53,12 @@ gpu_busy() {  # prints what occupies this GPU (compute processes with owner, or 
 run_job() {  # $1 = <arm>_fold<i>
   local arm=${1%_fold*} fold=${1##*_fold} rc
   log "start $1"
-  if [ "$arm" = S ]; then GPUS=$GPU bash $RUN S0 2>&1 | tee "$Q/$1/job.log"
-  else GPUS=$GPU FOLDS=$fold bash $RUN "$arm" 2>&1 | tee "$Q/$1/job.log"; fi
+  case $arm in
+    AUG_*) GPUS=$GPU FOLD=$fold bash $AUG "${arm#AUG_}" 2>&1 | tee "$Q/$1/job.log" ;;
+    S) if [ "$fold" = 0 ]; then GPUS=$GPU bash $RUN S0 2>&1 | tee "$Q/$1/job.log"
+       else GPUS=$GPU FOLDS=$fold bash $RUN S 2>&1 | tee "$Q/$1/job.log"; fi ;;
+    *) GPUS=$GPU FOLDS=$fold bash $RUN "$arm" 2>&1 | tee "$Q/$1/job.log" ;;
+  esac
   rc=$?
   if [ "$rc" -ne 0 ] || grep -q "FAILED" "$Q/$1/job.log"; then
     touch "$Q/$1/failed"
@@ -61,12 +69,20 @@ run_job() {  # $1 = <arm>_fold<i>
   runs_tsv
 }
 past_deadline() { [ -n "$DEADLINE" ] && [ "$(date +%s)" -ge "$(date -d "$DEADLINE" +%s)" ]; }
+before_start() { [ -n "$START" ] && [ "$(date +%s)" -lt "$(date -d "$START" +%s)" ]; }
 
 waiting=""
 while true; do
   if past_deadline; then log "deadline $DEADLINE reached, no new jobs"; break; fi
   available || break
+  if before_start; then sleep 60; continue; fi
+  if [ -n "$AFTER_PID" ] && kill -0 "$AFTER_PID" 2>/dev/null; then
+    [ "$waiting" != "pid" ] && log "waiting for pid $AFTER_PID to exit"
+    waiting=pid; sleep 120; continue
+  fi
   busy=$(gpu_busy)
+  # the GPU must look free twice, 30 s apart: a running job is briefly off the GPU between its steps
+  [ -z "$busy" ] && { sleep 30; busy=$(gpu_busy); }
   if [ -n "$busy" ]; then
     [ "$busy" != "$waiting" ] && log "GPU busy, not claiming: $busy"
     waiting=$busy; sleep 120; continue

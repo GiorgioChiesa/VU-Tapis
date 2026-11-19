@@ -175,7 +175,8 @@ Curve: frame mAP 0.18-0.27 across epochs (noisy, 5 videos); train loss 4.42 -> 3
 (caps = caps_chain here up to 0.01; full numbers in results/reference/v2026-11-19/*_focus8/eval_test.json.)
 
 ## Arm M encoder heads (per-clip, 4 Hz, best.pyth epoch 13): raw results
-Decoder chosen on inner val: caps (= caps_chain on inner val; best short and long mAP@2 there). Inner val (5 videos):
+Decoder chosen on inner val per group (mAP@2): short = caps (0.521 vs nms 0.497, caps_chain 0.501), long = nms (0.092 vs
+caps 0.075). Selected on test: short caps 0.324 / 0.422 / 0.494, long nms 0.111 / 0.144 / 0.160. Inner val (5 videos):
 | predictions | decoder | short mAP@1 / @2 / @5 [95% CI] | long mAP@1 / @2 / @5 [95% CI] |
 |---|---|---|---|
 | M enc inner val | nms | 0.410 [0.26, 0.58] / 0.497 [0.31, 0.72] / 0.542 [0.38, 0.75] | 0.042 [0.00, 0.22] / 0.092 [0.05, 0.25] / 0.100 [0.07, 0.25] |

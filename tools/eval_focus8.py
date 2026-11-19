@@ -108,6 +108,27 @@ def matches(dets, gts, classes):
     return m, n
 
 
+def fast_ap(scores, tp, n_gt):
+    """``se.average_precision`` with the precision envelope vectorised (same value).
+
+    >>> fast_ap(np.array([0.9, 0.8, 0.7]), np.array([1.0, 0.0, 1.0]), 2) == se.average_precision([0.9, 0.8, 0.7], [True, False, True], 2)
+    True
+    """
+    if n_gt == 0:
+        return float("nan")
+    if len(scores) == 0:
+        return 0.0
+    order = np.argsort(-np.asarray(scores, dtype=np.float64), kind="stable")
+    tp = np.asarray(tp, dtype=np.float64)[order]
+    cum_tp = np.cumsum(tp)
+    cum_fp = np.cumsum(1.0 - tp)
+    mrec = np.concatenate(([0.0], cum_tp / n_gt, [1.0]))
+    mpre = np.concatenate(([0.0], cum_tp / np.maximum(cum_tp + cum_fp, 1e-12), [0.0]))
+    mpre = np.maximum.accumulate(mpre[::-1])[::-1]
+    idx = np.where(mrec[1:] != mrec[:-1])[0]
+    return float(np.sum((mrec[idx + 1] - mrec[idx]) * mpre[idx + 1]))
+
+
 def ap_table(m, n, videos, classes):
     """ap[d][c] pooled over ``videos`` (a list, repeats allowed)."""
     out = {}
@@ -117,7 +138,7 @@ def ap_table(m, n, videos, classes):
             ng = sum(n[(v, c)] for v in videos)
             s = np.concatenate([m[(v, c, d)][0] for v in videos])
             tp = np.concatenate([m[(v, c, d)][1] for v in videos])
-            out[d][c] = se.average_precision(s, tp, ng)
+            out[d][c] = fast_ap(s, tp, ng)
     return out
 
 

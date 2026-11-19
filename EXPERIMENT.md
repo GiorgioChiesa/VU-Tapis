@@ -255,3 +255,8 @@ Test:
 | M0 enc test | 0.490 | 0.255 | 0.1 | 31.4 |
 | M enc test | 0.452 | 0.235 | 0.1 | 23.2 |
 Decoders chosen on M0 inner val (mAP@2): short caps (0.483 = caps_chain > nms 0.473), long nms (0.096). Selected on test: M0 short caps 0.337 / 0.408 / 0.512, long nms 0.077 / 0.113 / 0.143; M short caps 0.324 / 0.422 / 0.494, long nms 0.111 / 0.144 / 0.160.
+
+## GPU queue
+All remaining jobs run from `run_files/gpuq` (tmux gpuq; see GPU_HANDOVER.md (d); status in results/STATUS.md).
+Enqueue one job: `run_files/gpuq/q add --id ID --priority P --cmd "bash run_files/x.sh {gpu}" [--deps ...]`.
+Long-model results (both seeds, inner val and test, with the reference): results/M/fold0/long/SUMMARY.md.

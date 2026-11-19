@@ -43,3 +43,18 @@ done
 ```
 Lanes 0/1 had start "2026-11-19 20:00": relaunch them the same way (`exp19_queue.sh 1 ...`) only if wanted;
 lane 0 runs on GPU0, which another user occupies.
+
+## (d) GPU queue gpuq (2026-11-19 17:42, replaces the EXP-21 watchers and the EXP-19 lanes)
+Daemon `run_files/gpuq/gpuq.py daemon` in tmux `gpuq` (restart loop; restartable at any time: state lives in
+`run_files/gpuq/queue/{pending,running,done,failed}/<id>.json`, jobs run detached and survive a daemon restart).
+Every 60 s it starts the highest-priority ready job on a free GPU among 1, 2, 3 (never 0): no process of gchie, no
+running queue job, memory below the job threshold (default 6000 MiB, tolerates the other user idle ~2.5 GB on GPU3),
+free at two consecutive ticks. A failed job only blocks its dependants. Log `results/gpuq.log`, table `results/STATUS.md`.
+Enqueue: `run_files/gpuq/q add --id ID --priority P [--deps JOB|glob:PAT|count:N:PAT ...] [--mem MiB] [--cpu] --cmd "... {gpu} ..."`.
+EXP-21 phase-2 jobs (`run_files/gpuq/enqueue_exp21_phase2.sh`, priority 193-200 + CPU summary 150): all done 18:14.
+EXP-19 resume (`run_files/gpuq/enqueue_exp19_resume.sh`): S_fold3 (prio 5), AUG_none_fold2 (4), S_fold4 (3),
+AUG_none_fold3 (2), AUG_none_fold4 (1); `wait_for_group exp21` (start only when no EXP-21 job is pending), exclusive
+GPU (< 1500 MiB, no process of any user, as the EXP-19 lane requires). Each job drops its own HOLD_EXP21 claim (only if
+the job never ran) and runs `JOBS=<job> bash run_files/exp19_queue.sh <gpu>`. Started 18:14: S_fold3 GPU1,
+AUG_none_fold2 GPU2, S_fold4 GPU3; AUG_none_fold3/4 pending. New EXP-21 jobs (priority > 5) go ahead of EXP-19
+jobs not yet started; running jobs are never interrupted. Section (c) is no longer needed for these five jobs.

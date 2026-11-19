@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Shortcut: run_files/gpuq/q add --id ID --priority P --cmd "..." [--deps ...] | q status | q daemon
+exec /home/gchie/miniforge3/envs/Vu-Tapis/bin/python "$(dirname "$0")/gpuq.py" "$@"

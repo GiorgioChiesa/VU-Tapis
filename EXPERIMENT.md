@@ -100,3 +100,15 @@ EXP-21 M: 30 clips/s, epoch = 263 s train + 66 s inner val (7027 rows) -> 25 epo
 - reference: `bash run_files/exp21_reference.sh v2026-11-17` and `... v2026-11-19` (CPU)
 - arm M: tmux exp21_M: `bash run_files/exp21_arm.sh M 1` (started 2026-11-19 11:43, commit 2141846, GPU1)
 - arm M0: tmux exp21_M0 via watcher `run_files/exp21_gpuwatch.sh` (= `bash run_files/exp21_arm.sh M0 <gpu>`)
+
+## Mamba env and SEDMamba (plan step 5 prep)
+- venv `~/workspace/envs/mamba` (`--system-site-packages` over Vu-Tapis; torch stays the base 2.6.0+cu124):
+  `causal-conv1d==1.5.0.post8`, `mamba-ssm==2.2.4` (prebuilt cu12/torch2.6/cp313 wheels, no compile; build script
+  `~/workspace/envs/build_mamba.sh`, constraint torch==2.6.0 because unpinned latest mamba-ssm pulls a cu13 torch).
+  Import and CUDA forward OK on GPU1; `Mamba` and `Mamba2` blocks are causal (perturbing t >= 200 leaves outputs
+  t < 200 bit-identical).
+- SEDMamba cloned at `~/workspace/repos/SEDMamba` (a65417d, Apache-2.0). `baseline/SEDMamba.py`: 3 stages, each
+  1x1 bottleneck -> FCTF (conv k3 dilation 2/4/8 chained, `padding=dilation`, i.e. symmetric) -> concat + 1x1 ->
+  one unidirectional `mamba_ssm.Mamba` (v1, d_state 16, d_conv 4, expand 2) -> 1x1. The Mamba part is causal, the
+  FCTF convs are NOT: measured, an input change at step 300 changes outputs from step 280. Causal variant for the
+  online arm: left padding 2*dilation (padding=0 + F.pad(x, (2d, 0))). No bidirectional scan in the official code.

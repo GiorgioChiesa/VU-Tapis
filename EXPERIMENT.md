@@ -72,3 +72,12 @@ all-fold confirmation inside this pilot.
 Budget: ~3.3 h per config on GPU 2, ~13-17 GPU h.
 
 Result:
+Fold 0 test, caps_chain|a=0.1|s=1|f=0.2, mean of head seeds 0/1 (seed mAP@1 in brackets); inner-val =
+best val/steps_mAP of the encoder fine-tune. Raw numbers, 2026-11-19 09:05:
+- L (ref):       all 0.1113/0.5072 (0.0888, 0.1338); short 0.2563/0.8048; long 0.0648/0.5890; inner-val 0.6653
+- AUG_none:      all 0.1342/0.5141 (0.1281, 0.1403); short 0.2992/0.7785; long 0.0874/0.5512; inner-val 0.6937; 3.72 h
+- AUG_geo:       all 0.1171/0.5193 (0.1175, 0.1168); short 0.2477/0.8023; long 0.1124/0.5584; inner-val 0.6707; 3.68 h
+- AUG_geo_photo: all 0.1293/0.5318 (0.1167, 0.1419); short 0.2803/0.8078; long 0.1006/0.5649; inner-val 0.6916; 3.74 h
+- AUG_geo_surg:  all 0.1289/0.5136 (0.1248, 0.1330); short 0.2495/0.8171; long 0.1345/0.5665; inner-val 0.6837; 3.68 h
+- AUG_geo_jit:   started 07:20 (before the deadline), fine-tune done 08:59, inner-val 0.6842; features/heads running.
+(values as mAP@1/mAP@5)

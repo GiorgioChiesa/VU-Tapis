@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Timeline eventi focus8</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:16px;background:#fff;color:#222}
+h1{font-size:20px;margin:0 0 6px} .note{color:#555;font-size:13px;max-width:1100px}
+.bar{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;align-items:center}
+.leg{cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border:1px solid #ccc;border-radius:4px;font-size:12px}
+.leg.off{opacity:.3}
+.vid{margin:14px 0 4px;font-weight:600} svg{display:block}
+select{font-size:14px}
+#tip{position:fixed;pointer-events:none;background:#222;color:#fff;font-size:12px;padding:4px 6px;border-radius:4px;display:none}
+</style></head><body>
+<h1>Timeline degli 8 eventi target: eventi reali e predetti</h1>
+<div class="note">Per ogni video di test: barra delle fasi reali, eventi reali, poi le predizioni di ogni modello (decoder nms).
+Colori: <b style="color:#2ca02c">verde</b> entro ±1 s, <b style="color:#0b5d1e">verde scuro</b> entro ±5 s,
+<b style="color:#ff8c00">arancione</b> entro ±7 s, <b style="color:#d62728">rosso</b> falso positivo; i falsi negativi sono simboli rossi vuoti barrati nella riga del modello.
+Soglia per classe: miglior F1 a ±2 s sui video mostrati, stessa regola per ogni modello (solo per la visualizzazione, non è una metrica).
+Clicca sulla legenda per nascondere o mostrare un evento, o attenuare una fase.</div>
+<div class="bar">Fold: <select id="fold"></select></div>
+<div class="note" id="counts"></div>
+<div class="bar" id="evleg"></div>
+<div class="bar" id="phleg"></div>
+<div id="main"></div><div id="tip"></div>
+<script>
+const D=/*DATA*/null;
+const SYM=["circle","square","tri","diamond","trid","star","plus","hex"];
+const COL={g1:"#2ca02c",g5:"#0b5d1e",o7:"#ff8c00",fp:"#d62728",fn:"#d62728"};
+const PH=["#8dd3c7","#ffffb3","#bebada","#fb8072","#80b1d3","#fdb462","#b3de69","#fccde5","#d9d9d9","#bc80bd","#ccebc5","#ffed6f","#a6cee3","#b2df8a","#fb9a99","#cab2d6","#e5c494"];
+const hidden=new Set(), dimmed=new Set();
+function shape(s,x,y,r,fill,stroke){
+  const p=(pts)=>`<polygon points="${pts.map(q=>q.join(',')).join(' ')}" fill="${fill}" stroke="${stroke}"/>`;
+  switch(s){
+    case"circle":return`<circle cx="${x}" cy="${y}" r="${r}" fill="${fill}" stroke="${stroke}"/>`;
+    case"square":return`<rect x="${x-r}" y="${y-r}" width="${2*r}" height="${2*r}" fill="${fill}" stroke="${stroke}"/>`;
+    case"tri":return p([[x,y-r],[x+r,y+r],[x-r,y+r]]);
+    case"trid":return p([[x-r,y-r],[x+r,y-r],[x,y+r]]);
+    case"diamond":return p([[x,y-r-1],[x+r+1,y],[x,y+r+1],[x-r-1,y]]);
+    case"hex":return p([0,1,2,3,4,5].map(i=>[x+r*Math.cos(i*Math.PI/3),y+r*Math.sin(i*Math.PI/3)]));
+    case"star":return p([...Array(10).keys()].map(i=>{const rr=i%2?r*0.45:r+1,a=-Math.PI/2+i*Math.PI/5;return[x+rr*Math.cos(a),y+rr*Math.sin(a)]}));
+    case"plus":return`<path d="M${x-r} ${y}H${x+r}M${x} ${y-r}V${y+r}" stroke="${fill==='none'?stroke:fill}" stroke-width="3"/>`;
+  }}
+const mmss=t=>`${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,'0')}`;
+function legend(){
+  const el=document.getElementById('evleg');
+  el.innerHTML='Eventi: '+D.events.map((e,i)=>`<span class="leg${hidden.has(i)?' off':''}" data-e="${i}"><svg width="16" height="16">${shape(SYM[i],8,8,5,'#555','#222')}</svg>${e.replace(/_/g,' ')}${D.short.includes(e)?' (corto)':' (lungo)'}</span>`).join('');
+  el.querySelectorAll('.leg').forEach(n=>n.onclick=()=>{const i=+n.dataset.e;hidden.has(i)?hidden.delete(i):hidden.add(i);legend();draw()});
+  const ph=new Set();Object.values(D.folds).forEach(f=>Object.values(f.videos).forEach(v=>v.phases.forEach(s=>ph.add(s[2]))));
+  const pl=document.getElementById('phleg');
+  pl.innerHTML='Fasi: '+[...ph].sort((a,b)=>a-b).map(p=>`<span class="leg${dimmed.has(p)?' off':''}" data-p="${p}"><span style="width:14px;height:12px;background:${PH[p%PH.length]};display:inline-block;border:1px solid #999"></span>P${p}</span>`).join('');
+  pl.querySelectorAll('.leg').forEach(n=>n.onclick=()=>{const p=+n.dataset.p;dimmed.has(p)?dimmed.delete(p):dimmed.add(p);legend();draw()});
+}
+function draw(){
+  const f=D.folds[document.getElementById('fold').value],W=Math.max(700,document.body.clientWidth-40),L=230,R=10;
+  const models=Object.keys(Object.values(f.videos)[0].models);
+  const cnt={};let html='';
+  for(const [v,vd] of Object.entries(f.videos)){
+    const sx=t=>L+(W-L-R)*t/vd.duration, H=60+(models.length+1)*26;
+    let s=`<svg width="${W}" height="${H}">`;
+    vd.phases.forEach(([a,b,p])=>s+=`<rect x="${sx(a)}" y="6" width="${Math.max(0.5,sx(b)-sx(a))}" height="18" fill="${PH[p%PH.length]}" opacity="${dimmed.has(p)?0.15:1}"><title>P${p} ${mmss(a)}–${mmss(b)}</title></rect>`);
+    s+=`<text x="4" y="20" font-size="12">fasi reali</text>`;
+    for(let t=0;t<=vd.duration;t+=300){s+=`<line x1="${sx(t)}" x2="${sx(t)}" y1="26" y2="${H-14}" stroke="#eee"/><text x="${sx(t)+2}" y="${H-2}" font-size="10" fill="#888">${mmss(t)}</text>`}
+    const yT=44;s+=`<text x="4" y="${yT+4}" font-size="12">eventi reali</text>`;
+    vd.gt.forEach(([c,t])=>{if(hidden.has(c))return;
+      s+=`<g data-tip="reale: ${D.events[c]} @ ${mmss(t)}">${shape(SYM[c],sx(t),yT,5,'#333','#000')}</g>`;});
+    models.forEach((m,k)=>{const y=yT+26*(k+1);s+=`<text x="4" y="${y+4}" font-size="12">${m.length>34?m.slice(0,34)+'…':m}</text>`;
+      cnt[m]=cnt[m]||{g1:0,g5:0,o7:0,fp:0,fn:0};
+      vd.models[m].gt_col.forEach((g,j)=>{const [c,t]=vd.gt[j];if(g!=='fn'||hidden.has(c))return;cnt[m].fn++;
+        s+=`<g data-tip="${m}: mancato ${D.events[c]} @ ${mmss(t)}">${shape(SYM[c],sx(t),y,5,'none',COL.fn)}<line x1="${sx(t)-6}" x2="${sx(t)+6}" y1="${y-6}" y2="${y+6}" stroke="${COL.fn}" stroke-width="1.5"/></g>`});
+      vd.models[m].pred.forEach(([c,t,sc,col])=>{if(hidden.has(c))return;cnt[m][col]++;
+        s+=`<g data-tip="${m}: ${D.events[c]} @ ${mmss(t)} score ${sc} (${col})">${shape(SYM[c],sx(t),y,5,COL[col],'#000')}</g>`;});
+    });
+    html+=`<div class="vid">${v} (${mmss(vd.duration)})</div>`+s+'</svg>';
+  }
+  document.getElementById('main').innerHTML=html;
+  document.getElementById('counts').innerHTML=Object.entries(cnt).map(([m,c])=>`<b>${m}</b>: ±1 s ${c.g1} · ±5 s ${c.g5} · ±7 s ${c.o7} · FP ${c.fp} · FN ${c.fn}`).join('<br>');
+  const tip=document.getElementById('tip');
+  document.querySelectorAll('[data-tip]').forEach(n=>{n.onmousemove=e=>{tip.style.display='block';tip.style.left=e.clientX+12+'px';tip.style.top=e.clientY+12+'px';tip.textContent=n.dataset.tip};n.onmouseleave=()=>tip.style.display='none'});
+}
+const sel=document.getElementById('fold');Object.keys(D.folds).forEach(k=>sel.innerHTML+=`<option value="${k}">fold ${k}</option>`);
+sel.onchange=draw;window.onresize=draw;legend();draw();
+</script></body></html>

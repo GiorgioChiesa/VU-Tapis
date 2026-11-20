@@ -46,6 +46,8 @@ def main():
     ap.add_argument("--viewer", default=str(Path.home() / "workspace/viewer/EXP24_hybrid"))
     a = ap.parse_args()
     fj = {f: json.loads((OUT / f"fold{f}/fold.json").read_text()) for f in FOLDS}
+    for r in fj.values():  # phase_summary returned (summary, per_video) -> stored as a 2-list
+        r["phases"] = {m: {**s, "per_video": pv} for m, (s, pv) in r["phases"].items()}
     KEYS = fj[0]["keys"]
     ki = {k: i for i, k in enumerate(KEYS)}
     boots = {f: dict(np.load(OUT / f"fold{f}/boot.npz")) for f in FOLDS}
@@ -57,9 +59,9 @@ def main():
     dci = np.nanpercentile(bt["hybrid"] - bt["reference"], [2.5, 97.5], axis=0)
     md = ["# EXP-24: hybrid (reference S MS-TCN short events + L-A3 long events and phases) vs reference vs L-A3, 5 folds x 10 held-out videos\n",
           "AP in [0, 1]; 95% CI = per-video bootstrap within fold (1000, same resamples for all models), 5-fold mean = mean of the 5 fold values.\n"]
-    sel = [[f, fj[f]["selection"]["chosen"], f"{fj[f]['selection']['inner_val_long_score'][fj[f]['selection']['chosen']]:.3f}",
+    sel = [[f, fj[f]["selection"]["chosen"].replace("|", " / "), f"{fj[f]['selection']['inner_val_long_score'][fj[f]['selection']['chosen']]:.3f}",
             fj[f]["selection"]["phase_cand"], f"{fj[f]['short_diff_max']:.1e}"] for f in FOLDS]
-    md += ["## Choices made on the inner val", table(["fold", "L-A3 long events (seed or ens | decoder)", "inner-val long score",
+    md += ["## Choices made on the inner val", table(["fold", "L-A3 long events (seed or ens / decoder)", "inner-val long score",
                                                        "phases from", "max |hybrid - reference| short AP"], sel), ""]
 
     # ---- groups per fold and mean
@@ -128,7 +130,7 @@ def main():
             "per_fold_mean8_diff_map2": {str(f): float(np.array(fj[f]["events"]["hybrid_minus_reference"]["point"])[ki["mean8"]][1]) for f in FOLDS}}
     md += ["## Prediction check (pre-registered in EXPERIMENT.md, EXP-24)",
            f"8-event mean mAP@2, 5-fold mean: hybrid {pred['mean8_map2_hybrid']:.4f}, reference {pred['mean8_map2_reference']:.4f}, "
-           f"difference {m8:+.4f} (threshold +0.02, 95% CI of the difference [{dci[ki['mean8']][0][1]:+.3f}, {dci[ki['mean8']][1][1]:+.3f}]); "
+           f"difference {m8:+.4f} (threshold +0.02, 95% CI of the difference [{dci[0][ki['mean8']][1]:+.3f}, {dci[1][ki['mean8']][1]:+.3f}]); "
            f"short group difference {pred['short_diff_map2']:+.4f} (limit -0.01). Per fold mean8 difference @2: "
            + ", ".join(f"{k}: {v:+.3f}" for k, v in pred["per_fold_mean8_diff_map2"].items()), ""]
 

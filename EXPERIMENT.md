@@ -441,4 +441,18 @@ after seeing held-out numbers, no second selection rule.
 Machine: Orsi, CPU only (Vu-Tapis env), via the gpuq with --cpu; GPUs not used.
 Budget: about 1 CPU hour (EXP-22 evaluation took 10-20 CPU min per fold with 1000 bootstraps; here 6 candidates x 2 decoders on
 inner val plus the held-out runs per fold).
-Result: (filled after the run)
+Result:
+Experiment commits: pre-registration 378c4f2 (pushed before any evaluation), code 426fe86 (run), then a fix of the summary script (tables only) in the commit that holds this Result.
+Smoke test before the queue run: fold 0 with 20 bootstraps (printed fold-0 held-out numbers; no choice changed after it; the smoke outputs were deleted).
+Labels v2026-11-19 / v2026-11-19_4hz; seeds: L-A3 seeds 0, 1 (EXP-22), reference seeds 0, 1; bootstrap seed 0, 1000 resamples. Run: queue jobs exp24_f0..f4, exp24_report, exp24_viewer
+(~5 min each, CPU only). Outputs: results/exp24/fold<i>/{fold.json,boot.npz,hybrid_dets_s0.json}, results/exp24/report.{md,json}, tracked results_summary/exp24.md.
+Choices on the inner val (L-A3 long events, seed|decoder; phases from): fold 0 s1|nms, ens; fold 1 s0|caps_chain, s0; fold 2 s1|caps_chain, ens; fold 3 s1|caps_chain, ens; fold 4 s0|nms, ens.
+Short group hybrid - reference: 0.000 at @1/@2/@5 in all folds (max abs difference 0.0e+00, as the merge implies).
+8-event mean AP@2 (hybrid / reference / L-A3 EXP-22 rule), folds 0-4 and 5-fold mean: 0.562/0.564/0.548; 0.610/0.583/0.563; 0.645/0.562/0.597; 0.612/0.565/0.585; 0.517/0.533/0.561; mean 0.589/0.562/0.571.
+Hybrid - reference 8-event mean (@1 / @2 / @5), 5-fold mean: +0.010 [-0.02, 0.06] / +0.027 [0.00, 0.06] / +0.015 [-0.01, 0.05]; @2 per fold: -0.003, +0.027, +0.083, +0.046, -0.016.
+Long group mAP@2 (hybrid / reference / L-A3), 5-fold mean 0.397 / 0.342 / 0.403; short 0.781 / 0.781 / 0.739. Classes (of 8) with hybrid AP >= reference at @2: 7 (5-fold mean AP; only Incision_of_Denonvilliers_fascia is lower, -0.055).
+Pooled paired Wilcoxon, 50 videos, hybrid - reference @2: 8-event mean +0.034 (35 better / 14 worse, p 0.030); long +0.069 (35/14, p 0.032); short 0 (identical).
+Phases hybrid / reference (5-fold mean): row acc 0.875 / 0.851; F1@50 P0 71.3 / 43.2, P1 79.2 / 73.4; acc 1 Hz P0 0.874 / 0.852, P1 0.874 / 0.851. Wilcoxon F1@50 P1 +5.8 (36/9, p<0.0001).
+Prediction check: 8-event mean mAP@2 5-fold mean hybrid 0.5890, reference 0.5615, difference +0.0275 (>= +0.02: holds; 95% CI of the difference [+0.002, +0.064]); short difference +0.0000 (>= -0.01: holds).
+Online (fold 0 only): hybrid online long @1/@2/@5 0.272 / 0.391 / 0.620, short (reference offline, declared 2 s delay) 0.531 / 0.766 / 0.869; causal L-A3 alone (selected ens|plain) short 0.295 / 0.520 / 0.761.
+Viewer: ~/workspace/viewer/timelines_focus8/index.html (hybrid added via --dets), summary page ~/workspace/viewer/EXP24_hybrid/index.html (figures/group_map2_per_fold.png, class_ap2_5fold.png, diff_and_phases.png), linked from EXP22_s_long.

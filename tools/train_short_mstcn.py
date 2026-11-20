@@ -70,12 +70,10 @@ def main():
     ap.add_argument("--smooth-weight", type=float, default=0.15)
     ap.add_argument("--k-sec", type=float, default=3.0)
     ap.add_argument("--causal", action="store_true", help="left-only padding in every dilated conv (online model, EXP-25)")
+    ap.add_argument("--lookahead", default="", help="comma-separated look-aheads in seconds (EXP-25a): one model per value in <out>/F<value>/, features loaded once; implies --causal use")
     ap.add_argument("--smoke", action="store_true", help="2 train videos, 1 inner-val, 1 held-out, 2 epochs")
     args = ap.parse_args()
 
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     sp = json.loads(Path(args.splits).read_text())
@@ -89,11 +87,37 @@ def main():
     xs = np.concatenate([data[p]["x"] for p in train])
     mu, sd = xs.mean(0), xs.std(0) + 1e-6
     del xs
-    on_dev = {p: (torch.from_numpy((d["x"] - mu) / sd).T[None].to(dev), torch.from_numpy(d["phase"])[None].to(dev),
-                  torch.from_numpy(d["y"]).T[None].to(dev), torch.from_numpy(d["m"]).T[None].to(dev))
-              for p, d in data.items()}
+    # normalised features stay in CPU RAM (a crop is copied to the GPU per step): the GPU needs about 1 GB instead of 14 GB
+    cpu = {}
+    for p in list(data):
+        d = data[p]
+        cpu[p] = (torch.from_numpy((d["x"] - mu) / sd).T.contiguous()[None], torch.from_numpy(d["phase"])[None],
+                  torch.from_numpy(d["y"]).T.contiguous()[None], torch.from_numpy(d["m"]).T.contiguous()[None])
+        del d["x"], d["y"], d["m"], d["phase"]
     print(f"data {len(train)}/{len(inner)}/{len(held)} videos in {time.time() - t0:.0f}s", flush=True)
+    looks = [float(x) for x in args.lookahead.split(",")] if args.lookahead else [None]
+    for look in looks:
+        train_one(args, cpu, data, train, inner, held, mu, dev, out / (f"F{look:g}" if look is not None else ""),
+                  int(round(4 * look)) if look is not None else 0)
+    print("done", flush=True)
 
+
+def shifted(t, S, pad_value):
+    """Labels of row t - S at row t (``S`` rows of ``pad_value`` first): [.., T] -> [.., T]."""
+    if S == 0:
+        return t
+    pad = torch.full_like(t[..., :S], pad_value)
+    return torch.cat([pad, t[..., :-S]], -1)
+
+
+def train_one(args, cpu, data, train, inner, held, mu, dev, out, S):
+    """One model with a look-ahead of S rows (S = 0: the EXP-25 causal model), seeded with ``args.seed`` (independent of other S)."""
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    out.mkdir(parents=True, exist_ok=True)
+    # model output at row t is trained against the labels of row t - S; the first S rows have no label (mask 0, phase ignored)
+    tr = {p: (x, shifted(yp, S, int(yp[0, 0])), shifted(ye, S, 0.0), shifted(me, S, 0.0)) for p, (x, yp, ye, me) in cpu.items()}
     model = TemporalModel(len(mu), len(F8.PHASE_IDS), len(F8.TARGETS) + 1, args.channels, args.layers, args.stages,
                           args.causal, args.dropout).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -115,11 +139,12 @@ def main():
         order = list(train)
         random.shuffle(order)
         for p in order:
-            x, yp, ye, me = on_dev[p]
+            x, yp, ye, me = tr[p]
             s = random.randint(0, max(0, x.shape[-1] - args.crop))
             sl = slice(s, s + args.crop)
-            xc = Fn.dropout1d(x[..., sl], args.feat_dropout, training=True) if args.feat_dropout else x[..., sl]
-            loss = losses(model(xc), yp[:, sl], ye[..., sl], me[..., sl], FG, args.gamma, args.smooth_weight)
+            xc = x[..., sl].to(dev, non_blocking=True)
+            xc = Fn.dropout1d(xc, args.feat_dropout, training=True) if args.feat_dropout else xc
+            loss = losses(model(xc), yp[:, sl].to(dev), ye[..., sl].to(dev), me[..., sl].to(dev), FG, args.gamma, args.smooth_weight)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
@@ -127,12 +152,12 @@ def main():
         sched.step()
         rec = {"epoch": epoch, "train_loss": tot / len(order), "train_s": round(time.time() - te, 1)}
         log.append(rec)
-        print(json.dumps(rec), flush=True)
+        print(json.dumps(dict(rec, lookahead_rows=S)), flush=True)
         if not args.smoke:
             torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "sched": sched.state_dict(),
                         "epoch": epoch, "log": log, "py_rng": random.getstate(),
                         "torch_rng": torch.get_rng_state()}, last)
-    cfg = dict(vars(args), event_classes=F8.EVENT_CLASSES, selection="last epoch (reference recipe)")
+    cfg = dict(vars(args), event_classes=F8.EVENT_CLASSES, selection="last epoch (reference recipe)", lookahead_rows=S)
     (out / "train_log.json").write_text(json.dumps({"cfg": cfg, "log": log}, indent=1))
     model.eval()
     for name, vids in (("inner_val", inner), ("held_out", held)):
@@ -142,12 +167,14 @@ def main():
                                                  "feat_dir": str(Path(args.feat_dir).resolve()), "cfg": cfg},
                                                 indent=1, default=str))
         for p in vids:
-            ev, ph = predict(model, on_dev[p][0], BG, FG)
+            ev, ph = predict(model, cpu[p][0].to(dev), BG, FG)
+            if S:   # read the output S rows later (the last S rows repeat the final output)
+                idx = np.minimum(np.arange(len(ev)) + S, len(ev) - 1)
+                ev, ph = ev[idx], ph[idx]
             np.savez_compressed(d / f"{p}.npz", second=data[p]["second"], probs_steps=ev.astype(np.float32),
                                 probs_phases=ph.astype(np.float32))
     if not args.smoke:
         (out / ".done").touch()
-    print("done", flush=True)
 
 
 if __name__ == "__main__":

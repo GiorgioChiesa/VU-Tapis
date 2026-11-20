@@ -456,3 +456,51 @@ Phases hybrid / reference (5-fold mean): row acc 0.875 / 0.851; F1@50 P0 71.3 / 
 Prediction check: 8-event mean mAP@2 5-fold mean hybrid 0.5890, reference 0.5615, difference +0.0275 (>= +0.02: holds; 95% CI of the difference [+0.002, +0.064]); short difference +0.0000 (>= -0.01: holds).
 Online (fold 0 only): hybrid online long @1/@2/@5 0.272 / 0.391 / 0.620, short (reference offline, declared 2 s delay) 0.531 / 0.766 / 0.869; causal L-A3 alone (selected ens|plain) short 0.295 / 0.520 / 0.761.
 Viewer: ~/workspace/viewer/timelines_focus8/index.html (hybrid added via --dets), summary page ~/workspace/viewer/EXP24_hybrid/index.html (figures/group_map2_per_fold.png, class_ap2_5fold.png, diff_and_phases.png), linked from EXP22_s_long.
+
+## EXP-25: fully online hybrid (causal S MS-TCN for short events + causal L-A3 for long events and phases), 5 folds
+Hypothesis: the EXP-24 hybrid gain comes from the long events and phases; replacing its offline short part (reference S MS-TCN,
+which sees the whole video) by a causal MS-TCN on the same S features, and using the causal L-A3 for the long part, keeps most
+of the offline hybrid's 8-event mAP while every part runs online (declared delays: clip 2 s, decoder 2 s).
+Parent: 0884035 (EXP-24 results, branch exp/focus8-s-long).
+Base: origin/container is NOT included (worktree is 3 commits behind after git fetch); nothing merged.
+Data version: labels v2026-11-19 / v2026-11-19_4hz (ORSI_LABEL_DIR as EXP-21..24); S features of each fold
+(`~/workspace/wt/short-long-context/results/S/LONG/cv_ft/fold<i>/untrimmed/checkpoint_best_steps/all`, 4 Hz, 1536-d); splits =
+results/exp22/fold<i>/splits.json (35 train / 5 inner val / 10 held out per fold; the 5 held-out sets are disjoint, 50 videos).
+Models (seeds 0 and 1):
+  - causal short MS-TCN: tools/train_short_mstcn.py --causal; identical recipe to the reference (dilate3, 10 layers, 2 stages,
+    64 channels, dropout 0.5, feature dropout 0.5, focal BCE, +-3 s targets, Adam 5e-4 cosine, 100 epochs, crop 16384, LAST epoch,
+    no checkpoint selection); only change: left-only padding (2 * dilation, 0) in every dilated conv (the existing `causal` flag of
+    TemporalModel). Event head = Idle + 8 target events (9 columns); the phase head is trained too. All 5 folds.
+  - causal L-A3: tools/train_long_s.py --causal (EXP-22 code, unchanged); folds 1-4 trained here, fold 0 = EXP-22 runs
+    results/exp22/fold0/a3_causal_s{0,1} (their held-out online numbers were printed in EXP-22 / EXP-24, so fold 0 is not a blind fold
+    for the long part; the selection below is re-applied on its inner val).
+Online hybrid construction (decoded detections merged per group): short-class emissions from the causal short MS-TCN, long-class
+emissions from the causal L-A3, both decoded online (tapis/evaluate/online_decode.py via tools/online_eval_focus8.py: peak at t
+emitted at t + 2 s, window 5 s, decoders plain and caps_chain), clip delay 2 s declared (the encoder clip is centred).
+Choices on each fold's inner val only (5 videos): short part = candidate in {seed 0, seed 1, seed ensemble (mean of probabilities)}
+x decoder {plain, caps_chain}, best short-group mAP averaged over +-1/2/5 s; long part = same for causal L-A3 with the long-group
+mAP; phases = causal L-A3 candidate in {s0, s1, ens} with the best inner-val F1@50 of the causal hysteresis (margin 0.1).
+Comparators (existing, no retraining): offline hybrid and offline reference from results/exp24/fold<i>/fold.json (reference =
+mean of its 2 seeds, decoder nms; hybrid = EXP-24 selection). Same bootstrap draws (seed 0, 1000, per video) as EXP-24.
+Command: `bash run_files/enqueue_exp25.sh` (trainings, queue ids exp25_*), then `bash run_files/exp25_online.sh fold <0-4>` (per-fold
+online evaluation, CPU), `bash run_files/exp25_online.sh report`, `bash run_files/exp25_online.sh viewer`. Outputs results/exp25/.
+Metric (primary): 8-event mean mAP@+-2 s of the online hybrid = mean of the short-group and long-group mAP@2 (= mean of the 8 class
+APs), 5-fold mean over the held-out sets. Latency = mean over the true positives (any of the 8 classes, +-2 s) of emission time
++ clip delay (2 s) - ground-truth time, pooled over the 50 videos (mean and std; also per fold and at +-1 / +-5 s).
+Secondary: group short mAP@2 of the causal short MS-TCN alone (online decoding, selected on inner val) vs the offline reference
+short group (5-fold mean 0.781); per class and group AP at +-1/2/5 s with per-video bootstrap CIs; online phases F1@50 raw (P0)
+and with causal hysteresis (H); pooled paired Wilcoxon over the 50 videos (per-video 8-event mAP@2) of the online hybrid against
+the offline hybrid and against the offline reference.
+Prediction (written 2026-11-20, before any evaluation or training of EXP-25): online hybrid 8-event mean mAP@2, 5-fold mean,
+>= 0.85 x offline hybrid (0.589) = 0.50, and mean latency <= 5 s. Secondary: causal short MS-TCN alone short-group mAP@2 (5-fold
+mean) within 0.10 of the offline reference (>= 0.681). Expected point values (not part of the prediction): online hybrid about
+0.50 (range 0.44-0.56; fold-0 EXP-22 causal L-A3 long @2 was 0.364), latency about 4.1 s as in EXP-22 fold 0 (2 s clip + 2 s
+decoder), causal short alone about 0.65-0.70.
+Stop rule: stop when the 10 causal short trainings and the 8 new causal L-A3 trainings are done and the 5 folds are evaluated, the
+report, the viewer and the summary page exist, whatever the result. No tuning or second selection rule after seeing held-out numbers.
+A training that fails is reported and not retried with other settings.
+Machine: Orsi, gpuq of the focus8 worktree (GPUs 1-3 only, never GPU0), at most 2 GPU jobs at a time (two job lanes chained with
+--deps); mamba venv for L-A3, Vu-Tapis env for the MS-TCN and for the evaluation (CPU).
+Budget: 18 trainings (about 5 min each for the MS-TCN, 8-10 min for L-A3 as in EXP-22) = about 2 GPU h, about 1.1 h wall on 2 lanes;
+evaluation about 5-10 CPU min per fold.
+Result:

@@ -69,6 +69,7 @@ def main():
     ap.add_argument("--gamma", type=float, default=2.0)
     ap.add_argument("--smooth-weight", type=float, default=0.15)
     ap.add_argument("--k-sec", type=float, default=3.0)
+    ap.add_argument("--causal", action="store_true", help="left-only padding in every dilated conv (online model, EXP-25)")
     ap.add_argument("--smoke", action="store_true", help="2 train videos, 1 inner-val, 1 held-out, 2 epochs")
     args = ap.parse_args()
 
@@ -94,7 +95,7 @@ def main():
     print(f"data {len(train)}/{len(inner)}/{len(held)} videos in {time.time() - t0:.0f}s", flush=True)
 
     model = TemporalModel(len(mu), len(F8.PHASE_IDS), len(F8.TARGETS) + 1, args.channels, args.layers, args.stages,
-                          False, args.dropout).to(dev)
+                          args.causal, args.dropout).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     start, log = 0, []

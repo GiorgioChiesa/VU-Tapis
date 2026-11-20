@@ -315,3 +315,47 @@ Result (raw numbers; ran 2026-11-20 09:16-09:24 via gpuq, all 8 jobs exit 0; cod
   inner val); latency of TPs at +-2 s 4.01 s (std 0.85, n 207); online phases F1@50 argmax 33.5 / causal hysteresis 46.0, acc 1 Hz 0.753 / 0.755.
 - Exploratory short MS-TCN (reference recipe, last epoch), test mAP@1/@2/@5: seed 0 nms short 0.205/0.567/0.695 caps 0.210/0.593/0.728;
   seed 1 nms 0.319/0.634/0.748 caps 0.322/0.642/0.767 (reference S MS-TCN seed 0: 0.532/0.722/0.848 nms).
+
+## EXP-22: L-A3 on the EXP-19 S encoder features (fold 0), one model for the 8 target events
+Hypothesis: the focused fine-tune of EXP-21 (arm M) made the 4 Hz encoder features poorer than the EXP-19 S features, so
+the same long-context model (L-A3 = BiMamba2 + 2 MS-TCN stages) trained on the S features beats the reference S MS-TCN
+on the long events and phases, and its extra short-event head keeps the reference level on the 4 short events.
+Parent: EXP-21 phase 3 (3b955e5, branch exp/focus8-phase3); the S features are the EXP-19 S fold 0 outputs.
+Base: origin/main 9eee77e (included in this worktree: 0 commits behind after git fetch; nothing merged).
+Data version: labels v2026-11-19 / v2026-11-19_4hz (ORSI_LABEL_DIR as EXP-21); S features
+`~/workspace/wt/short-long-context/results/S/LONG/cv_ft/fold<i>/untrimmed/checkpoint_best_steps/all/RARPxx.npz`
+(4 Hz, `features` [T, 1536] fp16, same rows and `second` as the arm M features; the S encoder never saw the held-out
+videos of its fold). Fold 0 splits (35 train / 5 inner val / 10 held out) = EXP-21 splits (asserted by
+tools/s_fold_inputs.py); folds 1-4: train / inner val = `train_data.csv` / `val_data.csv` of the S fine-tune of the
+fold (cv_finetune.choose_inner_val), held out = the videos of the EXP-19 S dilate3 prediction dir of the fold.
+Arms (2 seeds each, 0 and 1): L-A3 offline and L-A3 causal, tools/train_long_s.py; same architecture, optimiser, schedule
+(100 epochs, AdamW 5e-4 cosine, crop 16384 rows, feature dropout 0.5, targets +-1 s, weighted CE, phase CE, 0.15 T-MSE)
+as EXP-21 (tools/train_long_mamba.py, imported unchanged). Differences: event head = Idle + 4 short + 4 long targets
+(9 outputs); selection on the inner val = mean of the short-group and long-group mAP (each averaged over +-1/2/5 s, NMS).
+Reference: EXP-19 S MS-TCN dilate3 seeds 0 and 1, re-evaluated with the EXP-21 evaluator (results/reference/v2026-11-19):
+nms, held out: long mAP@+-2 s 0.429 / 0.297 (mean 0.363), short 0.722 / 0.811 (mean 0.767); phases F1@50 P0 / P1
+41.3 / 71.3 and 40.3 / 70.4. EXP-21 comparison: arm M L-A3 long 0.357 / 0.303 (nms, @2), F1@50 63 (P0) and 68 (P1).
+Command: see "Commands" below (run exactly as written).
+Metric: held-out (10 videos) spotting AP per class and group mAP (short, long) at +-1, +-2, +-5 s with per-video bootstrap CI
+(tools/eval_focus8.py, 1000 resamples); phase accuracy and F1@50 with (P1) and without (P0) the P1 decoding; per-video paired
+Wilcoxon of L-A3 (mean of seeds per video) against the reference MS-TCN; online evaluation of the causal arm with the
+EXP-21 online decoding (tools/online_eval_focus8.py functions, clip delay 2 s, decoder delay 2 s).
+Prediction (written 2026-11-20, before any run): long-group mAP@+-2 s, NMS decoder, offline L-A3 on S features,
+mean of the 2 seeds on the held-out videos >= reference mean + 0.03 = 0.363 + 0.03 = 0.393.
+Secondary, not part of the prediction: short-group mAP@+-2 s of the same model within 0.05 of the reference (0.767);
+phases F1@50 P1 within 5 points of the reference (70.9 mean).
+Stop rule: all runs of fold 0 (4 trainings, 100 epochs each) are done and evaluated, whatever the result. Folds 1-4 are a secondary
+cross-validation check (offline L-A3, 2 seeds each, reported after fold 0); no choice is made on them. Every choice (checkpoint
+epoch, causal seed / ensemble and online decoder) is made on the inner val only.
+Machine: Orsi, gpuq of the focus8 worktree (GPUs 1-3 only), mamba venv for training, Vu-Tapis env for evaluation.
+Budget: measured in EXP-21: an L-A3 run takes 7-9 min on one GPU; 4 runs fold 0 plus 8 runs folds 1-4 = about 12 x 8 min = 1.6 GPU h;
+evaluation 10-20 CPU min per fold.
+
+Commands (run exactly as written; the queue is `run_files/enqueue_exp22.sh`):
+- `bash run_files/exp22_s_long.sh inputs <fold>`   (splits + 9-column reference predictions)
+- `bash run_files/exp22_s_long.sh train <fold> <a3|a3_causal> <seed> <gpu>`   (training + eval_focus8 on inner val and held out)
+- `bash run_files/exp22_s_long.sh report <fold> [online]`   (tables, Wilcoxon, online)
+- `bash run_files/exp22_s_long.sh viewer`   (viewer at ~/workspace/viewer/EXP22_s_long)
+Outputs: results/exp22/fold<i>/{a3,a3_causal}_s<seed>/, results/exp22/fold<i>/report/report.{md,json}.
+
+Result:

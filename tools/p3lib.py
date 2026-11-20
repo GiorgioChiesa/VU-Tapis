@@ -18,7 +18,6 @@ import eval_focus8 as ev  # noqa: E402
 import phase_decode as pd_  # noqa: E402
 from tapis.datasets import focus8 as F  # noqa: E402
 from tapis.evaluate import spotting_eval as se  # noqa: E402
-from tapis.evaluate import structured_decoding as sd  # noqa: E402
 
 # inputs of phases 1-2 live in the focus8 worktree (read only, absolute paths)
 FOCUS8 = Path("/home/gchie/workspace/wt/focus8")
@@ -201,32 +200,56 @@ def wilcoxon(x, y):
     return out
 
 
-def onehot(labels, n):
-    o = np.zeros((len(labels), n), np.float32)
-    o[np.arange(len(labels)), labels] = 1.0
-    return o
+def best_thresholds(dets, gts, classes, delta=2.0, grid=None):
+    """Per-class score threshold with the best F1 at +-delta s (classes without GT keep 0.5).
 
-
-def gate_short(preds, ph_dec, ctx, floor, names=F.EVENT_CLASSES):
-    """Hard phase gate of the SHORT event columns by the P1-decoded phase (long events untouched).
-
-    ``ph_dec[v]`` = {"secs", "P1"}: one phase per second; rows take the phase of their second.
+    >>> d = {"v": [(1, 10.0, 0.9), (1, 50.0, 0.3)]}
+    >>> best_thresholds(d, {"v": [(1, 10.5)]}, [1])[1]
+    0.35
     """
-    pri = ctx.priors(names)
-    m = floor + (1.0 - floor) * pri["phase_given_event"]
-    m = m.copy()
-    keep = np.ones(len(names), bool)
-    keep[SHORT_IDX] = False
-    m[keep] = 1.0  # background and long events: no gate
+    grid = np.round(np.arange(0.05, 1.0, 0.05), 2) if grid is None else grid
     out = {}
-    for v in ctx.videos:
-        z = preds[v]
-        s = np.floor(z["second"] + 1e-6).astype(int)
-        lab = np.full(s.max() + 1, 0, int)
-        lab[ph_dec[v]["secs"]] = ph_dec[v]["P1"]
-        oh = onehot(lab[s], len(F.PHASE_IDS))
-        out[v] = dict(z, probs_steps=sd.phase_gate(z["probs_steps"], oh, m))
+    for c in classes:
+        n_gt = sum(1 for v in gts for k, _ in gts[v] if k == c)
+        if n_gt == 0:
+            out[c] = 0.5
+            continue
+        best, best_f = 0.5, -1.0
+        for th in grid:
+            tp = fp = 0
+            for v in gts:
+                p = [(t, s) for k, t, s in dets.get(v, []) if k == c and s >= th]
+                g = [t for k, t in gts[v] if k == c]
+                m, _, _ = se.match_events([t for t, _ in p], [s for _, s in p], g, delta)
+                tp += int(m.sum())
+                fp += len(p) - int(m.sum())
+            f = 2 * tp / max(2 * tp + fp + (n_gt - tp), 1)
+            if f > best_f + 1e-12:
+                best, best_f = float(th), f
+        out[c] = best
     return out
+
+
+def apply_thresholds(dets, th):
+    return {v: [(c, t, s) for c, t, s in d if s >= th.get(c, 0.5)] for v, d in dets.items()}
+
+
+def dump_json(obj, path):
+    """json.dump with NaN/inf as null (the viewer parses the files in a browser)."""
+    def clean(x):
+        if isinstance(x, dict):
+            return {str(k): clean(v) for k, v in x.items()}
+        if isinstance(x, (list, tuple)):
+            return [clean(v) for v in x]
+        if isinstance(x, (np.floating, float)):
+            return None if not np.isfinite(x) else float(x)
+        if isinstance(x, np.integer):
+            return int(x)
+        if isinstance(x, np.ndarray):
+            return clean(x.tolist())
+        return x
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(clean(obj), indent=1))
 
 
 def to_json_dets(dets):

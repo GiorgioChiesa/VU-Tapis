@@ -78,8 +78,8 @@ def main():
     axs[0].axvline(lat.mean(), color="k", ls="--", lw=0.8); axs[0].axvline(5, color="r", lw=0.8)
     axs[0].set_title(f"latency of the true positives at +-2 s (mean {lat.mean():.2f} s, std {lat.std():.2f}, n {len(lat)}; red = 5 s)")
     axs[0].set_xlabel("emission time + clip delay - ground truth (s)")
-    rows = np.array(rep["phases"], float)  # fold, onlineP0, onlineH, offH P0, offH P1, ref P0, ref P1, ...
-    lab = [("online P0", 1, "#fdae6b"), ("online H", 2, COL[ON]), ("offline hybrid P1", 4, COL[OFFH]), ("offline ref P1", 6, COL[REF])]
+    rows = np.array([[float(c) for c in r[1:]] for r in rep["phases"]])  # 5 folds + mean; columns: onlineP0, onlineH, offH P0, offH P1, ref P0, ref P1, ...
+    lab = [("online P0", 0, "#fdae6b"), ("online H", 1, COL[ON]), ("offline hybrid P1", 3, COL[OFFH]), ("offline ref P1", 5, COL[REF])]
     for i, (n, c, col) in enumerate(lab):
         axs[1].bar(x + (i - 1.5) * 0.2, rows[:, c], 0.2, color=col, label=n)
     axs[1].set_xticks(x, [f"fold {f}" for f in FOLDS] + ["mean"]); axs[1].set_title("phases F1@50 (%)"); axs[1].legend(fontsize=7, loc="lower left")

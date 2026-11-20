@@ -406,3 +406,39 @@ Wilcoxon per fold (long @2 mean diff, p; short @2 mean diff, p; F1@50 P1 mean di
 fold 2 +0.035 p 0.846; -0.027 p 0.846; -1.2 p 0.432. fold 3 +0.089 p 0.160; -0.065 p 0.014; +0.6 p 0.910. fold 4 +0.074 p 0.432; +0.052 p 0.322; +6.0 p 0.055.
 Long @2 differences are the L-A3 mean minus the reference mean (prediction rule applied per fold, not pre-registered): fold 0 +0.025, 1 +0.012, 2 +0.088, 3 +0.128, 4 +0.052 (mean over the 5 folds +0.061).
 Notes: no GPU0 use (queue GPUs 1-3); GPU use 86-97% during training; evaluation CPU only. Selection score on the inner val = mean of short and long group mAP (see Arms), not the long group alone as in EXP-21.
+
+## EXP-24: hybrid of the reference S MS-TCN (short events) and L-A3 on the S features (long events, phases), 5 folds
+Hypothesis: EXP-22 showed L-A3 (S features) better than the reference S MS-TCN on long events and phases in all 5 folds and
+worse on short events. A hybrid that takes the 4 short events from the reference and the 4 long events plus the phases from
+L-A3 is therefore better than the reference on the 8-event mean without losing on the short group.
+Parent: 1e97d74 (EXP-22 raw results and timeline viewer, branch exp/focus8-s-long).
+Base: origin/container 525a397 is NOT included (worktree is 3 commits behind; merge base 90c1af3); nothing merged.
+Data version: labels v2026-11-19 / v2026-11-19_4hz; predictions of EXP-22 (results/exp22/fold<i>/{a3_s0,a3_s1}/{inner_val,held_out},
+reference_s{0,1}); no new training. Held-out = 5 folds x 10 videos = 50 videos (disjoint).
+Construction (decoded detections merged per group, no probability fusion, so no Idle recomputation): short-class
+detections from the reference, long-class detections from L-A3, same priors/ignore windows as the EXP-21 evaluator (tools/p3lib.py).
+Because the short detections are the reference's own, the hybrid short group equals the reference short group by construction
+(checked numerically: difference must be 0.000); the "short no more than 0.01 below" condition is therefore a sanity check of the
+merge, not a test.
+Choices, made per fold on the inner val only (5 videos): L-A3 candidates = seed 0, seed 1, seed ensemble (mean of the probabilities)
+x decoder {nms, caps_chain}; selected by the long-group mAP averaged over +-1/2/5 s. Phases from L-A3: candidate in {s0, s1, ens}
+with the best inner-val F1@50 of the hysteresis decoding (P1); P0 also reported. The reference has no inner-val predictions, so its
+short part uses its EXP-22 rule: per-seed results averaged over the 2 seeds, decoder nms. The hybrid is built per reference seed k
+(reference_s<k> short + the selected L-A3 long) and its metrics are averaged over k, exactly as the reference metrics.
+Command: `bash run_files/exp24_hybrid.sh report` (= tools/exp24_hybrid.py for folds 0-4, then `viewer`); outputs results/exp24/.
+Metric: 8-event mean mAP@+-2 s = mean of the short-group and long-group mAP@2 (4 classes each, equal to the mean of the 8 class APs),
+averaged over the 5 folds (primary analysis: the 5 folds). Secondary: the same at +-1 and +-5 s; per-class and per-group AP with
+per-video bootstrap CI (1000, within fold; the 5-fold-mean CI resamples within each fold and averages); phases accuracy and
+F1@50 with (P1) and without (P0) hysteresis; paired Wilcoxon per video over the pooled 50 videos, hybrid vs reference (seed-mean
+per video), for the 8-event mean, short and long; number of the 8 classes with hybrid AP@2 >= reference (5-fold mean AP).
+Online (fold 0 only, the only fold with causal L-A3): causal L-A3 long head (inner-val selection as EXP-22) + reference short events
+as offline detections with the declared 2 s delay; not a true online number (the reference sees the whole video).
+Prediction: 8-event mean mAP@2, 5-fold mean, hybrid >= reference + 0.02 (expected about +0.03: half of the EXP-22 long @2 gain
++0.061, short gain 0 by construction; plausible range +0.01 to +0.05 because of the inner-val selection); short group
+hybrid - reference = 0.000 (and in any case >= -0.01).
+Stop rule: stop after the 5 folds are evaluated and the report, viewer and summary page exist, whatever the result; no tuning
+after seeing held-out numbers, no second selection rule.
+Machine: Orsi, CPU only (Vu-Tapis env), via the gpuq with --cpu; GPUs not used.
+Budget: about 1 CPU hour (EXP-22 evaluation took 10-20 CPU min per fold with 1000 bootstraps; here 6 candidates x 2 decoders on
+inner val plus the held-out runs per fold).
+Result: (filled after the run)

@@ -298,4 +298,20 @@ is decided here: the pre-registered rule of EXP-21 (>= 0.03 mAP@+-2 s over the r
 Machine: Orsi, gpuq (CPU jobs; the MS-TCN on one GPU of 1-3, never GPU0).
 Budget: CPU about 1-2 h in total (fusion about 10-20 min, strips and figures a few min), GPU 2 x about 10-20 min.
 Data version: labels v2026-11-19 / v2026-11-19_4hz, arm M best.pyth epoch 13, seed 0, long models seeds 0 and 1.
-Result: (filled after the runs; commit of the code: see the result commit below)
+Result (raw numbers; ran 2026-11-20 09:16-09:24 via gpuq, all 8 jobs exit 0; code commit fc6df23, seed 0; outputs in
+~/workspace/wt/focus8-p3/results/p3/{fusion,online,clip_applier,confusion,corr,short_mstcn}, viewer
+~/workspace/viewer/EXP21_focus8/index.html (curl localhost:8765/EXP21_focus8/ answers)):
+- Fusion, long events, test mAP@1/@2/@5: (a) enc nms 0.111/0.144/0.160; (b) a3_s0 nms 0.160/0.357/0.501; (c) a3_s0+enc nms
+  0.160/0.316/0.470; (c') w=0.1 nms 0.239/0.410/0.447. Inner-val choices: (b) a3_s0 nms (0.269), (c) 0.211, (c') 0.233,
+  (a) 0.078; better of (a),(b) = (b); final long arm = (b). Wilcoxon (per-video long AP) c vs b p = 0.52/0.074/0.57
+  (mean diff -0.065/-0.079/-0.022); c' vs b p = 0.36/0.74/0.94 (+0.052/+0.020/-0.023). Short (encoder heads, caps chosen on inner
+  val): 0.324/0.422/0.494.
+- Phases, test (row acc | F1@50 P0 | F1@50 P1): (a) 0.452 | 0.1 | 23.2; (b) a3_ens 0.778 | 63.1 | 67.8; (c) 0.769 | 24.3 | 67.8;
+  (c') w=0.7 0.671 | 1.3 | 58.5. Inner val F1@50 P1: a 18.0, b 53.7, c 52.5, c' 58.6 -> final phase arm = (c'). Wilcoxon F1@50 c vs b:
+  P0 p = 0.002 (-38.7), P1 p = 1.0 (0.0); c' vs b: P0 p = 0.002 (-61.8), P1 p = 0.008 (-9.3).
+- Clip Applier split (mean of the 3 clip_ classes, AP@1/@2/@5): with 0.344/0.492/0.536, without 0.511/0.554/0.610, all
+  0.372/0.459/0.500 (teacher signal >= 0.3 within +-2 s).
+- Online (test): short mAP 0.307/0.406/0.440, long 0.123/0.248/0.352 (causal model a3_causal_s0, plain decoder, chosen on the
+  inner val); latency of TPs at +-2 s 4.01 s (std 0.85, n 207); online phases F1@50 argmax 33.5 / causal hysteresis 46.0, acc 1 Hz 0.753 / 0.755.
+- Exploratory short MS-TCN (reference recipe, last epoch), test mAP@1/@2/@5: seed 0 nms short 0.205/0.567/0.695 caps 0.210/0.593/0.728;
+  seed 1 nms 0.319/0.634/0.748 caps 0.322/0.642/0.767 (reference S MS-TCN seed 0: 0.532/0.722/0.848 nms).

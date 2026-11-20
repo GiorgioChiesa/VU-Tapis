@@ -337,12 +337,12 @@ def export_strips(out):
 
 
 def main():
+    global P3
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default="/home/gchie/workspace/viewer/EXP21_focus8")
     ap.add_argument("--no-frames", action="store_true")
     ap.add_argument("--p3", default=str(P3), help="results root of phase 3 (smoke tests use results/p3_smoke)")
     a = ap.parse_args()
-    global P3
     P3 = Path(a.p3).resolve()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)

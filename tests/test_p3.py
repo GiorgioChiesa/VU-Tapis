@@ -20,6 +20,7 @@ import fuse_focus8 as FU  # noqa: E402
 import clip_applier_split as CA  # noqa: E402
 import online_eval_focus8 as OE  # noqa: E402
 import confusion_focus8 as CF  # noqa: E402
+import corr_focus8 as CO  # noqa: E402
 
 
 def test_equal_weights_give_the_plain_mean():
@@ -130,8 +131,28 @@ def test_confusion_tables_and_plot():
         assert (Path(d) / "a.png").stat().st_size > 1000
 
 
+def test_xcorr_recovers_the_lag_and_figures(tmpdir=None):
+    import tempfile
+
+    rng = np.random.default_rng(0)
+    events, sigs = {}, {}
+    for v in ("a", "b", "c"):
+        ev_secs = sorted(rng.choice(np.arange(60, 540), 6, replace=False).tolist())
+        s = rng.normal(size=(600, 2)) * 0.2
+        for t in ev_secs:
+            s[t + 7, 0] += 3.0  # signal 0 fires 7 s after every event of class 0
+        events[v], sigs[v] = {0: ev_secs}, s
+    r, p, n = CO.xcorr_events(events, sigs, 1, nshuf=50)
+    lags = np.arange(-30, 31)
+    assert lags[np.abs(r[0, 0]).argmax()] == 7 and p[0, 0] < 0.05 and abs(r[0, 1]).max() < abs(r[0, 0]).max()
+    with tempfile.TemporaryDirectory() as d:
+        m, lg = CO.heat(r, p, lags, ["e"], ["s0", "s1"], "t", Path(d) / "h.png")
+        assert lg[0][0] == 7 and (Path(d) / "h.png").stat().st_size > 1000
+        CO.lagged(r, lags, ["e"], ["s0", "s1"], "t", Path(d) / "l.png")
+
+
 def test_doctests():
-    for mod in (P, FU, CA, OE, CF):
+    for mod in (P, FU, CA, OE, CF, CO):
         r = doctest.testmod(mod)
         assert r.failed == 0, (mod.__name__, r)
 

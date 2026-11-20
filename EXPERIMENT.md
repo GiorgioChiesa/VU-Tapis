@@ -359,3 +359,50 @@ Commands (run exactly as written; the queue is `run_files/enqueue_exp22.sh`):
 Outputs: results/exp22/fold<i>/{a3,a3_causal}_s<seed>/, results/exp22/fold<i>/report/report.{md,json}.
 
 Result:
+Experiment commit (section + code, before the runs): a6435ce. Seeds 0 and 1; labels v2026-11-19 / v2026-11-19_4hz; S features of
+fold 0 = EXP-19 S fold 0 `untrimmed/checkpoint_best_steps/all` (4 Hz, 1536-d, same `second` as arm M; splits identical to EXP-21).
+Runs: results/exp22/fold0/{a3,a3_causal}_s{0,1}/ (train.log, train_log.json, best.pt, inner_val/, held_out/, eval/*.json); each run
+7-11 min on one GPU (queue log results/exp22/runs.txt, STATUS in ~/workspace/wt/focus8/results/STATUS.md). Best epoch (inner val):
+a3_s0 99 (val metric 0.479), a3_s1 84 (0.517). Report: results/exp22/fold<i>/report/report.{md,json}; tracked copies results_summary/exp22_fold<i>.md.
+Viewer: ~/workspace/viewer/EXP22_s_long/index.html (figures/fold0_group_map.png, figures/cv_group_map2.png), linked from EXP21_focus8/index.html.
+
+Fold 0, held-out 10 videos, NMS, group mAP @1 / @2 / @5 (mean of the 2 seeds; per-seed values with 95% CI in the report):
+| model | short | long |
+|---|---|---|
+| S L-A3 offline (EXP-22), seeds 0 / 1 at @2 | 0.566 / 0.708 / 0.771 (0.724, 0.692) | 0.185 / 0.388 / 0.569 (0.419, 0.357) |
+| S MS-TCN reference | 0.531 / 0.766 / 0.869 (0.722, 0.811) | 0.215 / 0.363 / 0.601 (0.429, 0.297) |
+| M L-A3 offline (EXP-21, long head) | - | 0.129 / 0.330 / 0.500 (0.357, 0.303) |
+| M short MS-TCN (EXP-21 p3) | 0.262 / 0.601 / 0.722 (0.567, 0.634) | - |
+caps_chain decoder, S L-A3: short 0.565 / 0.706 / 0.770, long 0.192 / 0.393 / 0.590; reference caps_chain: short 0.541 / 0.779 / 0.888, long 0.212 / 0.366 / 0.609.
+Prediction check (long mAP@2, NMS, mean of seeds): S L-A3 0.388, reference 0.363, threshold 0.393, difference +0.025.
+Per-class AP@1 / @2 / @5, NMS, seed 0 | seed 1 (S L-A3), then reference seed 0 | seed 1:
+- Grasping_catheter_tip (n 9): 0.157 0.465 0.561 | 0.074 0.335 0.669 ; ref 0.314 0.330 0.740 | 0.391 0.781 0.944
+- Clip_or_coagulate_vas_deferens (17): 0.715 0.774 0.777 | 0.694 0.778 0.779 ; ref 0.487 0.844 0.845 | 0.528 0.706 0.783
+- Identification_and_clipping_SV_arteries (50): 0.738 0.813 0.813 | 0.653 0.811 0.847 ; ref 0.621 0.806 0.872 | 0.512 0.848 0.894
+- Metal_clip_on_right_pedicle (123): 0.745 0.842 0.858 | 0.751 0.843 0.860 ; ref 0.707 0.907 0.936 | 0.687 0.908 0.938
+- Start_dissection (10): 0.166 0.288 0.600 | 0.351 0.399 0.503 ; ref 0.317 0.454 0.768 | 0.137 0.323 0.702
+- Incision_of_Denonvilliers_fascia (9): 0.303 0.478 0.639 | 0.040 0.370 0.636 ; ref 0.367 0.618 0.703 | 0.305 0.455 0.753
+- Transection_of_the_urethra (10): 0.049 0.301 0.508 | 0.241 0.435 0.445 ; ref 0.091 0.252 0.531 | 0.242 0.309 0.506
+- Stitch_in_bladder (10): 0.252 0.608 0.681 | 0.080 0.226 0.543 ; ref 0.193 0.391 0.441 | 0.069 0.100 0.402
+Phases, held-out (row acc / row macro F1 / F1@50 P0 / F1@50 P1): S L-A3 s0 0.863 / 0.747 / 75.5 / 79.6, s1 0.855 / 0.740 / 69.0 / 77.6;
+reference s0 0.835 / 0.713 / 41.3 / 71.3, s1 0.832 / 0.710 / 40.3 / 70.4; M L-A3 s0 0.768 / 0.618 / 51.9 / 71.0, s1 0.788 / 0.665 / 58.8 / 69.2.
+Paired Wilcoxon, 10 videos, L-A3 S (seed mean per video) minus reference (seed mean), NMS (mean diff, better/worse, p):
+short @1 +0.008 7/3 p 0.770; short @2 -0.070 2/8 p 0.020; short @5 -0.113 0/10 p 0.002; long @1 +0.001 5/5 p 0.748; long @2 +0.030 6/3 p 0.359;
+long @5 -0.014 4/6 p 0.625; phases F1@50 P0 +31.5 10/0 p 0.002; P1 +7.7 8/1 p 0.008.
+Online, causal L-A3 S (clip delay 2 s, decoder delay 2 s; inner-val selection: a3_causal_s0, plain decoder; phases: seed ensemble a3_causal_ens):
+short 0.275 / 0.494 / 0.742 [@2 CI 0.43, 0.63], long 0.292 / 0.364 / 0.587 [@2 CI 0.26, 0.54]; per seed plain: s0 short 0.275 / 0.494 / 0.742, long 0.292 / 0.364 / 0.587;
+s1 short 0.238 / 0.526 / 0.680, long 0.169 / 0.286 / 0.424; caps_chain online s0 short 0.254 / 0.415 / 0.566, long 0.139 / 0.188 / 0.325, s1 short 0.203 / 0.443 / 0.564, long 0.092 / 0.173 / 0.280.
+Latency of the true positives (s): @1 mean 4.13 std 0.55 n 158; @2 mean 4.11 std 0.81 n 195; @5 mean 3.88 std 1.62 n 229. Phases online F1@50 P0 44.7, H 59.2.
+EXP-21 online (same evaluation): short 0.307 / 0.406 / 0.440, long 0.123 / 0.248 / 0.352.
+
+Folds 1-4 (secondary CV check, offline L-A3, 2 seeds, same settings, held-out 10 videos each; NMS, mean of seeds, group mAP @1 / @2 / @5):
+| fold | S L-A3 short | reference short | S L-A3 long | reference long | long @2 diff (threshold +0.03) | F1@50 P0/P1 S L-A3 s0, s1 | reference s0, s1 |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.577 / 0.719 / 0.820 | 0.500 / 0.772 / 0.879 | 0.250 / 0.406 / 0.539 | 0.247 / 0.394 / 0.537 | +0.012 | 72.0/77.4, 71.0/78.9 | 42.2/74.1, 40.5/74.9 |
+| 2 | 0.570 / 0.753 / 0.855 | 0.521 / 0.770 / 0.855 | 0.274 / 0.442 / 0.535 | 0.234 / 0.354 / 0.531 | +0.088 | 54.8/66.4, 74.2/76.9 | 44.0/73.4, 47.1/72.4 |
+| 3 | 0.566 / 0.745 / 0.843 | 0.504 / 0.833 / 0.892 | 0.141 / 0.425 / 0.557 | 0.184 / 0.297 / 0.536 | +0.128 | 54.5/69.5, 72.0/80.4 | 45.1/75.5, 36.2/73.1 |
+| 4 | 0.548 / 0.768 / 0.869 | 0.483 / 0.763 / 0.917 | 0.140 / 0.354 / 0.574 | 0.100 / 0.303 / 0.528 | +0.052 | 70.2/77.6, 72.7/83.0 | 45.6/73.5, 49.5/75.0 |
+Wilcoxon per fold (long @2 mean diff, p; short @2 mean diff, p; F1@50 P1 mean diff, p): fold 1 +0.069 p 0.049; -0.032 p 0.375; +3.7 p 0.055.
+fold 2 +0.035 p 0.846; -0.027 p 0.846; -1.2 p 0.432. fold 3 +0.089 p 0.160; -0.065 p 0.014; +0.6 p 0.910. fold 4 +0.074 p 0.432; +0.052 p 0.322; +6.0 p 0.055.
+Long @2 differences are the L-A3 mean minus the reference mean (prediction rule applied per fold, not pre-registered): fold 0 +0.025, 1 +0.012, 2 +0.088, 3 +0.128, 4 +0.052 (mean over the 5 folds +0.061).
+Notes: no GPU0 use (queue GPUs 1-3); GPU use 86-97% during training; evaluation CPU only. Selection score on the inner val = mean of short and long group mAP (see Arms), not the long group alone as in EXP-21.

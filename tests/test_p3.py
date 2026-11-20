@@ -16,11 +16,13 @@ for _n, _sub in (("tapis", ""), ("tapis.datasets", "datasets"), ("tapis.evaluate
 sys.path[:0] = [str(ROOT / "tools"), str(ROOT)]
 
 import p3lib as P  # noqa: E402
+F_TARGETS = P.F.TARGETS
 import fuse_focus8 as FU  # noqa: E402
 import clip_applier_split as CA  # noqa: E402
 import online_eval_focus8 as OE  # noqa: E402
 import confusion_focus8 as CF  # noqa: E402
 import corr_focus8 as CO  # noqa: E402
+import export_exp21_viewer as VW  # noqa: E402
 
 
 def test_equal_weights_give_the_plain_mean():
@@ -151,8 +153,20 @@ def test_xcorr_recovers_the_lag_and_figures(tmpdir=None):
         CO.lagged(r, lags, ["e"], ["s0", "s1"], "t", Path(d) / "l.png")
 
 
+def test_viewer_helpers():
+    gts = {"v": [(1, 10.0), (1, 40.0), (2, 70.0)]}
+    dets = {"v": [(1, 10.5, 0.9), (1, 90.0, 0.8), (2, 5.0, 0.2)]}
+    items = VW.event_items(dets, gts, {1: 0.5, 2: 0.5})
+    first = items[F_TARGETS[0]]
+    assert sorted(k for k, *_ in first) == ["TP", "false alarm", "missed"], first
+    assert [k for k, *_ in items[F_TARGETS[1]]] == ["missed"]  # detection below its threshold
+    html_ = VW.table(["a", "b"], [["x", 1]])
+    assert "<td>x</td>" in html_ and VW.f3(0.5, [0.1, 0.9]) == "0.500 [0.10,0.90]" and VW.f3(None) == "-"
+    assert VW.group_cells({"group_map": {"short": {"1": .1, "2": .2, "5": .3}}})[:3] == ["0.100", "0.200", "0.300"]
+
+
 def test_doctests():
-    for mod in (P, FU, CA, OE, CF, CO):
+    for mod in (P, FU, CA, OE, CF, CO, VW):
         r = doctest.testmod(mod)
         assert r.failed == 0, (mod.__name__, r)
 

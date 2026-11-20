@@ -237,16 +237,16 @@ def imgs(out, src_dir, pattern, label):
 
 # ----------------------------------------------------------------------------------------- strips
 def strip_image(frames, center, n, size=(160, 90)):
-    """16 frames at 4 Hz centred at row ``center`` -> one RGB array of 2 rows of 8 (BGR input, uint8).
+    """16 frames at 4 Hz centred at row ``center`` -> one RGB array of 2 rows of 8 (input [N, 3, H, W] uint8, BGR).
 
-    >>> fr = np.zeros((40, 9, 16, 3), np.uint8); fr[:, :, :, 0] = 255   # blue in BGR
+    >>> fr = np.zeros((40, 3, 9, 16), np.uint8); fr[:, 0] = 255   # blue in BGR
     >>> s = strip_image(fr, 20, 40, size=(8, 4)); s.shape, s[0, 0].tolist()
     ((8, 64, 3), [0, 0, 255])
     """
     from PIL import Image
 
     rows = F.clip_rows(center, n)
-    ims = [np.asarray(Image.fromarray(np.asarray(frames[r])[..., ::-1].copy()).resize(size)) for r in rows]
+    ims = [np.asarray(Image.fromarray(np.ascontiguousarray(np.asarray(frames[r]).transpose(1, 2, 0)[..., ::-1])).resize(size)) for r in rows]
     w, h = size
     return np.concatenate([np.concatenate(ims[:8], 1), np.concatenate(ims[8:], 1)], 0)
 

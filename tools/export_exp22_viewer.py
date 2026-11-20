@@ -107,7 +107,7 @@ def main():
     body = ["<h1>EXP-22: L-A3 on the EXP-19 S encoder features</h1>",
             "<p>Fold 0 first (held-out, 10 videos), then the cross-validation check on folds 1-4 (offline L-A3 only). "
             "Aggregates only. See EXPERIMENT.md of the branch exp/focus8-s-long.</p>",
-            '<p><a href="../EXP21_focus8/index.html">EXP-21 viewer</a></p>']
+            '<p><a href="../EXP21_focus8/index.html">EXP-21 viewer</a> | <a href="../EXP24_hybrid/index.html">EXP-24: short/long hybrid</a></p>']
     if 0 in reps:
         fig_fold0(reps[0], out / "figures/fold0_group_map.png")
         body.append('<img src="figures/fold0_group_map.png" style="max-width:100%">')

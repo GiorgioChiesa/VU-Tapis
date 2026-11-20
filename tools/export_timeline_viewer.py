@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Timeline error viewer for the 8 target events (EXP-22 L-A3 on the S latents vs the EXP-19 S MS-TCN reference,
-plus any extra experiment given with --extra NAME=RUNDIR_PATTERN, where {fold} is replaced by the fold index).
+plus any extra experiment given with --extra NAME=RUNDIR_PATTERN, where {fold} is replaced by the fold index,
+and merged detection files given with --dets NAME=JSON_PATTERN, e.g. the EXP-24 hybrid).
 
 Per held-out video of each fold: a bar of the true phases, the true events (one symbol per class) and, per model,
 the predicted events with the same symbols. Predictions are matched one-to-one per class (greedy by score, within
@@ -78,8 +79,11 @@ def main():
     ap.add_argument("--out", default=str(Path.home() / "workspace/viewer/timelines_focus8"))
     ap.add_argument("--folds", default="0,1,2,3,4")
     ap.add_argument("--extra", action="append", default=[], help="NAME=DIR_PATTERN with {fold}")
+    ap.add_argument("--dets", action="append", default=[], help="NAME=JSON_PATTERN with {fold}: merged detections "
+                    "{video: [[class, time, score]]} (EXP-24 hybrid: results/exp24/fold{fold}/hybrid_dets_s0.json)")
     a = ap.parse_args()
     extra = [tuple(e.split("=", 1)) for e in a.extra]
+    dets_extra = [tuple(e.split("=", 1)) for e in a.dets]
     data = {"events": NAMES[1:], "short": F.SHORT, "folds": {}}
     counts = {}
     for fold in [int(x) for x in a.folds.split(",")]:
@@ -87,9 +91,13 @@ def main():
         ct = P.Ctx("held_out")
         gts = ct.gts(NAMES)
         fd = {"videos": {}}
-        for model, d in runs_for(fold, extra).items():
-            preds = P.load_dir(d, ct.videos)
-            dets = ct.detect(preds, NAMES, "nms")
+        sources = {m: ("dir", d) for m, d in runs_for(fold, extra).items()}
+        sources.update({m: ("dets", Path(pat.format(fold=fold))) for m, pat in dets_extra})
+        for model, (kind, d) in sources.items():
+            if kind == "dir":
+                dets = ct.detect(P.load_dir(d, ct.videos), NAMES, "nms")
+            else:
+                dets = {v: [(int(c), float(t), float(s)) for c, t, s in x] for v, x in json.loads(d.read_text()).items()}
             th = P.best_thresholds(dets, gts, range(1, len(NAMES)), 2.0)
             dets = P.apply_thresholds(dets, th)
             for v in ct.videos:

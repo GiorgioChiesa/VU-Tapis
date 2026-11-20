@@ -6,8 +6,10 @@ Q=/home/gchie/workspace/wt/focus8/run_files/gpuq/q
 WT=/home/gchie/workspace/wt/focus8-p3
 L=/home/gchie/workspace/wt/focus8/results/M/fold0
 FEAT="count:50:$L/untrimmed/RARP*.npz"
-LONG="count:4:$L/long/[as]*[0-9]/.done"           # a3_s0 a3_s1 sed_s0 sed_s1 (offline runs)
-CAUSAL="count:4:$L/long/*_causal_s[01]/.done"     # a3_causal / sed_causal, seeds 0 and 1
+LONG=(); CAUSAL=()
+for s in 0 1; do
+  for r in a3 sed; do LONG+=("glob:$L/long/${r}_s$s/.done"); CAUSAL+=("glob:$L/long/${r}_causal_s$s/.done"); done
+done
 cd $WT
 add() { id=$1; pr=$2; shift 2; $Q add --id $id --priority $pr --group exp21p3 --cwd $WT --log results/p3/gpuq_$id.log "$@"; }
 # GPU: exploratory short-event MS-TCN, seeds 0 and 1 (about 10-20 min each)
@@ -15,8 +17,8 @@ for s in 0 1; do
   add exp21_p3_mstcn_s$s $((196 - s)) --mem 8000 --deps "$FEAT" --cmd "bash run_files/exp21_p3.sh mstcn $s {gpu}"
 done
 # CPU
-add exp21_p3_fuse 190 --cpu --deps "$FEAT" "$LONG" --cmd "bash run_files/exp21_p3.sh fuse"
-add exp21_p3_online 189 --cpu --deps "$FEAT" "$CAUSAL" --cmd "bash run_files/exp21_p3.sh online"
+add exp21_p3_fuse 190 --cpu --deps "$FEAT" "${LONG[@]}" --cmd "bash run_files/exp21_p3.sh fuse"
+add exp21_p3_online 189 --cpu --deps "$FEAT" "${CAUSAL[@]}" --cmd "bash run_files/exp21_p3.sh online"
 add exp21_p3_clip 188 --cpu --deps exp21_p3_fuse --cmd "bash run_files/exp21_p3.sh clip"
 add exp21_p3_confusion 187 --cpu --deps exp21_p3_fuse exp21_p3_online --cmd "bash run_files/exp21_p3.sh confusion"
 add exp21_p3_corr 186 --cpu --deps exp21_p3_fuse --cmd "bash run_files/exp21_p3.sh corr"

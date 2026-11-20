@@ -212,7 +212,7 @@ def main():
         "<!doctype html><meta charset=utf-8><title>EXP-24 hybrid</title><style>body{font-family:sans-serif;max-width:1200px;margin:2em auto}"
         "pre{font-size:12px;overflow-x:auto;background:#f6f6f6;padding:8px}img{max-width:100%}</style>"
         "<h1>EXP-24: hybrid of the reference S MS-TCN (short events) and L-A3 on the S features (long events, phases)</h1>"
-        "<p><a href='../EXP22_s_long/index.html'>EXP-22 viewer</a> | <a href='../timelines_focus8/index.html'>timeline viewer (includes the hybrid)</a></p>"
+        "<p><a href='../EXP22_s_long/index.html'>EXP-22 viewer</a> | <a href='../timelines_focus8/index.html'>timeline viewer (includes the hybrid)</a> | <a href='../EXP25_online/index.html'>EXP-25 online hybrid</a></p>"
         "<img src='figures/group_map2_per_fold.png'><img src='figures/class_ap2_5fold.png'><img src='figures/diff_and_phases.png'>" + body)
     print(text)
 

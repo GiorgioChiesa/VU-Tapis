@@ -35,5 +35,9 @@ case ${1:?step} in
       --dets "EXP-25 online hybrid=results/exp25/fold{fold}/online_hybrid_dets.json" \
       --dets "EXP-25a online hybrid, short look-ahead ${BEST} s=results/exp25a/fold{fold}/eval_F${BEST}/online_hybrid_dets.json" \
       --out /home/gchie/workspace/viewer/timelines_focus8 ;;
+  link)
+    V=/home/gchie/workspace/viewer/EXP25_online/index.html
+    grep -q EXP25a_lookahead $V || sed -i "s#<h1>#<p><a href='../EXP25a_lookahead/index.html'>EXP-25a: look-ahead for the short events</a></p><h1>#" $V
+    grep -c EXP25a_lookahead $V ;;
   *) echo "unknown step" >&2; exit 2 ;;
 esac

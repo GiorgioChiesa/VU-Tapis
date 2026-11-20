@@ -519,3 +519,54 @@ Pooled paired Wilcoxon, 50 videos (mean diff, better/worse, p): online hybrid - 
 Prediction check: online hybrid 8-event mean mAP@2 = 0.3654 vs threshold 0.85 x 0.5890 = 0.5007 (ratio 0.620): does not hold; mean latency at +-2 s 4.41 s <= 5 s: holds; secondary (causal short alone >= 0.781 - 0.10 = 0.681): 0.417, does not hold.
 Viewer: ~/workspace/viewer/EXP25_online/index.html (figures/group_map2_per_fold.png, class_ap2_5fold.png, latency_and_phases.png), linked from EXP24_hybrid/index.html; timeline viewer ~/workspace/viewer/timelines_focus8/index.html now has the row "EXP-25 online hybrid" (results/exp25/fold<i>/online_hybrid_dets.json).
 Notes: fold 0 causal L-A3 was already seen on held-out in EXP-22 / EXP-24 (the EXP-25 selection picked ens/plain on its inner val instead of EXP-22's a3_causal_s0). GPU 0 not used. GPU utilisation 55-57% during the short MS-TCN trainings (small model; 68 s of each run is data loading, idle GPU).
+
+## EXP-25a: look-ahead of F seconds for the short events only (short MS-TCN with bounded future context), long events and phases strictly causal
+Hypothesis: EXP-25 lost most of the offline short-event score (causal short MS-TCN @1/@2/@5 0.136 / 0.417 / 0.748 vs 0.508 / 0.781 / 0.882
+offline) because a causal model must decide on a short event before it has seen what follows it. A fixed look-ahead of F seconds
+recovers a large part of that gap at a latency cost of F, with the long events and the phases unchanged (causal L-A3).
+Parent: dec9dc5 (EXP-25 results, branch exp/focus8-s-long).
+Base: origin/container is NOT included (worktree 3 commits behind after git fetch, merge base 90c1af3); nothing merged.
+Data version: labels v2026-11-19 / v2026-11-19_4hz (ORSI_LABEL_DIR as EXP-21..25); S features of each fold (4 Hz, 1536-d,
+`~/workspace/wt/short-long-context/results/S/LONG/cv_ft/fold<i>/untrimmed/checkpoint_best_steps/all`); splits results/exp22/fold<i>/splits.json
+(35 train / 5 inner val / 10 held out; the 5 held-out sets are disjoint, 50 videos).
+Models: the EXP-25 causal short MS-TCN (tools/train_short_mstcn.py --causal, identical recipe: dilate3, 10 layers, 2 stages, 64 ch,
+dropout 0.5, focal BCE, +-3 s targets, Adam 5e-4 cosine, 100 epochs, crop 16384, LAST epoch) with a look-ahead of F in {2, 4, 6, 10} s
+(S = 4F rows), implemented as "causal model whose output is read F s later": the model output at row t (which sees features <= t only)
+is trained against the labels of row t - S and, at inference, the probability of row t is the model output at row t + S (the last S rows
+repeat the final output, since no further input exists). This is exactly a bounded future window of F s. The first S rows have no
+label and are masked in the loss. Phase head shifted the same way (trained, not used). 5 folds x 2 seeds (0, 1) x 4 values of F = 40
+trainings. Long events and phases: the EXP-25 causal L-A3 predictions and the EXP-25 inner-val choices (long candidate/decoder, phase
+candidate; they do not depend on the short part), unchanged.
+Engineering (results unaffected): the 4 values of F of one (fold, seed) are trained in one process that loads the fold's features once
+(in EXP-25 about 68 s of each ~3.5 min run were data loading with an idle GPU); the normalised features stay in CPU RAM and each crop is
+copied to the GPU, so a job needs about 1 GB of GPU memory instead of 14 GB (the other GPU jobs of the machine hold about 14 GB per card).
+Every F restarts from seed s (random / numpy / torch seeds), so a value of F does not depend on the others.
+Evaluation (tools/exp25a_eval.py, one job per fold x F, CPU, same code path as tools/exp25_online.py): short part = candidate in {seed 0,
+seed 1, seed ensemble} x decoder {plain, caps_chain} chosen per fold and per F on the inner val by the short-group mAP averaged over
++-1/2/5 s (online decoding: peak at t emitted at t + 2 s, window 5 s); long part and phases as EXP-25; hybrid = short detections +
+long detections merged per group. Bootstrap 1000 per video, seed 0, same draws as EXP-24 / EXP-25.
+Command: `bash run_files/enqueue_exp25a.sh` (10 training jobs, queue ids exp25a_train_f<fold>_s<seed>, two chained lanes), then
+`bash run_files/exp25a.sh eval <fold> <F>` for the 20 (fold, F) pairs (CPU, queue ids exp25a_eval_*), `bash run_files/exp25a.sh report`,
+`bash run_files/exp25a.sh viewer`. Outputs results/exp25a/.
+Metric (primary): short-group mAP@+-2 s of the short part and 8-event mean mAP@+-2 s of the online hybrid (mean of the short-group and
+long-group mAP@2), 5-fold mean over the held-out sets, per F. Secondary: @1 and @5; per-fold and per-class; per-video bootstrap 95% CI
+(within fold, averaged over folds for the 5-fold mean). Latency of a true positive = F + decoder delay (2 s, emission - peak time) + clip
+delay (2 s) - ... precisely: (emission time of the detection) + F + 2 s clip delay - ground-truth time, mean and std over the true positives
+of the 8 classes at +-2 s (short part reported separately; the long part has no look-ahead). Pooled paired Wilcoxon over the 50 videos on the
+per-video 8-event mAP@2 and short-group mAP@2: each F against EXP-25 (F = 0, results/exp25) and against the offline hybrid (results/exp24).
+8 tests (4 F x 2 comparisons) per metric: the raw p are reported, a Bonferroni threshold is 0.006. Trade-off plot: 8-event mAP@2 and short
+mAP@2 against mean latency for the 4 values of F, plus F = 0 (EXP-25) and the offline hybrid.
+Best F for the timeline viewer (rule fixed now, inner val only): the smallest F whose 5-fold mean inner-val short score (the selection score
+of the chosen candidate, averaged over the folds) is within 0.02 of the maximum over the four F.
+Prediction (written 2026-11-20, before any training or evaluation of EXP-25a): at F = 6 s, short-group mAP@2 (5-fold mean) >= 0.65 and the
+online hybrid 8-event mAP@2 (5-fold mean) >= 0.50. Expected point values (not part of the prediction): short group about 0.68 at F = 6
+(range 0.55-0.75), monotone non-decreasing in F with most of the gain by F = 4-6; hybrid 8-event about 0.52 at F = 6 (the long part stays
+0.314 @2); latency at F = 6 about 10 s (6 + 2 + 2).
+Stop rule: stop when the 40 trainings have run (a failed training is reported, not retried with other settings) and the 20 evaluations,
+the report, the viewer pages exist, whatever the result. No tuning or second selection rule after seeing held-out numbers; F is not
+chosen on the held-out sets.
+Machine: Orsi, gpuq of the focus8 worktree (GPUs 1-3 only, never GPU0), at most 2 GPU jobs of this experiment at a time (two lanes chained
+with --deps); Vu-Tapis env for training and evaluation (evaluation on CPU).
+Budget: 10 training jobs of about 70 s loading + 4 x about 100 s = about 8 min each = 1.3 GPU h, about 40 min wall on 2 lanes; evaluation about
+3-6 CPU min per (fold, F), 20 jobs.
+Result:

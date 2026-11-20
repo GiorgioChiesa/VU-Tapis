@@ -255,3 +255,47 @@ Test:
 | M0 enc test | 0.490 | 0.255 | 0.1 | 31.4 |
 | M enc test | 0.452 | 0.235 | 0.1 | 23.2 |
 Decoders chosen on M0 inner val (mAP@2): short caps (0.483 = caps_chain > nms 0.473), long nms (0.096). Selected on test: M0 short caps 0.337 / 0.408 / 0.512, long nms 0.077 / 0.113 / 0.143; M short caps 0.324 / 0.422 / 0.494, long nms 0.111 / 0.144 / 0.160.
+
+## EXP-21 phase 3: fusion, phase decoding, Clip Applier split, online evaluation, confusion matrices, correlations, viewer, exploratory short MS-TCN
+Hypothesis: (1) fusing the encoder heads with the long model (per-step confidence weighting, or one global weight)
+recovers the long events at least as well as the better of the two alone, for events and phases; (2) the
+Clip Applier detected by the teacher makes the clip_ events easier; (3) a causal long model plus a center-clip
+encoder with a declared 2 s delay keeps most of the offline long-event mAP online; (4) (exploratory, not
+pre-registered) an MS-TCN with the reference EXP-19 S recipe on the M features closes part of the short-event gap to
+the reference MS-TCN (0.738 mAP@2) that the per-clip encoder heads leave (0.422).
+Parent: 2141846..62c5649 (EXP-21 arms M and M0, long models of phase 2 on arm M features, fold 0).
+Base: 90c1af3 (origin/container; the worktree is 3 commits behind its tip 525a397, nothing merged).
+Command (run exactly as written, from ~/workspace/wt/focus8-p3, queue of ~/workspace/wt/focus8/run_files/gpuq):
+`bash run_files/enqueue_exp21_phase3.sh`, which adds these jobs (cmd of each), seed 0 unless a seed is in the command:
+- exp21_p3_mstcn_s0 / _s1 (GPU, priority 196/195): `bash run_files/exp21_p3.sh mstcn <seed> {gpu}` = tools/train_short_mstcn.py
+  (reference recipe, last epoch) then tools/eval_focus8.py on inner_val and held_out
+- exp21_p3_fuse (CPU, 190): `bash run_files/exp21_p3.sh fuse` = `python tools/fuse_focus8.py --out results/p3/fusion`
+- exp21_p3_online (CPU, 189): `bash run_files/exp21_p3.sh online` = `python tools/online_eval_focus8.py --out results/p3/online`
+- exp21_p3_clip (188, after fuse): `python tools/clip_applier_split.py --dets results/p3/fusion/final_offline.json --out results/p3/clip_applier/split.json`
+- exp21_p3_confusion (187, after fuse and online): `python tools/confusion_focus8.py --out results/p3/confusion --fusion results/p3/fusion --online results/p3/online`
+- exp21_p3_corr (186, after fuse): `python tools/corr_focus8.py --out results/p3/corr --fusion results/p3/fusion`
+- exp21_p3_viewer (150, after all): `python tools/export_exp21_viewer.py --out /home/gchie/workspace/viewer/EXP21_focus8`
+Smoke test (1-2 videos): `bash run_files/exp21_p3_smoke.sh 1`, unit tests: `python tests/test_p3.py`.
+Notes: the phase-gating decode arm was already evaluated in phase 2 (no gain) and is not rebuilt. The online
+evaluation re-uses the cached center-clip probabilities (identical to streaming: a clip never depends on the
+future of its own window beyond the declared 2 s). corr_focus8.py is a new importable module; orsi_corr.py is untouched.
+Selection (all on the inner val of fold 0): long model of (b) among a3/sed x seeds and seed ensembles, decoder
+(nms / caps / caps_chain), fusion weight, final arm, online decoder and causal model, per-class thresholds
+(best F1 at +-2 s) of the confusion matrices; score = long mAP averaged over +-1/2/5 s (phases: F1@50 after P1).
+Metric: long-group mAP@+-1/2/5 s of arms (a), (b), (c), (c') on the 10 test videos with bootstrap CI over videos and
+the paired per-video Wilcoxon of (c) and (c') against the better of (a) and (b) (chosen on the inner val); phases:
+accuracy and F1@50 with and without P1; AP of clip_ events with and without Clip Applier (+-1/2/5 s); online mAP at
++-1/2/5 s, mean latency (emission + 2 s clip delay - ground truth) of the TPs, online confusion matrices;
+short-group mAP of the exploratory MS-TCN.
+Prediction (written 2026-11-20, before any phase 3 run):
+- fusion: best of (c), (c') long mAP@+-2 s >= max((a), (b)) - 0.02 and in 0.30-0.45; Wilcoxon p > 0.05 (10 videos);
+- phases: F1@50 with P1 of (c) or (c') >= (b) - 2 points, (b) in 45-60, encoder (a) < 30;
+- Clip Applier: mean AP@+-2 s with Clip Applier >= without + 0.10;
+- online: long mAP@+-2 s in 0.18-0.32, short mAP@+-2 s 0.30-0.45, mean latency 4.0 +- 0.5 s (2 s decoder + 2 s clip delay);
+- exploratory short MS-TCN: short mAP@+-2 s in 0.55-0.75 (above the encoder heads 0.42; reference 0.738).
+Stop rule: all jobs run to completion (or fail fast: a failed job blocks only its dependants); no extension to other folds
+is decided here: the pre-registered rule of EXP-21 (>= 0.03 mAP@+-2 s over the reference in a group) stays with the analyst.
+Machine: Orsi, gpuq (CPU jobs; the MS-TCN on one GPU of 1-3, never GPU0).
+Budget: CPU about 1-2 h in total (fusion about 10-20 min, strips and figures a few min), GPU 2 x about 10-20 min.
+Data version: labels v2026-11-19 / v2026-11-19_4hz, arm M best.pyth epoch 13, seed 0, long models seeds 0 and 1.
+Result: (filled after the runs; commit of the code: see the result commit below)

@@ -16,4 +16,5 @@ $PY -W ignore tools/confusion_focus8.py --out $S/confusion --fusion $S/fusion --
 $PY -W ignore tools/corr_focus8.py --out $S/corr --fusion $S/fusion --videos 2 --nshuf 10 && \
 CUDA_VISIBLE_DEVICES=$GPU $PY -W ignore tools/train_short_mstcn.py --feat-dir results/M/fold0/untrimmed \
   --splits /home/gchie/workspace/wt/focus8/results/M/fold0/splits.json --out $S/short_mstcn --smoke
+$PY -W ignore tools/export_exp21_viewer.py --p3 $S --out $S/viewer && echo VIEWER_OK
 echo SMOKE_EXIT $?

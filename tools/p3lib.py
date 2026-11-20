@@ -200,6 +200,26 @@ def wilcoxon(x, y):
     return out
 
 
+def match_with_gt(pred_times, pred_scores, gt_times, delta):
+    """Greedy one-to-one matching as ``spotting_eval.match_events``, returning ``[(pred index, gt index)]``.
+
+    >>> match_with_gt([10, 11, 30], [0.9, 0.8, 0.5], [10, 50], 2)
+    [(0, 0)]
+    """
+    pt, ps, gt = (np.asarray(x, float) for x in (pred_times, pred_scores, gt_times))
+    used, out = np.zeros(len(gt), bool), []
+    if len(gt) == 0:
+        return out
+    for i in np.argsort(-ps, kind="stable"):
+        dist = np.abs(gt - pt[i])
+        dist[used] = np.inf
+        j = int(np.argmin(dist))
+        if dist[j] <= delta:
+            used[j] = True
+            out.append((int(i), j))
+    return sorted(out)
+
+
 def best_thresholds(dets, gts, classes, delta=2.0, grid=None):
     """Per-class score threshold with the best F1 at +-delta s (classes without GT keep 0.5).
 

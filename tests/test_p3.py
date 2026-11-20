@@ -17,6 +17,9 @@ sys.path[:0] = [str(ROOT / "tools"), str(ROOT)]
 
 import p3lib as P  # noqa: E402
 import fuse_focus8 as FU  # noqa: E402
+import clip_applier_split as CA  # noqa: E402
+import online_eval_focus8 as OE  # noqa: E402
+import confusion_focus8 as CF  # noqa: E402
 
 
 def test_equal_weights_give_the_plain_mean():
@@ -87,8 +90,48 @@ def test_thresholds_and_dump_json(tmpdir=None):
         assert json.loads((Path(d) / "a.json").read_text()) == {"x": None, "y": [3, 1.5]}
 
 
+def test_clip_applier_split():
+    sig = np.zeros(100)
+    sig[20] = 0.9  # a Clip Applier near t = 20
+    flags = {"v": lambda t: CA.flag_at(sig, t, 2.0, 0.3)}
+    gts = {"v": [(1, 21.0), (1, 60.0)]}
+    dets = {"v": [(1, 21.0, 0.9), (1, 60.0, 0.4), (1, 80.0, 0.3)]}  # TP with, TP without, FP without
+    r = CA.split_ap(dets, gts, flags, [1])[1]
+    assert r["with"]["n_gt"] == 1 and r["with"]["2"] == 1.0
+    assert r["without"]["n_gt"] == 1 and abs(r["without"]["2"] - 1.0) < 1e-9 and r["without"]["n_det"] == 2
+    assert r["all"]["n_gt"] == 2 and r["all"]["n_det"] == 3
+
+
+def test_online_decode_latency_and_phases():
+    T = 80
+    sec = np.arange(T) / 4
+    probs = np.zeros((T, 3))
+    probs[40, 1] = 0.9  # event of class 1 at t = 10 s
+    em = OE.decode(probs, sec, [1, 2], "plain", None, 2.0)
+    assert em == [(1, 10.0, 0.9, 12.0)], em  # emitted L = 2 s after the peak
+    lat = OE.latency({"v": em}, {"v": [(1, 10.0)]}, 2.0, 2.0)
+    assert lat["mean"] == 4.0 and lat["n_tp"] == 1  # 2 s decoder + 2 s clip delay
+    p = np.tile(np.eye(3)[[0, 0, 1]].repeat(4, 0), (1, 1))  # 12 rows, 3 s
+    last, secs = OE.last_row_per_second(p, np.arange(12) / 4)
+    assert secs.tolist() == [0, 1, 2] and last.argmax(1).tolist() == [0, 0, 1]
+    assert P.match_with_gt([10, 11, 30], [0.9, 0.8, 0.5], [10, 50], 2) == [(0, 0)]
+
+
+def test_confusion_tables_and_plot():
+    import tempfile
+
+    names = ["bg"] + [f"e{i}" for i in range(8)]
+    mat = np.zeros((10, 10), int)
+    mat[1, 1], mat[2, 3], mat[9, 4], mat[3, 9] = 5, 2, 1, 1  # TP, confusion, false alarm row, missed column
+    sub, labels = CF.table(mat, names)
+    assert sub.shape == (9, 9) and sub[0, 0] == 5 and sub[1, 2] == 2 and sub[8, 3] == 1 and sub[2, 8] == 1
+    with tempfile.TemporaryDirectory() as d:
+        CF.plot(sub, labels + ["FA"], labels + ["M"], "t", Path(d) / "a.png")
+        assert (Path(d) / "a.png").stat().st_size > 1000
+
+
 def test_doctests():
-    for mod in (P, FU):
+    for mod in (P, FU, CA, OE, CF):
         r = doctest.testmod(mod)
         assert r.failed == 0, (mod.__name__, r)
 
